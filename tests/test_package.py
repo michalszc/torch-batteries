@@ -10,7 +10,7 @@ def test_dummy_pass() -> None:
 
 def test_dummy_math() -> None:
     """Dummy test with simple math."""
-    assert 1 + 1 != 2
+    assert 1 + 1 == 2
 
 
 def test_dummy_string() -> None:
