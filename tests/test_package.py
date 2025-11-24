@@ -3,7 +3,7 @@ Dummy tests for torch_batteries package.
 """
 
 
-def test_dummy_pass():
+def test_dummy_pass() -> None:
     """Dummy test that always passes."""
     assert True
 
