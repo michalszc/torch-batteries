@@ -39,7 +39,22 @@ jobs:
       run: pip3 install -e ".[dev]"
 
     - name: Run linter
-      run: make lint
+      run: |
+        echo "## 🔍 Linting Results" >> $GITHUB_STEP_SUMMARY
+        if make lint > lint_output.txt 2>&1; then
+          echo "✅ **All linting checks passed!**" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+        else
+          echo "❌ **Linting failed!**" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Errors found:" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          cat lint_output.txt >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "💡 **Fix suggestion:** Run \`make lint-fix\` to auto-fix issues" >> $GITHUB_STEP_SUMMARY
+          exit 1
+        fi
 
   format-check:
     runs-on: ubuntu-latest
@@ -65,7 +80,22 @@ jobs:
       run: pip3 install -e ".[dev]"
 
     - name: Check formatting
-      run: make format-check
+      run: |
+        echo "## 🎨 Code Formatting Check" >> $GITHUB_STEP_SUMMARY
+        if make format-check > format_output.txt 2>&1; then
+          echo "✅ **Code is properly formatted!**" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+        else
+          echo "❌ **Formatting issues found!**" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Format differences:" >> $GITHUB_STEP_SUMMARY
+          echo '```diff' >> $GITHUB_STEP_SUMMARY
+          cat format_output.txt >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "💡 **Fix suggestion:** Run \`make format\` to auto-format code" >> $GITHUB_STEP_SUMMARY
+          exit 1
+        fi
 
   type-check:
     runs-on: ubuntu-latest
@@ -91,7 +121,22 @@ jobs:
       run: pip3 install -e ".[dev]"
 
     - name: Type check
-      run: make type-check
+      run: |
+        echo "## 🔎 Type Checking Results" >> $GITHUB_STEP_SUMMARY
+        if make type-check > mypy_output.txt 2>&1; then
+          echo "✅ **All type checks passed!**" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+        else
+          echo "❌ **Type checking failed!**" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Type errors found:" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          cat mypy_output.txt >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "💡 **Fix suggestion:** Add type hints and fix type errors" >> $GITHUB_STEP_SUMMARY
+          exit 1
+        fi
 
   test:
     runs-on: ubuntu-latest
@@ -117,4 +162,36 @@ jobs:
       run: pip3 install -e ".[dev]"
 
     - name: Run tests
-      run: make test
+      run: |
+        echo "## 🧪 Test Results" >> $GITHUB_STEP_SUMMARY
+        if make test > test_output.txt 2>&1; then
+          echo "✅ **All tests passed!**" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Extract test summary
+          if grep -q "=" test_output.txt; then
+            echo "### Test Summary:" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            grep -E "(passed|failed|error|skipped|=)" test_output.txt | tail -5 >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          # Extract coverage summary
+          if grep -q "TOTAL" test_output.txt; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### Coverage Report:" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            grep -A 10 "Name.*Stmts.*Miss.*Cover" test_output.txt >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+          fi
+        else
+          echo "❌ **Tests failed!**" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Test output:" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          cat test_output.txt >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "💡 **Fix suggestion:** Review failing tests and fix issues" >> $GITHUB_STEP_SUMMARY
+          exit 1
+        fi
