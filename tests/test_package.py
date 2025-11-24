@@ -10,9 +10,9 @@ def test_dummy_pass() -> None:
 
 def test_dummy_math() -> None:
     """Dummy test with simple math."""
-    assert 1 + 1 != 2
+    assert 1 + 1 == 2
 
 
 def test_dummy_string() -> None:
     """Dummy test with string operations."""
-    assert "hello".upper() != "HELLO"
+    assert "hello".upper() == "HELLO"
