@@ -18,8 +18,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        check: [lint, format-check, type-check, test]
-    
+        check: [lint, format-check, type-check, test, validate-version]
+
     steps:
     - uses: actions/checkout@v4
 
@@ -31,7 +31,7 @@ jobs:
         cache-dependency-path: 'pyproject.toml'
 
     - name: Install dependencies
-      run: pip install -e ".[dev]"
+      run: make install-dev
 
     - name: Run ${{ matrix.check }}
       run: |
@@ -89,7 +89,7 @@ jobs:
             if make test > test_output.txt 2>&1; then
               echo "✅ **All tests passed!**" >> $GITHUB_STEP_SUMMARY
               echo "" >> $GITHUB_STEP_SUMMARY
-              
+
               # Extract test summary
               if grep -q "=" test_output.txt; then
                 echo "### Test Summary:" >> $GITHUB_STEP_SUMMARY
@@ -97,7 +97,7 @@ jobs:
                 grep -E "(passed|failed|error|skipped|=)" test_output.txt | tail -5 >> $GITHUB_STEP_SUMMARY
                 echo '```' >> $GITHUB_STEP_SUMMARY
               fi
-              
+
               # Extract coverage summary
               if grep -q "TOTAL" test_output.txt; then
                 echo "" >> $GITHUB_STEP_SUMMARY
@@ -115,6 +115,27 @@ jobs:
               echo '```' >> $GITHUB_STEP_SUMMARY
               echo "" >> $GITHUB_STEP_SUMMARY
               echo "💡 **Fix suggestion:** Review failing tests and fix issues" >> $GITHUB_STEP_SUMMARY
+              exit 1
+            fi
+            ;;
+          validate-version)
+            echo "## 🔢 Version Validation" >> $GITHUB_STEP_SUMMARY
+            if make validate-version > version_output.txt 2>&1; then
+              echo "✅ **Version validation passed!**" >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "### Validation result:" >> $GITHUB_STEP_SUMMARY
+              echo '```' >> $GITHUB_STEP_SUMMARY
+              cat version_output.txt >> $GITHUB_STEP_SUMMARY
+              echo '```' >> $GITHUB_STEP_SUMMARY
+            else
+              echo "❌ **Version validation failed!**" >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "### Version mismatch:" >> $GITHUB_STEP_SUMMARY
+              echo '```' >> $GITHUB_STEP_SUMMARY
+              cat version_output.txt >> $GITHUB_STEP_SUMMARY
+              echo '```' >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "💡 **Fix suggestion:** Update version in pyproject.toml or __init__.py to match" >> $GITHUB_STEP_SUMMARY
               exit 1
             fi
             ;;
