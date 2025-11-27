@@ -1,4 +1,4 @@
-.PHONY: help install install-dev test lint lint-fix format format-check type-check build clean
+.PHONY: help install install-dev test lint lint-fix format format-check type-check build clean validate-version
 .DEFAULT_GOAL := help
 
 help: ## Show this help message
@@ -44,6 +44,18 @@ publish: ## Publish to PyPI
 
 check-build: ## Check if build is ready for publishing
 	python -m twine check dist/*
+
+validate-version: ## Check if versions in pyproject.toml and __init__.py match
+	@PYPROJECT_VERSION=$$(python -c "import tomllib; print(tomllib.load(open('pyproject.toml', 'rb'))['project']['version'])"); \
+	INIT_VERSION=$$(python -c "import sys; sys.path.insert(0, 'src'); import torch_batteries; print(torch_batteries.__version__)"); \
+	if [ "$$PYPROJECT_VERSION" = "$$INIT_VERSION" ]; then \
+		echo "✅ Versions match: $$PYPROJECT_VERSION"; \
+	else \
+		echo "❌ Version mismatch:"; \
+		echo "  pyproject.toml: $$PYPROJECT_VERSION"; \
+		echo "  __init__.py:    $$INIT_VERSION"; \
+		exit 1; \
+	fi
 
 clean: ## Clean artifacts
 	rm -rf build/
