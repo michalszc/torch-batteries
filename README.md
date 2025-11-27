@@ -27,6 +27,7 @@ make install-dev
 
 ### Prerequisites
 - Python 3.12+
+- Pip 25.1+
 
 ### Setup Development Environment
 
