@@ -9,7 +9,7 @@ install: ## Install package
 	pip install -e .
 
 install-dev: ## Install package with development dependencies
-	pip install -e ".[dev]"
+	pip install -e . --config-settings group=dev
 	pre-commit install
 
 test: ## Run tests
@@ -32,6 +32,18 @@ format-check: ## Check code formatting without making changes
 
 type-check: ## Run type checking (mypy)
 	mypy src/torch_batteries/ tests/
+
+build: ## Build package for distribution
+	python -m build
+
+publish-test: ## Publish to TestPyPI
+	python -m twine upload --repository testpypi dist/*
+
+publish: ## Publish to PyPI
+	python -m twine upload dist/*
+
+check-build: ## Check if build is ready for publishing
+	python -m twine check dist/*
 
 clean: ## Clean artifacts
 	rm -rf build/

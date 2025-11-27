@@ -15,28 +15,52 @@ authors = [
     {name = "Antoni Zięciak"}
 ]
 keywords = ["pytorch", "machine learning", "deep learning", "training", "evaluation"]
-
-dependencies = [
-    "torch>=2.9.1",
+classifiers = [
+    "Development Status :: 1 - Planning",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Software Development :: Libraries :: Python Modules",
 ]
 
-[project.optional-dependencies]
-dev = [
-    # Testing
+dependencies = [
+    "torch>=2.9.0",
+]
+
+[dependency-groups]
+test = [
     "pytest>=7.0.0",
     "pytest-cov>=4.0.0",
     "pytest-mock>=3.10.0",
-
-    # Linting and formatting
+]
+lint = [
     "ruff>=0.1.0",
     "mypy>=1.0.0",
     "pre-commit>=3.0.0",
+]
+build = [
+    "build>=1.0.0",
+    "twine>=4.0.0",
+]
+dev = [
+    {include-group = "test"},
+    {include-group = "lint"},
+    {include-group = "build"},
 ]
 
 [project.urls]
 Homepage = "https://github.com/michalszc/torch-batteries"
 Repository = "https://github.com/michalszc/torch-batteries"
 Issues = "https://github.com/michalszc/torch-batteries/issues"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-dir]
+"" = "src"
 
 [tool.ruff]
 line-length = 88
