@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "torch-batteries"
-version = "0.1.3"
+version = "0.1.0"
 description = "A lightweight Python package that supplies batteries-included abstractions for PyTorch workflows"
 readme = "README.md"
 requires-python = ">=3.12"
