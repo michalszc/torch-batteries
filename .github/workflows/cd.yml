@@ -21,7 +21,7 @@ jobs:
         cache-dependency-path: 'pyproject.toml'
 
     - name: Install dependencies
-      run: pip install -e ".[build]"
+      run: 	pip install -e . --group build
 
     - name: Build package
       run: make build
