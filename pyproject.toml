@@ -45,10 +45,14 @@ build = [
     "build>=1.0.0",
     "twine>=4.0.0",
 ]
+docs = [
+    "pdoc>=14.0.0",
+]
 dev = [
     {include-group = "test"},
     {include-group = "lint"},
     {include-group = "build"},
+    {include-group = "docs"},
 ]
 
 [project.urls]
