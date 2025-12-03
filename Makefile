@@ -1,4 +1,4 @@
-.PHONY: help install install-dev test lint lint-fix format format-check type-check build clean validate-version
+.PHONY: help install install-dev test lint lint-fix format format-check type-check build clean validate-version docs docs-serve
 .DEFAULT_GOAL := help
 
 help: ## Show this help message
@@ -57,6 +57,17 @@ validate-version: ## Check if versions in pyproject.toml and __init__.py match
 		exit 1; \
 	fi
 
+docs: ## Generate HTML documentation using pdoc
+	pdoc -o docs src/torch_batteries
+	@echo "📚 Documentation generated in docs/ directory"
+
+docs-serve: ## Generate documentation and serve it locally
+	pdoc -o docs src/torch_batteries
+	@echo "📚 Documentation generated in docs/ directory"
+	@echo "🌐 Starting local server at http://localhost:8000"
+	@echo "Press Ctrl+C to stop the server"
+	cd docs && python -m http.server 8000
+
 clean: ## Clean artifacts
 	rm -rf build/
 	rm -rf dist/
@@ -67,6 +78,7 @@ clean: ## Clean artifacts
 	rm -rf htmlcov/
 	rm -rf .mypy_cache/
 	rm -rf .ruff_cache/
+	rm -rf docs/
 	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
 	find . -name "*.pyc" -delete
 	find . -name "*.pyo" -delete
