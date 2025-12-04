@@ -36,6 +36,9 @@ def get_batch_size(batch: Any) -> int:
         ```
     """
     if isinstance(batch, torch.Tensor):
+        # Handle scalar tensors (0-dimensional)
+        if batch.dim() == 0:
+            return 1
         return batch.size(0)
 
     if isinstance(batch, (list, tuple)):
