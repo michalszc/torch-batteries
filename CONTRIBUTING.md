@@ -60,7 +60,6 @@ Pre-commit hooks are automatically installed with `make install-dev` and will ru
 - End-of-file fixing
 - YAML validation
 - Ruff linting and formatting
-- MyPy type checking
 
 To manually run pre-commit on all files:
 ```bash
@@ -71,17 +70,51 @@ pre-commit run --all-files
 ```
 torch-batteries/
 ├── src/torch_batteries/    # Main package source
-│   └── __init__.py         # Package initialization
+│   ├── __init__.py         # Package initialization
+│   ├── const.py            # Package constants
+│   ├── py.typed            # PEP 561 type marker
+│   ├── events/             # Event system
+│   │   ├── __init__.py     # Events module initialization
+│   │   ├── core.py         # Event definitions and decorators
+│   │   └── handler.py      # Event handler implementation
+│   ├── trainer/            # Training system
+│   │   ├── __init__.py     # Trainer module initialization
+│   │   ├── core.py         # Battery trainer implementation
+│   │   └── types.py        # Type definitions for training
+│   └── utils/              # Utility functions
+│       ├── __init__.py     # Utils module initialization
+│       ├── batch.py        # Batch processing utilities
+│       ├── device.py       # Device management utilities
+│       ├── logging.py      # Logging utilities
+│       └── progress/       # Progress tracking
+│           ├── __init__.py # Progress module initialization
+│           ├── types.py    # Progress type definitions
+│           ├── progress_tracker.py        # Basic progress tracking
+│           └── epoch_progress_tracker.py  # Epoch-specific progress tracking
 ├── tests/                  # Test files
 │   ├── __init__.py         # Test package initialization
-│   └── test_package.py     # Package tests
+│   ├── test_package.py     # Package tests
+│   ├── test_events.py      # Event system tests
+│   ├── test_trainer.py     # Trainer tests
+│   ├── test_trainer_types.py # Trainer types tests
+│   ├── test_utils_batch.py # Batch utilities tests
+│   ├── test_utils_device.py # Device utilities tests
+│   ├── test_utils_logging.py # Logging utilities tests
+│   └── test_utils_progress.py # Progress tracking tests
+├── docs/                   # Generated documentation
+│   ├── index.html          # Main documentation page
+│   ├── search.js           # Documentation search
+│   └── torch_batteries.html # API documentation
 ├── notebooks/              # Jupyter notebooks for examples
 │   └── example.ipynb       # Example notebook
 ├── assets/                 # Project assets
 │   └── logo.png            # Logo files
+├── scripts/                # Build and CI scripts
+│   └── ci/                 # CI-specific scripts
 ├── .github/workflows/      # CI/CD pipelines
 │   ├── ci.yml              # Continuous integration
-│   └── cd.yml              # Continuous deployment
+│   ├── cd.yml              # Continuous deployment
+│   └── docs.yml            # Documentation generation
 ├── pyproject.toml          # Project configuration
 ├── Makefile                # Development commands
 ├── LICENSE                 # MIT license
