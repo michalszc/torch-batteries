@@ -55,7 +55,11 @@ def move_to_device(data: Any, device: torch.device) -> Any:
         ```
     """
     if isinstance(data, (list, tuple)):
-        return [x.to(device) if isinstance(x, torch.Tensor) else x for x in data]
+        moved_data = [move_to_device(x, device) for x in data]
+        # Preserve the original type (list or tuple)
+        return type(data)(moved_data)
+    if isinstance(data, dict):
+        return {k: move_to_device(v, device) for k, v in data.items()}
     if isinstance(data, torch.Tensor):
         return data.to(device)
     return data
