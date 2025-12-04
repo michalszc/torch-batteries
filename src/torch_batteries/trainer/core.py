@@ -7,6 +7,8 @@ from torch import nn
 from torch.utils.data import DataLoader
 
 from torch_batteries.events import Event, EventHandler
+from torch_batteries.trainer.types import PredictResult, TestResult, TrainResult
+from torch_batteries.utils.batch import get_batch_size
 from torch_batteries.utils.logging import get_logger
 
 logger = get_logger("trainer")
@@ -63,7 +65,6 @@ class Battery:
         self.device = torch.device(device) if isinstance(device, str) else device
         self.optimizer = optimizer
 
-        # Create event handler to manage decorated methods
         self.event_handler = EventHandler(self.model)
 
     def _move_batch_to_device(self, batch: Any) -> Any:
@@ -81,7 +82,7 @@ class Battery:
         train_loader: DataLoader,
         val_loader: DataLoader | None = None,
         epochs: int = 1,
-    ) -> dict[str, list[float]]:
+    ) -> TrainResult:
         """
         Train the model for the specified number of epochs.
 
@@ -91,7 +92,7 @@ class Battery:
             epochs: Number of training epochs
 
         Returns:
-            Dictionary containing training and validation metrics
+            TrainResult containing training and validation metrics
 
         Raises:
             ValueError: If no training step handler is found
@@ -107,23 +108,19 @@ class Battery:
             msg = "Optimizer is required for training."
             raise ValueError(msg)
 
-        metrics: dict[str, list[float]] = {
+        metrics: TrainResult = {
             "train_loss": [],
             "val_loss": [],
         }
 
         for epoch in range(epochs):
             # Training epoch
-            self.event_handler.call(Event.TRAIN_EPOCH_START, epoch)
             train_loss = self._train_epoch(train_loader)
-            self.event_handler.call(Event.TRAIN_EPOCH_END, epoch, train_loss)
             metrics["train_loss"].append(train_loss)
 
             # Validation epoch
             if val_loader:
-                self.event_handler.call(Event.VALIDATION_EPOCH_START, epoch)
                 val_loss = self._validate_epoch(val_loader)
-                self.event_handler.call(Event.VALIDATION_EPOCH_END, epoch, val_loss)
                 metrics["val_loss"].append(val_loss)
 
                 logger.info(
@@ -147,29 +144,27 @@ class Battery:
         """Run a single training epoch."""
         self.model.train()
         total_loss = 0.0
-        num_batches = 0
+        total_samples = 0
 
         for batch_data in dataloader:
-            # Move batch to device
             batch = self._move_batch_to_device(batch_data)
 
-            self.event_handler.call(Event.TRAIN_STEP_START, batch)
+            # Optimizer is guaranteed to be non-None by train() method
+            self.optimizer.zero_grad()  # type: ignore[union-attr]
+
             # Forward pass
             loss = self.event_handler.call(Event.TRAIN_STEP, batch)
+            assert loss is not None, "Training step must return a loss value."
 
-            if loss is not None:
-                # Backward pass
-                loss.backward()
-                assert self.optimizer is not None  # Already checked in train method
-                self.optimizer.step()
-                self.optimizer.zero_grad()
+            loss.backward()
+            self.optimizer.step()  # type: ignore[union-attr]
 
-                total_loss += loss.item()
-                num_batches += 1
+            num_samples = get_batch_size(batch)
 
-            self.event_handler.call(Event.TRAIN_STEP_END, batch, loss)
+            total_loss += loss.item() * num_samples
+            total_samples += num_samples
 
-        return total_loss / max(num_batches, 1)
+        return total_loss / total_samples
 
     def _validate_epoch(self, dataloader: DataLoader) -> float:
         """Run a single validation epoch."""
@@ -182,26 +177,22 @@ class Battery:
 
         self.model.eval()
         total_loss = 0.0
-        num_batches = 0
+        total_samples = 0
 
         with torch.no_grad():
             for batch_data in dataloader:
-                # Move batch to device
                 batch = self._move_batch_to_device(batch_data)
 
-                self.event_handler.call(Event.VALIDATION_STEP_START, batch)
-
                 loss = self.event_handler.call(Event.VALIDATION_STEP, batch)
+                assert loss is not None, "Validation step must return a loss value."
 
-                if loss is not None:
-                    total_loss += loss.item()
-                    num_batches += 1
+                num_samples = get_batch_size(batch)
+                total_loss += loss.item() * num_samples
+                total_samples += num_samples
 
-                self.event_handler.call(Event.VALIDATION_STEP_END, batch, loss)
+        return total_loss / total_samples
 
-        return total_loss / max(num_batches, 1)
-
-    def test(self, test_loader: DataLoader) -> dict[str, Any]:
+    def test(self, test_loader: DataLoader) -> TestResult:
         """
         Test the model on the provided data loader.
 
@@ -209,7 +200,7 @@ class Battery:
             test_loader: Test data loader
 
         Returns:
-            Dictionary containing test results
+            TestResult containing test loss
 
         Raises:
             ValueError: If no test step handler is found
@@ -222,24 +213,24 @@ class Battery:
             raise ValueError(msg)
 
         self.model.eval()
-        results = []
+        total_loss = 0.0
+        total_samples = 0
 
         with torch.no_grad():
             for batch_data in test_loader:
-                # Move batch to device
                 batch = self._move_batch_to_device(batch_data)
 
-                self.event_handler.call(Event.TEST_STEP_START, batch)
+                loss = self.event_handler.call(Event.TEST_STEP, batch)
+                assert loss is not None, "Test step must return a loss value."
 
-                result = self.event_handler.call(Event.TEST_STEP, batch)
-                if result is not None:
-                    results.append(result)
+                num_samples = get_batch_size(batch)
+                total_loss += loss.item() * num_samples
+                total_samples += num_samples
 
-                self.event_handler.call(Event.TEST_STEP_END, batch, result)
+        test_loss = total_loss / total_samples
+        return {"test_loss": [test_loss]}
 
-        return {"results": results}
-
-    def predict(self, data_loader: DataLoader) -> list[Any]:
+    def predict(self, data_loader: DataLoader) -> PredictResult:
         """
         Generate predictions using the model.
 
@@ -247,7 +238,7 @@ class Battery:
             data_loader: Data loader for prediction
 
         Returns:
-            List of predictions
+            PredictResult containing predictions
 
         Raises:
             ValueError: If no predict step handler is found
@@ -264,15 +255,10 @@ class Battery:
 
         with torch.no_grad():
             for batch_data in data_loader:
-                # Move batch to device
                 batch = self._move_batch_to_device(batch_data)
-
-                self.event_handler.call(Event.PREDICT_STEP_START, batch)
 
                 prediction = self.event_handler.call(Event.PREDICT_STEP, batch)
                 if prediction is not None:
                     predictions.append(prediction)
 
-                self.event_handler.call(Event.PREDICT_STEP_END, batch, prediction)
-
-        return predictions
+        return {"predictions": predictions}
