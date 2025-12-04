@@ -1,7 +1,5 @@
 """Battery trainer class for torch-batteries."""
 
-from typing import Any
-
 import torch
 from torch import nn
 from torch.utils.data import DataLoader
@@ -9,6 +7,7 @@ from torch.utils.data import DataLoader
 from torch_batteries.events import Event, EventHandler
 from torch_batteries.trainer.types import PredictResult, TestResult, TrainResult
 from torch_batteries.utils.batch import get_batch_size
+from torch_batteries.utils.device import get_device, move_to_device
 from torch_batteries.utils.logging import get_logger
 
 logger = get_logger("trainer")
@@ -23,7 +22,7 @@ class Battery:
 
     Args:
         model: PyTorch model (nn.Module)
-        device: PyTorch device (cpu, cuda, etc.)
+        device: PyTorch device (cpu, cuda, etc.). If 'auto', detects available device.
         optimizer: Optional optimizer for training
 
     Example:
@@ -50,32 +49,43 @@ class Battery:
                 loss = F.mse_loss(pred, y)
                 return loss
 
-        battery = Battery(model, device='cuda', optimizer=optimizer)
+        battery = Battery(model, optimizer=optimizer)  # Auto-detects device
         battery.train(train_loader, val_loader, epochs=10)
         ```
     """
 
+    __slots__ = ("_device", "_event_handler", "_model", "_optimizer")
+
     def __init__(
         self,
         model: nn.Module,
-        device: str | torch.device,
+        device: str | torch.device = "auto",
         optimizer: torch.optim.Optimizer | None = None,
     ):
-        self.model = model.to(device)
-        self.device = torch.device(device) if isinstance(device, str) else device
-        self.optimizer = optimizer
+        self._device = get_device(device)
+        self._model = model.to(self._device)
+        self._optimizer = optimizer
+        self._event_handler = EventHandler(self._model)
 
-        self.event_handler = EventHandler(self.model)
+    @property
+    def model(self) -> nn.Module:
+        """Get the model."""
+        return self._model
 
-    def _move_batch_to_device(self, batch: Any) -> Any:
-        """Move batch to device handling different data types."""
-        if isinstance(batch, (list, tuple)):
-            return [
-                x.to(self.device) if isinstance(x, torch.Tensor) else x for x in batch
-            ]
-        if isinstance(batch, torch.Tensor):
-            return batch.to(self.device)
-        return batch
+    @property
+    def device(self) -> torch.device:
+        """Get the device."""
+        return self._device
+
+    @property
+    def optimizer(self) -> torch.optim.Optimizer | None:
+        """Get the optimizer."""
+        return self._optimizer
+
+    @optimizer.setter
+    def optimizer(self, value: torch.optim.Optimizer | None) -> None:
+        """Set the optimizer."""
+        self._optimizer = value
 
     def train(
         self,
@@ -97,14 +107,14 @@ class Battery:
         Raises:
             ValueError: If no training step handler is found
         """
-        if not self.event_handler.has_handler(Event.TRAIN_STEP):
+        if not self._event_handler.has_handler(Event.TRAIN_STEP):
             msg = (
                 "No method decorated with @charge(Event.TRAIN_STEP) found. "
                 "Please add a training step method to your model."
             )
             raise ValueError(msg)
 
-        if self.optimizer is None:
+        if self._optimizer is None:
             msg = "Optimizer is required for training."
             raise ValueError(msg)
 
@@ -142,22 +152,22 @@ class Battery:
 
     def _train_epoch(self, dataloader: DataLoader) -> float:
         """Run a single training epoch."""
-        self.model.train()
+        self._model.train()
         total_loss = 0.0
         total_samples = 0
 
         for batch_data in dataloader:
-            batch = self._move_batch_to_device(batch_data)
+            batch = move_to_device(batch_data, self._device)
 
             # Optimizer is guaranteed to be non-None by train() method
-            self.optimizer.zero_grad()  # type: ignore[union-attr]
+            self._optimizer.zero_grad()  # type: ignore[union-attr]
 
             # Forward pass
-            loss = self.event_handler.call(Event.TRAIN_STEP, batch)
+            loss = self._event_handler.call(Event.TRAIN_STEP, batch)
             assert loss is not None, "Training step must return a loss value."
 
             loss.backward()
-            self.optimizer.step()  # type: ignore[union-attr]
+            self._optimizer.step()  # type: ignore[union-attr]
 
             num_samples = get_batch_size(batch)
 
@@ -168,22 +178,22 @@ class Battery:
 
     def _validate_epoch(self, dataloader: DataLoader) -> float:
         """Run a single validation epoch."""
-        if not self.event_handler.has_handler(Event.VALIDATION_STEP):
+        if not self._event_handler.has_handler(Event.VALIDATION_STEP):
             msg = (
                 "No method decorated with @charge(Event.VALIDATION_STEP) found. "
                 "Please add a validation step method to your model."
             )
             raise ValueError(msg)
 
-        self.model.eval()
+        self._model.eval()
         total_loss = 0.0
         total_samples = 0
 
         with torch.no_grad():
             for batch_data in dataloader:
-                batch = self._move_batch_to_device(batch_data)
+                batch = move_to_device(batch_data, self._device)
 
-                loss = self.event_handler.call(Event.VALIDATION_STEP, batch)
+                loss = self._event_handler.call(Event.VALIDATION_STEP, batch)
                 assert loss is not None, "Validation step must return a loss value."
 
                 num_samples = get_batch_size(batch)
@@ -205,22 +215,22 @@ class Battery:
         Raises:
             ValueError: If no test step handler is found
         """
-        if not self.event_handler.has_handler(Event.TEST_STEP):
+        if not self._event_handler.has_handler(Event.TEST_STEP):
             msg = (
                 "No method decorated with @charge(Event.TEST_STEP) found. "
                 "Please add a test step method to your model."
             )
             raise ValueError(msg)
 
-        self.model.eval()
+        self._model.eval()
         total_loss = 0.0
         total_samples = 0
 
         with torch.no_grad():
             for batch_data in test_loader:
-                batch = self._move_batch_to_device(batch_data)
+                batch = move_to_device(batch_data, self._device)
 
-                loss = self.event_handler.call(Event.TEST_STEP, batch)
+                loss = self._event_handler.call(Event.TEST_STEP, batch)
                 assert loss is not None, "Test step must return a loss value."
 
                 num_samples = get_batch_size(batch)
@@ -243,21 +253,21 @@ class Battery:
         Raises:
             ValueError: If no predict step handler is found
         """
-        if not self.event_handler.has_handler(Event.PREDICT_STEP):
+        if not self._event_handler.has_handler(Event.PREDICT_STEP):
             msg = (
                 "No method decorated with @charge(Event.PREDICT_STEP) found. "
                 "Please add a predict step method to your model."
             )
             raise ValueError(msg)
 
-        self.model.eval()
+        self._model.eval()
         predictions = []
 
         with torch.no_grad():
             for batch_data in data_loader:
-                batch = self._move_batch_to_device(batch_data)
+                batch = move_to_device(batch_data, self._device)
 
-                prediction = self.event_handler.call(Event.PREDICT_STEP, batch)
+                prediction = self._event_handler.call(Event.PREDICT_STEP, batch)
                 if prediction is not None:
                     predictions.append(prediction)
 
