@@ -29,3 +29,5 @@ repos:
         additional_dependencies:
           - torch>=2.9.0
           - types-tqdm>=4.67.0.20250809
+          - torch-batteries
+          - pytest
