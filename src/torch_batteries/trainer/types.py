@@ -19,7 +19,7 @@ class TestResult(TypedDict):
     Contains test results from the test step handlers.
     """
 
-    test_loss: list[float]
+    test_loss: float
 
 
 class PredictResult(TypedDict):

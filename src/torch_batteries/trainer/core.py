@@ -9,6 +9,11 @@ from torch_batteries.trainer.types import PredictResult, TestResult, TrainResult
 from torch_batteries.utils.batch import get_batch_size
 from torch_batteries.utils.device import get_device, move_to_device
 from torch_batteries.utils.logging import get_logger
+from torch_batteries.utils.progress import (
+    EpochProgressTracker,
+    Phase,
+    ProgressTracker,
+)
 
 logger = get_logger("trainer")
 
@@ -92,6 +97,7 @@ class Battery:
         train_loader: DataLoader,
         val_loader: DataLoader | None = None,
         epochs: int = 1,
+        verbose: int = 1,
     ) -> TrainResult:
         """
         Train the model for the specified number of epochs.
@@ -100,6 +106,7 @@ class Battery:
             train_loader: Training data loader
             val_loader: Optional validation data loader
             epochs: Number of training epochs
+            verbose: Verbosity level (0=silent, 1=progress bars, 2=epoch logs)
 
         Returns:
             TrainResult containing training and validation metrics
@@ -123,24 +130,27 @@ class Battery:
             "val_loss": [],
         }
 
+        progress = ProgressTracker(
+            verbose=verbose,
+            total_epochs=epochs,
+        )
+
         for epoch in range(epochs):
-            # Training epoch
-            train_loss = self._train_epoch(train_loader)
+            progress.start_epoch(epoch)
+
+            train_loss = self._train_epoch(train_loader, verbose)
             metrics["train_loss"].append(train_loss)
+            progress.train_loss = train_loss
 
-            # Validation epoch
+            val_loss = None
             if val_loader:
-                val_loss = self._validate_epoch(val_loader)
+                val_loss = self._validate_epoch(val_loader, verbose)
                 metrics["val_loss"].append(val_loss)
+                progress.val_loss = val_loss
 
-                logger.info(
-                    "Epoch %d/%d - Train Loss: %.4f, Val Loss: %.4f",
-                    epoch + 1,
-                    epochs,
-                    train_loss,
-                    val_loss,
-                )
-            else:
+            progress.end_epoch()
+
+            if verbose == 2 and val_loader is None:
                 logger.info(
                     "Epoch %d/%d - Train Loss: %.4f",
                     epoch + 1,
@@ -148,13 +158,18 @@ class Battery:
                     train_loss,
                 )
 
+        progress.end_phase()
         return metrics
 
-    def _train_epoch(self, dataloader: DataLoader) -> float:
+    def _train_epoch(self, dataloader: DataLoader, verbose: int = 1) -> float:
         """Run a single training epoch."""
         self._model.train()
-        total_loss = 0.0
-        total_samples = 0
+
+        progress = EpochProgressTracker(
+            verbose=verbose,
+            phase=Phase.TRAIN,
+            total_batches=len(dataloader),
+        )
 
         for batch_data in dataloader:
             batch = move_to_device(batch_data, self._device)
@@ -162,7 +177,6 @@ class Battery:
             # Optimizer is guaranteed to be non-None by train() method
             self._optimizer.zero_grad()  # type: ignore[union-attr]
 
-            # Forward pass
             loss = self._event_handler.call(Event.TRAIN_STEP, batch)
             assert loss is not None, "Training step must return a loss value."
 
@@ -170,13 +184,11 @@ class Battery:
             self._optimizer.step()  # type: ignore[union-attr]
 
             num_samples = get_batch_size(batch)
+            progress.update({"loss": loss.item()}, num_samples)
 
-            total_loss += loss.item() * num_samples
-            total_samples += num_samples
+        return progress.close()
 
-        return total_loss / total_samples
-
-    def _validate_epoch(self, dataloader: DataLoader) -> float:
+    def _validate_epoch(self, dataloader: DataLoader, verbose: int = 1) -> float:
         """Run a single validation epoch."""
         if not self._event_handler.has_handler(Event.VALIDATION_STEP):
             msg = (
@@ -186,8 +198,12 @@ class Battery:
             raise ValueError(msg)
 
         self._model.eval()
-        total_loss = 0.0
-        total_samples = 0
+
+        progress = EpochProgressTracker(
+            verbose=verbose,
+            phase=Phase.VALIDATION,
+            total_batches=len(dataloader),
+        )
 
         with torch.no_grad():
             for batch_data in dataloader:
@@ -197,17 +213,18 @@ class Battery:
                 assert loss is not None, "Validation step must return a loss value."
 
                 num_samples = get_batch_size(batch)
-                total_loss += loss.item() * num_samples
-                total_samples += num_samples
 
-        return total_loss / total_samples
+                progress.update({"loss": loss.item()}, num_samples)
 
-    def test(self, test_loader: DataLoader) -> TestResult:
+        return progress.close()
+
+    def test(self, test_loader: DataLoader, verbose: int = 1) -> TestResult:
         """
         Test the model on the provided data loader.
 
         Args:
             test_loader: Test data loader
+            verbose: Verbosity level (0=silent, 1=progress bar, 2=simple log)
 
         Returns:
             TestResult containing test loss
@@ -223,8 +240,12 @@ class Battery:
             raise ValueError(msg)
 
         self._model.eval()
-        total_loss = 0.0
-        total_samples = 0
+
+        progress = EpochProgressTracker(
+            verbose=verbose,
+            phase=Phase.TEST,
+            total_batches=len(test_loader),
+        )
 
         with torch.no_grad():
             for batch_data in test_loader:
@@ -234,18 +255,19 @@ class Battery:
                 assert loss is not None, "Test step must return a loss value."
 
                 num_samples = get_batch_size(batch)
-                total_loss += loss.item() * num_samples
-                total_samples += num_samples
 
-        test_loss = total_loss / total_samples
-        return {"test_loss": [test_loss]}
+                progress.update({"loss": loss.item()}, num_samples)
 
-    def predict(self, data_loader: DataLoader) -> PredictResult:
+        test_loss = progress.close()
+        return {"test_loss": test_loss}
+
+    def predict(self, data_loader: DataLoader, verbose: int = 1) -> PredictResult:
         """
         Generate predictions using the model.
 
         Args:
             data_loader: Data loader for prediction
+            verbose: Verbosity level (0=silent, 1=progress bar, 2=simple log)
 
         Returns:
             PredictResult containing predictions
@@ -263,12 +285,22 @@ class Battery:
         self._model.eval()
         predictions = []
 
+        progress = EpochProgressTracker(
+            verbose=verbose,
+            phase=Phase.PREDICT,
+            total_batches=len(data_loader),
+        )
+
         with torch.no_grad():
-            for batch_data in data_loader:
+            for _, batch_data in enumerate(data_loader):
                 batch = move_to_device(batch_data, self._device)
 
                 prediction = self._event_handler.call(Event.PREDICT_STEP, batch)
                 if prediction is not None:
                     predictions.append(prediction)
 
+                # Update progress (no loss for predictions)
+                progress.update()
+
+        progress.close()
         return {"predictions": predictions}

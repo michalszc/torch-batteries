@@ -27,7 +27,8 @@ classifiers = [
 ]
 
 dependencies = [
-    "torch>=2.9.0"
+    "torch>=2.9.0",
+    "tqdm>=4.67.1"
 ]
 
 [project.optional-dependencies]
@@ -48,6 +49,9 @@ lint = [
     "mypy>=1.0.0",
     "pre-commit>=3.0.0",
 ]
+types = [
+    "types-tqdm>=4.67.0.20250809"
+]
 build = [
     "build>=1.0.0",
     "twine>=4.0.0",
@@ -58,6 +62,7 @@ docs = [
 dev = [
     {include-group = "test"},
     {include-group = "lint"},
+    {include-group = "types"},
     {include-group = "build"},
     {include-group = "docs"},
 ]
@@ -87,6 +92,8 @@ ignore = [
     "PLR2004",
     # Avoid conflicts with formatter
     "COM812",
+    # Allow print statements in progress tracking
+    "T201",
 ]
 
 # Allow autofix for all enabled rules
