@@ -19,27 +19,15 @@ class Event(Enum):
 
     # Training events
     TRAIN_STEP = "train_step"
-    TRAIN_STEP_START = "train_step_start"
-    TRAIN_STEP_END = "train_step_end"
-    TRAIN_EPOCH_START = "train_epoch_start"
-    TRAIN_EPOCH_END = "train_epoch_end"
 
     # Validation events
     VALIDATION_STEP = "validation_step"
-    VALIDATION_STEP_START = "validation_step_start"
-    VALIDATION_STEP_END = "validation_step_end"
-    VALIDATION_EPOCH_START = "validation_epoch_start"
-    VALIDATION_EPOCH_END = "validation_epoch_end"
 
     # Test events
     TEST_STEP = "test_step"
-    TEST_STEP_START = "test_step_start"
-    TEST_STEP_END = "test_step_end"
 
     # Prediction events
     PREDICT_STEP = "predict_step"
-    PREDICT_STEP_START = "predict_step_start"
-    PREDICT_STEP_END = "predict_step_end"
 
 
 def charge(event: Event) -> Callable[[Callable[P, R]], Callable[P, R]]:
