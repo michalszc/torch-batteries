@@ -26,3 +26,5 @@ repos:
     hooks:
       - id: mypy
         args: [--config-file=pyproject.toml]
+        additional_dependencies:
+          - torch>=2.9.0
