@@ -12,6 +12,7 @@ class BarProgress(Progress):
     """Progress tracker that displays progress bars (verbose=1)."""
 
     __slots__ = (
+        "_current_epoch",
         "_current_phase",
         "_pbar",
         "_total_epochs",
@@ -26,14 +27,15 @@ class BarProgress(Progress):
             total_epochs: Total number of epochs.
         """
         self._total_epochs = total_epochs
+        self._current_epoch = 0
         self._current_phase: Phase | None = None
         self._pbar: Any | None = None
         self._total_loss = 0.0
         self._total_samples = 0
 
     def start_epoch(self, epoch: int) -> None:
-        """Start a new epoch and print epoch header."""
-        print(f"Epoch {epoch + 1}/{self._total_epochs}")
+        """Start a new epoch and store epoch number."""
+        self._current_epoch = epoch
 
     def start_phase(self, phase: Phase, total_batches: int = 0) -> None:
         """Start a new phase with progress bar."""
@@ -43,12 +45,12 @@ class BarProgress(Progress):
         self._pbar = None
 
         if total_batches > 0:
-            phase_name = phase.value.capitalize()
+            phase_name = "Train" if phase == Phase.TRAIN else "Val"
+            epoch_num = self._current_epoch + 1
+            desc = f"Epoch {epoch_num}/{self._total_epochs} [{phase_name}]"
             self._pbar = tqdm(
                 total=total_batches,
-                desc=phase_name,
-                ncols=80,
-                bar_format="{desc}: {n}/{total} {bar} {percentage:3.0f}%{postfix}",
+                desc=desc,
                 leave=True,
             )
 
@@ -63,10 +65,7 @@ class BarProgress(Progress):
         if self._pbar:
             if self._total_samples > 0:
                 avg_loss = self._total_loss / self._total_samples
-                loss_label = (
-                    "val_loss" if self._current_phase == Phase.VALIDATION else "loss"
-                )
-                self._pbar.set_postfix_str(f"{loss_label}: {avg_loss:.4f}")
+                self._pbar.set_postfix_str(f"Loss={avg_loss:.4f}")
             self._pbar.update(1)
 
     def end_phase(self) -> float:
