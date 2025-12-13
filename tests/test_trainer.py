@@ -141,18 +141,11 @@ class TestBattery:
         ):
             battery.train(train_loader)
 
-    @patch("torch_batteries.utils.progress.ProgressTracker")
-    @patch("torch_batteries.utils.progress.EpochProgressTracker")
-    def test_train_basic_functionality(
-        self, mock_epoch_tracker: MagicMock, mock_progress_tracker: MagicMock
-    ) -> None:
+    @patch("torch_batteries.utils.progress.progress.Progress.end_phase")
+    def test_train_basic_functionality(self, mock_end_phase: MagicMock) -> None:
         """Test basic train functionality."""
-        # Setup mocks
-        mock_progress = MagicMock()
-        mock_progress_tracker.return_value = mock_progress
-        mock_epoch_progress = MagicMock()
-        mock_epoch_progress.close.return_value = 0.5
-        mock_epoch_tracker.return_value = mock_epoch_progress
+        # Setup mock to return a loss value
+        mock_end_phase.return_value = 0.5
 
         model = SimpleModel()
         optimizer = optim.SGD(model.parameters(), lr=0.01)
@@ -167,18 +160,11 @@ class TestBattery:
         assert len(result["train_loss"]) == 2  # 2 epochs
         assert len(result["val_loss"]) == 0  # no validation loader
 
-    @patch("torch_batteries.utils.progress.ProgressTracker")
-    @patch("torch_batteries.utils.progress.EpochProgressTracker")
-    def test_train_with_validation(
-        self, mock_epoch_tracker: MagicMock, mock_progress_tracker: MagicMock
-    ) -> None:
+    @patch("torch_batteries.utils.progress.progress.Progress.end_phase")
+    def test_train_with_validation(self, mock_end_phase: MagicMock) -> None:
         """Test training with validation loader."""
-        # Setup mocks
-        mock_progress = MagicMock()
-        mock_progress_tracker.return_value = mock_progress
-        mock_epoch_progress = MagicMock()
-        mock_epoch_progress.close.return_value = 0.3
-        mock_epoch_tracker.return_value = mock_epoch_progress
+        # Setup mock to return a loss value
+        mock_end_phase.return_value = 0.3
 
         model = SimpleModel()
         optimizer = optim.Adam(model.parameters())
@@ -240,12 +226,10 @@ class TestBattery:
         ):
             battery.test(test_loader)
 
-    @patch("torch_batteries.utils.progress.EpochProgressTracker")
-    def test_test_basic_functionality(self, mock_epoch_tracker: MagicMock) -> None:
+    @patch("torch_batteries.utils.progress.progress.Progress.end_phase")
+    def test_test_basic_functionality(self, mock_end_phase: MagicMock) -> None:
         """Test basic test functionality."""
-        mock_epoch_progress = MagicMock()
-        mock_epoch_progress.close.return_value = 0.25
-        mock_epoch_tracker.return_value = mock_epoch_progress
+        mock_end_phase.return_value = 0.25
 
         model = SimpleModel()
         battery = Battery(model)
@@ -274,12 +258,10 @@ class TestBattery:
         ):
             battery.predict(data_loader)
 
-    @patch("torch_batteries.utils.progress.EpochProgressTracker")
-    def test_predict_basic_functionality(self, mock_epoch_tracker: MagicMock) -> None:
+    @patch("torch_batteries.utils.progress.progress.Progress.end_phase")
+    def test_predict_basic_functionality(self, mock_end_phase: MagicMock) -> None:
         """Test basic predict functionality."""
-        mock_epoch_progress = MagicMock()
-        mock_epoch_progress.close.return_value = 0.0
-        mock_epoch_tracker.return_value = mock_epoch_progress
+        mock_end_phase.return_value = 0.0
 
         model = SimpleModel()
         battery = Battery(model)
@@ -303,11 +285,10 @@ class TestBattery:
 
         train_loader = self.create_simple_data_loader(batch_size=2, num_samples=2)
 
-        with (
-            patch("torch_batteries.utils.progress.ProgressTracker"),
-            patch("torch_batteries.utils.progress.EpochProgressTracker") as mock_epoch,
-        ):
-            mock_epoch.return_value.close.return_value = 0.1
+        with patch(
+            "torch_batteries.utils.progress.progress.Progress.end_phase"
+        ) as mock_end_phase:
+            mock_end_phase.return_value = 0.1
             battery.train(train_loader, epochs=1, verbose=0)
 
         assert model.training
@@ -323,8 +304,10 @@ class TestBattery:
 
         test_loader = self.create_simple_data_loader(batch_size=2, num_samples=2)
 
-        with patch("torch_batteries.utils.progress.EpochProgressTracker") as mock_epoch:
-            mock_epoch.return_value.close.return_value = 0.1
+        with patch(
+            "torch_batteries.utils.progress.progress.Progress.end_phase"
+        ) as mock_end_phase:
+            mock_end_phase.return_value = 0.1
             battery.test(test_loader, verbose=0)
 
         assert not model.training
@@ -340,8 +323,10 @@ class TestBattery:
 
         data_loader = self.create_simple_data_loader(batch_size=2, num_samples=2)
 
-        with patch("torch_batteries.utils.progress.EpochProgressTracker") as mock_epoch:
-            mock_epoch.return_value.close.return_value = 0.0
+        with patch(
+            "torch_batteries.utils.progress.progress.Progress.end_phase"
+        ) as mock_end_phase:
+            mock_end_phase.return_value = 0.0
             battery.predict(data_loader, verbose=0)
 
         assert not model.training
