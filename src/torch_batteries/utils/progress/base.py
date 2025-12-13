@@ -14,9 +14,6 @@ class Progress(ABC):
 
         Args:
             epoch: The epoch number (0-indexed).
-
-        Returns:
-            None
         """
 
     @abstractmethod
@@ -55,16 +52,8 @@ class Progress(ABC):
         """
 
     @abstractmethod
-    def end_epoch(self, train_loss: float, val_loss: float | None = None) -> None:
-        """End the current epoch and display summary.
-
-        Args:
-            train_loss: Training loss for the epoch.
-            val_loss: Optional validation loss for the epoch.
-
-        Returns:
-            None
-        """
+    def end_epoch(self) -> None:
+        """End the current epoch and display summary."""
 
     @abstractmethod
     def end_training(self) -> None:

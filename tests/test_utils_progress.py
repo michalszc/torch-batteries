@@ -127,7 +127,7 @@ class TestSilentProgress:
     def test_end_epoch_no_output(self, mock_print: MagicMock) -> None:
         """Test end_epoch produces no output."""
         progress = SilentProgress()
-        progress.end_epoch(0.5, 0.3)
+        progress.end_epoch()
         mock_print.assert_not_called()
 
     @patch("builtins.print")
@@ -218,7 +218,7 @@ class TestBarProgress:
     def test_end_epoch_no_output(self, mock_print: MagicMock) -> None:
         """Test end_epoch produces no output for verbose=1."""
         progress = BarProgress(total_epochs=1)
-        progress.end_epoch(0.5, 0.3)
+        progress.end_epoch()
         mock_print.assert_not_called()
 
     @patch("builtins.print")
@@ -273,7 +273,14 @@ class TestSimpleProgress:
 
         progress = SimpleProgress(total_epochs=3)
         progress.start_epoch(0)
-        progress.end_epoch(0.4, 0.2)
+        # Simulate train and validation phases
+        progress.start_phase(Phase.TRAIN)
+        progress.update({"loss": 0.4}, 32)
+        progress.end_phase()
+        progress.start_phase(Phase.VALIDATION)
+        progress.update({"loss": 0.2}, 16)
+        progress.end_phase()
+        progress.end_epoch()
 
         expected = "Epoch 1/3 - Train Loss: 0.4000, Val Loss: 0.2000 (5.00s)"
         mock_print.assert_called_with(expected)
@@ -288,7 +295,11 @@ class TestSimpleProgress:
 
         progress = SimpleProgress(total_epochs=2)
         progress.start_epoch(1)
-        progress.end_epoch(0.3)
+        # Simulate only train phase
+        progress.start_phase(Phase.TRAIN)
+        progress.update({"loss": 0.3}, 32)
+        progress.end_phase()
+        progress.end_epoch()
 
         expected = "Epoch 2/2 - Train Loss: 0.3000 (2.00s)"
         mock_print.assert_called_with(expected)

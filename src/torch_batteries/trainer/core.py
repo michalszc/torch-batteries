@@ -139,7 +139,7 @@ class Battery:
                 val_loss = self._validate_epoch(val_loader, progress)
                 metrics["val_loss"].append(val_loss)
 
-            progress.end_epoch(train_loss, val_loss)
+            progress.end_epoch()
 
         progress.end_training()
         return metrics
@@ -233,6 +233,7 @@ class Battery:
         self._model.eval()
 
         progress = ProgressFactory.create(verbose=verbose, total_epochs=1)
+        progress.start_epoch(0)
         progress.start_phase(Phase.TEST, total_batches=len(test_loader))
 
         with torch.no_grad():
@@ -247,6 +248,7 @@ class Battery:
                 progress.update({"loss": loss.item()}, num_samples)
 
         test_loss = progress.end_phase()
+        progress.end_epoch()
         return {"test_loss": test_loss}
 
     def predict(self, data_loader: DataLoader, verbose: int = 1) -> PredictResult:
@@ -274,6 +276,7 @@ class Battery:
         predictions = []
 
         progress = ProgressFactory.create(verbose=verbose, total_epochs=1)
+        progress.start_epoch(0)
         progress.start_phase(Phase.PREDICT, total_batches=len(data_loader))
 
         with torch.no_grad():
@@ -288,4 +291,5 @@ class Battery:
                 progress.update()
 
         progress.end_phase()
+        progress.end_epoch()
         return {"predictions": predictions}

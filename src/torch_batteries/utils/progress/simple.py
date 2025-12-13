@@ -11,7 +11,9 @@ class SimpleProgress(Progress):
 
     __slots__ = (
         "_current_epoch",
+        "_current_phase",
         "_epoch_start_time",
+        "_losses",
         "_total_epochs",
         "_total_loss",
         "_total_samples",
@@ -26,10 +28,12 @@ class SimpleProgress(Progress):
         """
         self._total_epochs = total_epochs
         self._current_epoch = 0
+        self._current_phase: Phase | None = None
         self._epoch_start_time = 0.0
         self._training_start_time = time.time()
         self._total_loss = 0.0
         self._total_samples = 0
+        self._losses: dict[Phase, float] = {}
 
     def start_epoch(self, epoch: int) -> None:
         """Start a new epoch and record time."""
@@ -38,15 +42,16 @@ class SimpleProgress(Progress):
 
     def start_phase(
         self,
-        phase: Phase,  # noqa: ARG002
+        phase: Phase,
         total_batches: int = 0,  # noqa: ARG002
     ) -> None:
         """Start a new phase.
 
         Args:
-            phase: The training phase (unused).
+            phase: The training phase.
             total_batches: Total number of batches (unused).
         """
+        self._current_phase = phase
         self._total_loss = 0.0
         self._total_samples = 0
 
@@ -60,26 +65,43 @@ class SimpleProgress(Progress):
 
     def end_phase(self) -> float:
         """End the current phase and return average loss."""
-        return (
+        avg_loss = (
             self._total_loss / self._total_samples if self._total_samples > 0 else 0.0
         )
+        match self._current_phase:
+            case Phase.TRAIN:
+                self._losses[Phase.TRAIN] = avg_loss
+            case Phase.VALIDATION:
+                self._losses[Phase.VALIDATION] = avg_loss
+            case Phase.TEST:
+                self._losses[Phase.TEST] = avg_loss
+            case Phase.PREDICT:
+                self._losses[Phase.PREDICT] = 0.0
+        return avg_loss
 
-    def end_epoch(self, train_loss: float, val_loss: float | None = None) -> None:
+    def end_epoch(self) -> None:
         """End the current epoch and print summary."""
         epoch_time = time.time() - self._epoch_start_time
         epoch_num = self._current_epoch + 1
 
-        if val_loss is not None:
-            print(
-                f"Epoch {epoch_num}/{self._total_epochs} - "
-                f"Train Loss: {train_loss:.4f}, "
-                f"Val Loss: {val_loss:.4f} ({epoch_time:.2f}s)"
-            )
-        else:
-            print(
-                f"Epoch {epoch_num}/{self._total_epochs} - "
-                f"Train Loss: {train_loss:.4f} ({epoch_time:.2f}s)"
-            )
+        match self._losses:
+            case {Phase.TRAIN: train_loss, Phase.VALIDATION: val_loss}:
+                print(
+                    f"Epoch {epoch_num}/{self._total_epochs} - "
+                    f"Train Loss: {train_loss:.4f}, "
+                    f"Val Loss: {val_loss:.4f} ({epoch_time:.2f}s)"
+                )
+            case {Phase.TRAIN: train_loss}:
+                print(
+                    f"Epoch {epoch_num}/{self._total_epochs} - "
+                    f"Train Loss: {train_loss:.4f} ({epoch_time:.2f}s)"
+                )
+            case {Phase.TEST: test_loss}:
+                print(f"Test Loss: {test_loss:.4f} ({epoch_time:.2f}s)")
+            case {Phase.PREDICT: _}:
+                print(f"Prediction completed ({epoch_time:.2f}s)")
+        # Clear losses for next epoch
+        self._losses.clear()
 
     def end_training(self) -> None:
         """End the training phase and print total time."""

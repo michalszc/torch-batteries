@@ -78,8 +78,10 @@ class BarProgress(Progress):
             self._total_loss / self._total_samples if self._total_samples > 0 else 0.0
         )
 
-    def end_epoch(self, train_loss: float, val_loss: float | None = None) -> None:
+    def end_epoch(self) -> None:
         """End the current epoch (no output for verbose=1)."""
+        pass  # noqa: PIE790
 
     def end_training(self) -> None:
         """End the training phase (no output for verbose=1)."""
+        pass  # noqa: PIE790
