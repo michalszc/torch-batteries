@@ -9,7 +9,7 @@ from torch_batteries.trainer.types import PredictResult, TestResult, TrainResult
 from torch_batteries.utils.batch import get_batch_size
 from torch_batteries.utils.device import get_device, move_to_device
 from torch_batteries.utils.logging import get_logger
-from torch_batteries.utils.progress import Phase, Progress
+from torch_batteries.utils.progress import Phase, Progress, ProgressFactory
 
 logger = get_logger("trainer")
 
@@ -126,7 +126,7 @@ class Battery:
             "val_loss": [],
         }
 
-        progress = Progress(verbose=verbose, total_epochs=epochs)
+        progress = ProgressFactory.create(verbose=verbose, total_epochs=epochs)
 
         for epoch in range(epochs):
             progress.start_epoch(epoch)
@@ -232,7 +232,7 @@ class Battery:
 
         self._model.eval()
 
-        progress = Progress(verbose=verbose, total_epochs=1)
+        progress = ProgressFactory.create(verbose=verbose, total_epochs=1)
         progress.start_phase(Phase.TEST, total_batches=len(test_loader))
 
         with torch.no_grad():
@@ -273,7 +273,7 @@ class Battery:
         self._model.eval()
         predictions = []
 
-        progress = Progress(verbose=verbose, total_epochs=1)
+        progress = ProgressFactory.create(verbose=verbose, total_epochs=1)
         progress.start_phase(Phase.PREDICT, total_batches=len(data_loader))
 
         with torch.no_grad():

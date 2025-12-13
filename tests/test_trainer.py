@@ -141,7 +141,7 @@ class TestBattery:
         ):
             battery.train(train_loader)
 
-    @patch("torch_batteries.utils.progress.progress.Progress.end_phase")
+    @patch("torch_batteries.utils.progress.base.Progress.end_phase")
     def test_train_basic_functionality(self, mock_end_phase: MagicMock) -> None:
         """Test basic train functionality."""
         # Setup mock to return a loss value
@@ -160,7 +160,7 @@ class TestBattery:
         assert len(result["train_loss"]) == 2  # 2 epochs
         assert len(result["val_loss"]) == 0  # no validation loader
 
-    @patch("torch_batteries.utils.progress.progress.Progress.end_phase")
+    @patch("torch_batteries.utils.progress.base.Progress.end_phase")
     def test_train_with_validation(self, mock_end_phase: MagicMock) -> None:
         """Test training with validation loader."""
         # Setup mock to return a loss value
@@ -226,7 +226,7 @@ class TestBattery:
         ):
             battery.test(test_loader)
 
-    @patch("torch_batteries.utils.progress.progress.Progress.end_phase")
+    @patch("torch_batteries.utils.progress.base.Progress.end_phase")
     def test_test_basic_functionality(self, mock_end_phase: MagicMock) -> None:
         """Test basic test functionality."""
         mock_end_phase.return_value = 0.25
@@ -258,7 +258,7 @@ class TestBattery:
         ):
             battery.predict(data_loader)
 
-    @patch("torch_batteries.utils.progress.progress.Progress.end_phase")
+    @patch("torch_batteries.utils.progress.base.Progress.end_phase")
     def test_predict_basic_functionality(self, mock_end_phase: MagicMock) -> None:
         """Test basic predict functionality."""
         mock_end_phase.return_value = 0.0
@@ -286,7 +286,7 @@ class TestBattery:
         train_loader = self.create_simple_data_loader(batch_size=2, num_samples=2)
 
         with patch(
-            "torch_batteries.utils.progress.progress.Progress.end_phase"
+            "torch_batteries.utils.progress.base.Progress.end_phase"
         ) as mock_end_phase:
             mock_end_phase.return_value = 0.1
             battery.train(train_loader, epochs=1, verbose=0)
@@ -305,7 +305,7 @@ class TestBattery:
         test_loader = self.create_simple_data_loader(batch_size=2, num_samples=2)
 
         with patch(
-            "torch_batteries.utils.progress.progress.Progress.end_phase"
+            "torch_batteries.utils.progress.base.Progress.end_phase"
         ) as mock_end_phase:
             mock_end_phase.return_value = 0.1
             battery.test(test_loader, verbose=0)
@@ -324,7 +324,7 @@ class TestBattery:
         data_loader = self.create_simple_data_loader(batch_size=2, num_samples=2)
 
         with patch(
-            "torch_batteries.utils.progress.progress.Progress.end_phase"
+            "torch_batteries.utils.progress.base.Progress.end_phase"
         ) as mock_end_phase:
             mock_end_phase.return_value = 0.0
             battery.predict(data_loader, verbose=0)
