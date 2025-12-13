@@ -45,17 +45,8 @@ publish: ## Publish to PyPI
 check-build: ## Check if build is ready for publishing
 	python -m twine check dist/*
 
-validate-version: ## Check if versions in pyproject.toml and __init__.py match
-	@PYPROJECT_VERSION=$$(python -c "import tomllib; print(tomllib.load(open('pyproject.toml', 'rb'))['project']['version'])"); \
-	INIT_VERSION=$$(python -c "import sys; sys.path.insert(0, 'src'); import torch_batteries; print(torch_batteries.__version__)"); \
-	if [ "$$PYPROJECT_VERSION" = "$$INIT_VERSION" ]; then \
-		echo "✅ Versions match: $$PYPROJECT_VERSION"; \
-	else \
-		echo "❌ Version mismatch:"; \
-		echo "  pyproject.toml: $$PYPROJECT_VERSION"; \
-		echo "  __init__.py:    $$INIT_VERSION"; \
-		exit 1; \
-	fi
+validate-version: ## Check if versions match and differ from PyPI
+	@bash scripts/validate_version.sh
 
 docs: ## Generate HTML documentation using pdoc
 	pdoc -o docs src/torch_batteries

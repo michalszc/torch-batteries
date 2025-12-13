@@ -9,11 +9,7 @@ from torch_batteries.trainer.types import PredictResult, TestResult, TrainResult
 from torch_batteries.utils.batch import get_batch_size
 from torch_batteries.utils.device import get_device, move_to_device
 from torch_batteries.utils.logging import get_logger
-from torch_batteries.utils.progress import (
-    EpochProgressTracker,
-    Phase,
-    ProgressTracker,
-)
+from torch_batteries.utils.progress import Phase, Progress, ProgressFactory
 
 logger = get_logger("trainer")
 
@@ -130,46 +126,37 @@ class Battery:
             "val_loss": [],
         }
 
-        progress = ProgressTracker(
-            verbose=verbose,
-            total_epochs=epochs,
-        )
+        progress = ProgressFactory.create(verbose=verbose, total_epochs=epochs)
 
         for epoch in range(epochs):
             progress.start_epoch(epoch)
 
-            train_loss = self._train_epoch(train_loader, verbose)
+            train_loss = self._train_epoch(train_loader, progress)
             metrics["train_loss"].append(train_loss)
-            progress.train_loss = train_loss
 
             val_loss = None
             if val_loader:
-                val_loss = self._validate_epoch(val_loader, verbose)
+                val_loss = self._validate_epoch(val_loader, progress)
                 metrics["val_loss"].append(val_loss)
-                progress.val_loss = val_loss
 
             progress.end_epoch()
 
-            if verbose == 2 and val_loader is None:
-                logger.info(
-                    "Epoch %d/%d - Train Loss: %.4f",
-                    epoch + 1,
-                    epochs,
-                    train_loss,
-                )
-
-        progress.end_phase()
+        progress.end_training()
         return metrics
 
-    def _train_epoch(self, dataloader: DataLoader, verbose: int = 1) -> float:
-        """Run a single training epoch."""
+    def _train_epoch(self, dataloader: DataLoader, progress: Progress) -> float:
+        """Run a single training epoch.
+
+        Args:
+            dataloader: Training data loader
+            progress: Progress tracker instance
+
+        Returns:
+            Average training loss for the epoch
+        """
         self._model.train()
 
-        progress = EpochProgressTracker(
-            verbose=verbose,
-            phase=Phase.TRAIN,
-            total_batches=len(dataloader),
-        )
+        progress.start_phase(Phase.TRAIN, total_batches=len(dataloader))
 
         for batch_data in dataloader:
             batch = move_to_device(batch_data, self._device)
@@ -186,10 +173,18 @@ class Battery:
             num_samples = get_batch_size(batch)
             progress.update({"loss": loss.item()}, num_samples)
 
-        return progress.close()
+        return progress.end_phase()
 
-    def _validate_epoch(self, dataloader: DataLoader, verbose: int = 1) -> float:
-        """Run a single validation epoch."""
+    def _validate_epoch(self, dataloader: DataLoader, progress: Progress) -> float:
+        """Run a single validation epoch.
+
+        Args:
+            dataloader: Validation data loader
+            progress: Progress tracker instance
+
+        Returns:
+            Average validation loss for the epoch
+        """
         if not self._event_handler.has_handler(Event.VALIDATION_STEP):
             msg = (
                 "No method decorated with @charge(Event.VALIDATION_STEP) found. "
@@ -199,11 +194,7 @@ class Battery:
 
         self._model.eval()
 
-        progress = EpochProgressTracker(
-            verbose=verbose,
-            phase=Phase.VALIDATION,
-            total_batches=len(dataloader),
-        )
+        progress.start_phase(Phase.VALIDATION, total_batches=len(dataloader))
 
         with torch.no_grad():
             for batch_data in dataloader:
@@ -216,7 +207,7 @@ class Battery:
 
                 progress.update({"loss": loss.item()}, num_samples)
 
-        return progress.close()
+        return progress.end_phase()
 
     def test(self, test_loader: DataLoader, verbose: int = 1) -> TestResult:
         """
@@ -241,11 +232,9 @@ class Battery:
 
         self._model.eval()
 
-        progress = EpochProgressTracker(
-            verbose=verbose,
-            phase=Phase.TEST,
-            total_batches=len(test_loader),
-        )
+        progress = ProgressFactory.create(verbose=verbose, total_epochs=1)
+        progress.start_epoch(0)
+        progress.start_phase(Phase.TEST, total_batches=len(test_loader))
 
         with torch.no_grad():
             for batch_data in test_loader:
@@ -258,7 +247,8 @@ class Battery:
 
                 progress.update({"loss": loss.item()}, num_samples)
 
-        test_loss = progress.close()
+        test_loss = progress.end_phase()
+        progress.end_epoch()
         return {"test_loss": test_loss}
 
     def predict(self, data_loader: DataLoader, verbose: int = 1) -> PredictResult:
@@ -285,11 +275,9 @@ class Battery:
         self._model.eval()
         predictions = []
 
-        progress = EpochProgressTracker(
-            verbose=verbose,
-            phase=Phase.PREDICT,
-            total_batches=len(data_loader),
-        )
+        progress = ProgressFactory.create(verbose=verbose, total_epochs=1)
+        progress.start_epoch(0)
+        progress.start_phase(Phase.PREDICT, total_batches=len(data_loader))
 
         with torch.no_grad():
             for _, batch_data in enumerate(data_loader):
@@ -302,5 +290,6 @@ class Battery:
                 # Update progress (no loss for predictions)
                 progress.update()
 
-        progress.close()
+        progress.end_phase()
+        progress.end_epoch()
         return {"predictions": predictions}
