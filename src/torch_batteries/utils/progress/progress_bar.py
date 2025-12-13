@@ -45,7 +45,7 @@ class BarProgress(Progress):
         self._pbar = None
 
         if total_batches > 0:
-            phase_name = "Train" if phase == Phase.TRAIN else "Val"
+            phase_name = self._current_phase.value.capitalize()
             epoch_num = self._current_epoch + 1
             desc = f"Epoch {epoch_num}/{self._total_epochs} [{phase_name}]"
             self._pbar = tqdm(
