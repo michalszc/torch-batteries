@@ -5,8 +5,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from torch_batteries.utils.progress import (
+    BarProgress,
     Phase,
-    ProgressBarProgress,
     ProgressFactory,
     ProgressMetrics,
     SilentProgress,
@@ -38,9 +38,9 @@ class TestProgressFactory:
         assert isinstance(progress, SilentProgress)
 
     def test_creates_progress_bar(self) -> None:
-        """Test ProgressFactory creates ProgressBarProgress for verbose=1."""
+        """Test ProgressFactory creates BarProgress for verbose=1."""
         progress = ProgressFactory.create(verbose=1, total_epochs=5)
-        assert isinstance(progress, ProgressBarProgress)
+        assert isinstance(progress, BarProgress)
 
     def test_creates_simple_progress(self) -> None:
         """Test ProgressFactory creates SimpleProgress for verbose=2."""
@@ -55,7 +55,7 @@ class TestProgressFactory:
     def test_default_values(self) -> None:
         """Test ProgressFactory uses default values."""
         progress = ProgressFactory.create(verbose=1)  # Explicitly set default
-        assert isinstance(progress, ProgressBarProgress)  # verbose=1 is default
+        assert isinstance(progress, BarProgress)  # verbose=1 is default
 
 
 class TestProgressFactoryCreate:
@@ -67,9 +67,9 @@ class TestProgressFactoryCreate:
         assert isinstance(progress, SilentProgress)
 
     def test_create_progress_bar(self) -> None:
-        """Test factory creates ProgressBarProgress for verbose=1."""
+        """Test factory creates BarProgress for verbose=1."""
         progress = ProgressFactory.create(verbose=1, total_epochs=5)
-        assert isinstance(progress, ProgressBarProgress)
+        assert isinstance(progress, BarProgress)
 
     def test_create_simple_progress(self) -> None:
         """Test factory creates SimpleProgress for verbose=2."""
@@ -138,18 +138,18 @@ class TestSilentProgress:
         mock_print.assert_not_called()
 
 
-class TestProgressBarProgress:
-    """Test cases for ProgressBarProgress class."""
+class TestBarProgress:
+    """Test cases for BarProgress class."""
 
     def test_init(self) -> None:
-        """Test ProgressBarProgress initialization."""
-        progress = ProgressBarProgress(total_epochs=5)
+        """Test BarProgress initialization."""
+        progress = BarProgress(total_epochs=5)
         assert progress is not None
 
     @patch("builtins.print")
     def test_start_epoch_prints_header(self, mock_print: MagicMock) -> None:
         """Test start_epoch prints epoch header."""
-        progress = ProgressBarProgress(total_epochs=5)
+        progress = BarProgress(total_epochs=5)
         progress.start_epoch(2)
         mock_print.assert_called_once_with("Epoch 3/5")
 
@@ -159,7 +159,7 @@ class TestProgressBarProgress:
         mock_pbar = MagicMock()
         mock_tqdm.return_value = mock_pbar
 
-        progress = ProgressBarProgress(total_epochs=1)
+        progress = BarProgress(total_epochs=1)
         progress.start_phase(Phase.TRAIN, total_batches=10)
 
         mock_tqdm.assert_called_once_with(
@@ -173,7 +173,7 @@ class TestProgressBarProgress:
     @patch("torch_batteries.utils.progress.progress_bar.tqdm")
     def test_start_phase_no_bar_zero_batches(self, mock_tqdm: MagicMock) -> None:
         """Test start_phase doesn't create bar for zero batches."""
-        progress = ProgressBarProgress(total_epochs=1)
+        progress = BarProgress(total_epochs=1)
         progress.start_phase(Phase.TRAIN, total_batches=0)
         mock_tqdm.assert_not_called()
 
@@ -183,7 +183,7 @@ class TestProgressBarProgress:
         mock_pbar = MagicMock()
         mock_tqdm.return_value = mock_pbar
 
-        progress = ProgressBarProgress(total_epochs=1)
+        progress = BarProgress(total_epochs=1)
         progress.start_phase(Phase.TRAIN, total_batches=5)
         progress.update({"loss": 0.5}, 32)
 
@@ -196,7 +196,7 @@ class TestProgressBarProgress:
         mock_pbar = MagicMock()
         mock_tqdm.return_value = mock_pbar
 
-        progress = ProgressBarProgress(total_epochs=1)
+        progress = BarProgress(total_epochs=1)
         progress.start_phase(Phase.VALIDATION, total_batches=3)
         progress.update({"loss": 0.3}, 16)
 
@@ -208,7 +208,7 @@ class TestProgressBarProgress:
         mock_pbar = MagicMock()
         mock_tqdm.return_value = mock_pbar
 
-        progress = ProgressBarProgress(total_epochs=1)
+        progress = BarProgress(total_epochs=1)
         progress.start_phase(Phase.TRAIN, total_batches=2)
         progress.update({"loss": 0.4}, 10)
         avg_loss = progress.end_phase()
@@ -219,14 +219,14 @@ class TestProgressBarProgress:
     @patch("builtins.print")
     def test_end_epoch_no_output(self, mock_print: MagicMock) -> None:
         """Test end_epoch produces no output for verbose=1."""
-        progress = ProgressBarProgress(total_epochs=1)
+        progress = BarProgress(total_epochs=1)
         progress.end_epoch(0.5, 0.3)
         mock_print.assert_not_called()
 
     @patch("builtins.print")
     def test_end_training_no_output(self, mock_print: MagicMock) -> None:
         """Test end_training produces no output for verbose=1."""
-        progress = ProgressBarProgress(total_epochs=1)
+        progress = BarProgress(total_epochs=1)
         progress.end_training()
         mock_print.assert_not_called()
 

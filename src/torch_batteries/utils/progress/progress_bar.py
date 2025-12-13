@@ -8,7 +8,7 @@ from .base import Progress
 from .types import Phase, ProgressMetrics
 
 
-class ProgressBarProgress(Progress):
+class BarProgress(Progress):
     """Progress tracker that displays progress bars (verbose=1)."""
 
     __slots__ = (

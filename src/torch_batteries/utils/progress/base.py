@@ -14,6 +14,9 @@ class Progress(ABC):
 
         Args:
             epoch: The epoch number (0-indexed).
+
+        Returns:
+            None
         """
 
     @abstractmethod
@@ -21,8 +24,12 @@ class Progress(ABC):
         """Start a new phase (train, validation, test, predict).
 
         Args:
-            phase: The training phase.
+            phase: The current phase of training (e.g., train, validation,
+                   test, predict).
             total_batches: Total number of batches in the phase.
+
+        Returns:
+            None
         """
 
     @abstractmethod
@@ -34,6 +41,9 @@ class Progress(ABC):
         Args:
             metrics: Optional metrics dictionary containing 'loss' and other metrics.
             batch_size: Optional batch size for averaging metrics.
+
+        Returns:
+            None
         """
 
     @abstractmethod
@@ -51,8 +61,15 @@ class Progress(ABC):
         Args:
             train_loss: Training loss for the epoch.
             val_loss: Optional validation loss for the epoch.
+
+        Returns:
+            None
         """
 
     @abstractmethod
     def end_training(self) -> None:
-        """End the training phase and display total time."""
+        """End the training phase and display total time.
+
+        Returns:
+            None
+        """
