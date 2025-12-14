@@ -261,7 +261,7 @@ class TestBattery:
     @patch("torch_batteries.utils.progress.base.Progress.end_phase")
     def test_predict_basic_functionality(self, mock_end_phase: MagicMock) -> None:
         """Test basic predict functionality."""
-        mock_end_phase.return_value = 0.0
+        mock_end_phase.return_value = float("nan")  # Predict doesn't return loss
 
         model = SimpleModel()
         battery = Battery(model)
