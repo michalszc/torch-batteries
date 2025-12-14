@@ -76,7 +76,7 @@ class SimpleProgress(Progress):
             case Phase.TEST:
                 self._losses[Phase.TEST] = avg_loss
             case Phase.PREDICT:
-                self._losses[Phase.PREDICT] = 0.0
+                self._losses[Phase.PREDICT] = float("nan")
         return avg_loss
 
     def end_epoch(self) -> None:
