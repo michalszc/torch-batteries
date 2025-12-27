@@ -76,10 +76,11 @@ class TestBarProgress:
         progress = BarProgress(total_epochs=1)
         progress.start_phase(Phase.TRAIN, total_batches=2)
         progress.update({"loss": 0.4}, 10)
-        avg_loss = progress.end_phase()
+        avg_metrics = progress.end_phase()
 
         mock_pbar.close.assert_called_once()
-        assert avg_loss == 0.4
+        assert isinstance(avg_metrics, dict)
+        assert avg_metrics["loss"] == 0.4
 
     @patch("builtins.print")
     def test_end_epoch_no_output(self, mock_print: MagicMock) -> None:
