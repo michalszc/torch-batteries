@@ -25,3 +25,11 @@ Designed to reduce boilerplate and standardize experiment code.
 ```bash
 pip install torch-batteries
 ```
+
+## Examples
+
+Explore practical examples demonstrating torch-batteries features:
+
+| Example | Description | Notebook | Colab |
+|---------|-------------|----------|-------|
+| **Function Fitting with MLP** | Train a neural network to approximate a polynomial function using the event-driven training approach | [function_fitting.ipynb](notebooks/function_fitting.ipynb) | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/michalszc/torch-batteries/blob/master/notebooks/function_fitting.ipynb) |
