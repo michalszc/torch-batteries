@@ -7,7 +7,7 @@ import torch
 from torch import nn, optim
 from torch.utils.data import DataLoader, TensorDataset
 
-from torch_batteries.events import Event, charge
+from torch_batteries.events import Event, EventContext, charge
 from torch_batteries.trainer import Battery
 
 
@@ -22,25 +22,29 @@ class SimpleModel(nn.Module):
         return self.linear(x)  # type: ignore[no-any-return]
 
     @charge(Event.TRAIN_STEP)
-    def training_step(self, batch: tuple[torch.Tensor, torch.Tensor]) -> torch.Tensor:
+    def training_step(self, context: EventContext) -> torch.Tensor:
+        batch = context["batch"]
         x, y = batch
         pred = self(x)
         return nn.functional.mse_loss(pred, y)
 
     @charge(Event.VALIDATION_STEP)
-    def validation_step(self, batch: tuple[torch.Tensor, torch.Tensor]) -> torch.Tensor:
+    def validation_step(self, context: EventContext) -> torch.Tensor:
+        batch = context["batch"]
         x, y = batch
         pred = self(x)
         return nn.functional.mse_loss(pred, y)
 
     @charge(Event.TEST_STEP)
-    def test_step(self, batch: tuple[torch.Tensor, torch.Tensor]) -> torch.Tensor:
+    def test_step(self, context: EventContext) -> torch.Tensor:
+        batch = context["batch"]
         x, y = batch
         pred = self(x)
         return nn.functional.mse_loss(pred, y)
 
     @charge(Event.PREDICT_STEP)
-    def predict_step(self, batch: tuple[torch.Tensor, torch.Tensor]) -> torch.Tensor:
+    def predict_step(self, context: EventContext) -> torch.Tensor:
+        batch = context["batch"]
         x = batch[0] if isinstance(batch, (list, tuple)) else batch
         return self(x)  # type: ignore[no-any-return]
 
@@ -184,15 +188,14 @@ class TestBattery:
         class ModelWithoutValidationStep(nn.Module):
             def __init__(self) -> None:
                 super().__init__()
-                self.linear = nn.Linear(10, 1)  # Match input size\n
+                self.linear = nn.Linear(10, 1)  # Match input size
 
             def forward(self, x: torch.Tensor) -> torch.Tensor:
                 return self.linear(x)  # type: ignore[no-any-return]
 
             @charge(Event.TRAIN_STEP)
-            def training_step(
-                self, batch: tuple[torch.Tensor, torch.Tensor]
-            ) -> torch.Tensor:
+            def training_step(self, context: EventContext) -> torch.Tensor:
+                batch = context["batch"]
                 x, y = batch
                 pred = self(x)
                 return nn.functional.mse_loss(pred, y)

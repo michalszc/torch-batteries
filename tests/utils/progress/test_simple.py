@@ -35,9 +35,10 @@ class TestSimpleProgress:
         progress.update({"loss": 0.5}, 10)
         progress.update({"loss": 0.3}, 20)
 
-        avg_loss = progress.end_phase()
+        avg_metrics = progress.end_phase()
         expected_avg = (0.5 * 10 + 0.3 * 20) / (10 + 20)
-        assert abs(avg_loss - expected_avg) < 1e-6
+        assert isinstance(avg_metrics, dict)
+        assert abs(avg_metrics["loss"] - expected_avg) < 1e-6
 
     @patch("builtins.print")
     @patch("time.time")

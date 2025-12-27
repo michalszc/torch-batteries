@@ -35,16 +35,17 @@ class TestSilentProgress:
         progress.update({"loss": 0.5}, 10)
         progress.update({"loss": 0.3}, 20)
 
-        avg_loss = progress.end_phase()
+        avg_metrics = progress.end_phase()
         expected_avg = (0.5 * 10 + 0.3 * 20) / (10 + 20)
-        assert abs(avg_loss - expected_avg) < 1e-6
+        assert isinstance(avg_metrics, dict)
+        assert abs(avg_metrics["loss"] - expected_avg) < 1e-6
 
     def test_end_phase_returns_zero_no_samples(self) -> None:
         """Test end_phase returns 0 when no samples processed."""
         progress = SilentProgress()
         progress.start_phase(Phase.TRAIN, total_batches=1)
-        avg_loss = progress.end_phase()
-        assert avg_loss == 0.0
+        avg_metrics = progress.end_phase()
+        assert avg_metrics == {}
 
     @patch("builtins.print")
     def test_end_epoch_no_output(self, mock_print: MagicMock) -> None:

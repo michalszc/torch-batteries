@@ -1,7 +1,7 @@
 """Types for progress tracking utilities."""
 
 from enum import Enum
-from typing import TypedDict
+from typing import NotRequired, TypedDict
 
 
 class Phase(Enum):
@@ -14,6 +14,10 @@ class Phase(Enum):
 
 
 class ProgressMetrics(TypedDict, total=False):
-    """Metrics for progress tracking."""
+    """Metrics for progress tracking.
 
-    loss: float
+    Can contain loss and any additional metric names.
+    All values should be floats.
+    """
+
+    loss: NotRequired[float]
