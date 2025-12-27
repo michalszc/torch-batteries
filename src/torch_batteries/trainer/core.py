@@ -1,5 +1,8 @@
 """Battery trainer class for torch-batteries."""
 
+from collections.abc import Callable
+from typing import cast
+
 import torch
 from torch import nn
 from torch.utils.data import DataLoader
@@ -9,7 +12,11 @@ from torch_batteries.trainer.types import PredictResult, TestResult, TrainResult
 from torch_batteries.utils.batch import get_batch_size
 from torch_batteries.utils.device import get_device, move_to_device
 from torch_batteries.utils.logging import get_logger
+from torch_batteries.utils.metrics import calculate_metrics
 from torch_batteries.utils.progress import Phase, Progress, ProgressFactory
+from torch_batteries.utils.progress.types import (  # noqa: TC001
+    ProgressMetrics,
+)
 
 logger = get_logger("trainer")
 
@@ -25,6 +32,8 @@ class Battery:
         model: PyTorch model (nn.Module)
         device: PyTorch device (cpu, cuda, etc.). If 'auto', detects available device.
         optimizer: Optional optimizer for training
+        metrics: Optional dict of metric functions {name: callable(pred, target)}.
+                These metrics are automatically calculated for each batch.
 
     Example:
         ```python
@@ -55,17 +64,20 @@ class Battery:
         ```
     """
 
-    __slots__ = ("_device", "_event_handler", "_model", "_optimizer")
+    __slots__ = ("_device", "_event_handler", "_metrics", "_model", "_optimizer")
 
     def __init__(
         self,
         model: nn.Module,
         device: str | torch.device = "auto",
         optimizer: torch.optim.Optimizer | None = None,
+        metrics: dict[str, Callable[[torch.Tensor, torch.Tensor], float | torch.Tensor]]
+        | None = None,
     ):
         self._device = get_device(device)
         self._model = model.to(self._device)
         self._optimizer = optimizer
+        self._metrics = metrics or {}
         self._event_handler = EventHandler(self._model)
 
     @property
@@ -87,6 +99,22 @@ class Battery:
     def optimizer(self, value: torch.optim.Optimizer | None) -> None:
         """Set the optimizer."""
         self._optimizer = value
+
+    @property
+    def metrics(
+        self,
+    ) -> dict[str, Callable[[torch.Tensor, torch.Tensor], float | torch.Tensor]]:
+        """Get the metrics dictionary."""
+        return self._metrics
+
+    @metrics.setter
+    def metrics(
+        self,
+        value: dict[str, Callable[[torch.Tensor, torch.Tensor], float | torch.Tensor]]
+        | None,
+    ) -> None:
+        """Set the metrics dictionary."""
+        self._metrics = value or {}
 
     def train(
         self,
@@ -121,7 +149,7 @@ class Battery:
             msg = "Optimizer is required for training."
             raise ValueError(msg)
 
-        metrics: TrainResult = {
+        results: TrainResult = {
             "train_loss": [],
             "val_loss": [],
         }
@@ -131,20 +159,37 @@ class Battery:
         for epoch in range(epochs):
             progress.start_epoch(epoch)
 
-            train_loss = self._train_epoch(train_loader, progress)
-            metrics["train_loss"].append(train_loss)
+            train_metrics = self._train_epoch(train_loader, progress)
+            results["train_loss"].append(train_metrics["loss"])
 
-            val_loss = None
+            for key, value in train_metrics.items():
+                if key != "loss":
+                    if "train_metrics" not in results:
+                        results["train_metrics"] = {}
+                    if key not in results["train_metrics"]:
+                        results["train_metrics"][key] = []
+                    results["train_metrics"][key].append(value)
+
             if val_loader:
-                val_loss = self._validate_epoch(val_loader, progress)
-                metrics["val_loss"].append(val_loss)
+                val_metrics = self._validate_epoch(val_loader, progress)
+                results["val_loss"].append(val_metrics["loss"])
+
+                for key, value in val_metrics.items():
+                    if key != "loss":
+                        if "val_metrics" not in results:
+                            results["val_metrics"] = {}
+                        if key not in results["val_metrics"]:
+                            results["val_metrics"][key] = []
+                        results["val_metrics"][key].append(value)
 
             progress.end_epoch()
 
         progress.end_training()
-        return metrics
+        return results
 
-    def _train_epoch(self, dataloader: DataLoader, progress: Progress) -> float:
+    def _train_epoch(
+        self, dataloader: DataLoader, progress: Progress
+    ) -> dict[str, float]:
         """Run a single training epoch.
 
         Args:
@@ -152,7 +197,7 @@ class Battery:
             progress: Progress tracker instance
 
         Returns:
-            Average training loss for the epoch
+            Dictionary with average loss and any additional metrics for the epoch
         """
         self._model.train()
 
@@ -164,18 +209,38 @@ class Battery:
             # Optimizer is guaranteed to be non-None by train() method
             self._optimizer.zero_grad()  # type: ignore[union-attr]
 
-            loss = self._event_handler.call(Event.TRAIN_STEP, batch)
-            assert loss is not None, "Training step must return a loss value."
+            result = self._event_handler.call(Event.TRAIN_STEP, batch)
+
+            # Handle flexible return: either loss or (loss, metrics_dict)
+            step_metrics = {}
+            if isinstance(result, tuple):
+                loss, step_metrics = result
+                assert loss is not None, "Training step must return a loss value."
+            else:
+                loss = result
+                assert loss is not None, "Training step must return a loss value."
 
             loss.backward()
             self._optimizer.step()  # type: ignore[union-attr]
 
+            init_metrics = {}
+            if self._metrics and len(batch) >= 2:
+                with torch.no_grad():
+                    pred = self._model(batch[0])
+                    target = batch[1]
+                    init_metrics = calculate_metrics(self._metrics, pred, target)
+
+            batch_metrics = {"loss": loss.item(), **init_metrics, **step_metrics}
+
             num_samples = get_batch_size(batch)
-            progress.update({"loss": loss.item()}, num_samples)
+            progress.update(cast("ProgressMetrics", batch_metrics), num_samples)
 
-        return progress.end_phase()
+        avg_metrics = progress.end_phase()
+        return avg_metrics if isinstance(avg_metrics, dict) else {"loss": avg_metrics}
 
-    def _validate_epoch(self, dataloader: DataLoader, progress: Progress) -> float:
+    def _validate_epoch(
+        self, dataloader: DataLoader, progress: Progress
+    ) -> dict[str, float]:
         """Run a single validation epoch.
 
         Args:
@@ -183,7 +248,7 @@ class Battery:
             progress: Progress tracker instance
 
         Returns:
-            Average validation loss for the epoch
+            Dictionary with average loss and any additional metrics for the epoch
         """
         if not self._event_handler.has_handler(Event.VALIDATION_STEP):
             msg = (
@@ -200,14 +265,30 @@ class Battery:
             for batch_data in dataloader:
                 batch = move_to_device(batch_data, self._device)
 
-                loss = self._event_handler.call(Event.VALIDATION_STEP, batch)
-                assert loss is not None, "Validation step must return a loss value."
+                result = self._event_handler.call(Event.VALIDATION_STEP, batch)
+
+                # Handle flexible return: either loss or (loss, metrics_dict)
+                step_metrics = {}
+                if isinstance(result, tuple):
+                    loss, step_metrics = result
+                    assert loss is not None, "Validation step must return a loss value."
+                else:
+                    loss = result
+                    assert loss is not None, "Validation step must return a loss value."
+
+                init_metrics = {}
+                if self._metrics and len(batch) >= 2:
+                    pred = self._model(batch[0])
+                    target = batch[1]
+                    init_metrics = calculate_metrics(self._metrics, pred, target)
+
+                batch_metrics = {"loss": loss.item(), **init_metrics, **step_metrics}
 
                 num_samples = get_batch_size(batch)
+                progress.update(cast("ProgressMetrics", batch_metrics), num_samples)
 
-                progress.update({"loss": loss.item()}, num_samples)
-
-        return progress.end_phase()
+        avg_metrics = progress.end_phase()
+        return avg_metrics if isinstance(avg_metrics, dict) else {"loss": avg_metrics}
 
     def test(self, test_loader: DataLoader, verbose: int = 1) -> TestResult:
         """
@@ -240,16 +321,43 @@ class Battery:
             for batch_data in test_loader:
                 batch = move_to_device(batch_data, self._device)
 
-                loss = self._event_handler.call(Event.TEST_STEP, batch)
-                assert loss is not None, "Test step must return a loss value."
+                result = self._event_handler.call(Event.TEST_STEP, batch)
+
+                # Handle flexible return: either loss or (loss, metrics_dict)
+                step_metrics = {}
+                if isinstance(result, tuple):
+                    loss, step_metrics = result
+                    assert loss is not None, "Test step must return a loss value."
+                else:
+                    loss = result
+                    assert loss is not None, "Test step must return a loss value."
+
+                init_metrics = {}
+                if self._metrics and len(batch) >= 2:
+                    pred = self._model(batch[0])
+                    target = batch[1]
+                    init_metrics = calculate_metrics(self._metrics, pred, target)
+
+                batch_metrics = {"loss": loss.item(), **init_metrics, **step_metrics}
 
                 num_samples = get_batch_size(batch)
+                progress.update(cast("ProgressMetrics", batch_metrics), num_samples)
 
-                progress.update({"loss": loss.item()}, num_samples)
-
-        test_loss = progress.end_phase()
+        test_metrics = progress.end_phase()
         progress.end_epoch()
-        return {"test_loss": test_loss}
+
+        # Format results with test_loss and test_metrics
+        if isinstance(test_metrics, dict):
+            results: TestResult = {"test_loss": test_metrics["loss"]}
+
+            if len(test_metrics) > 1:  # Has metrics beyond just loss
+                results["test_metrics"] = {
+                    k: v for k, v in test_metrics.items() if k != "loss"
+                }
+        else:
+            results = {"test_loss": test_metrics}
+
+        return results
 
     def predict(self, data_loader: DataLoader, verbose: int = 1) -> PredictResult:
         """
