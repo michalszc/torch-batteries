@@ -50,11 +50,100 @@ class EventContext(TypedDict, total=False):
 class Event(Enum):
     """Events that can be used with the @charge decorator.
 
-    Events are triggered at different points during training/testing/prediction:
-    - BEFORE_* events: Called before the operation starts
-    - AFTER_* events: Called after the operation completes
-    - *_STEP events: Called for each batch
-    - *_EPOCH events: Called for each epoch
+    Events are triggered at different points during training/testing/prediction.
+    Each event receives an `EventContext` with different available fields.
+
+    ## Training Events
+
+    - `BEFORE_TRAIN`: Called before training starts.
+        - **Context**: `optimizer`
+
+    - `AFTER_TRAIN`: Called after training completes.
+        - **Context**: `optimizer`, `epoch`, `train_metrics`, `val_metrics` (if validation ran)
+
+    - `BEFORE_TRAIN_EPOCH`: Called before each training epoch.
+        - **Context**: `optimizer`, `epoch`
+
+    - `AFTER_TRAIN_EPOCH`: Called after each training epoch.
+        - **Context**: `optimizer`, `epoch`, `train_metrics`
+
+    - `BEFORE_TRAIN_STEP`: Called before each training batch.
+        - **Context**: `optimizer`, `batch`, `batch_idx`, `epoch`
+
+    - `TRAIN_STEP`: Called for each training batch (must return loss).
+        - **Context**: `optimizer`, `batch`, `batch_idx`, `epoch`
+
+    - `AFTER_TRAIN_STEP`: Called after each training batch.
+        - **Context**: `optimizer`, `batch`, `batch_idx`, `epoch`, `loss`, `train_metrics`
+
+    ## Validation Events
+
+    - `BEFORE_VALIDATION`: Called before validation starts.
+        - **Context**: `optimizer`, `epoch`, `train_metrics`
+
+    - `AFTER_VALIDATION`: Called after validation completes.
+        - **Context**: `optimizer`, `epoch`, `train_metrics`, `val_metrics`
+
+    - `BEFORE_VALIDATION_EPOCH`: Called before each validation epoch.
+        - **Context**: `epoch`
+
+    - `AFTER_VALIDATION_EPOCH`: Called after each validation epoch.
+        - **Context**: `epoch`, `val_metrics`
+
+    - `BEFORE_VALIDATION_STEP`: Called before each validation batch.
+        - **Context**: `batch`, `batch_idx`, `epoch`
+
+    - `VALIDATION_STEP`: Called for each validation batch (must return loss).
+        - **Context**: `batch`, `batch_idx`, `epoch`
+
+    - `AFTER_VALIDATION_STEP`: Called after each validation batch.
+        - **Context**: `batch`, `batch_idx`, `epoch`, `loss`, `val_metrics`
+
+    ## Test Events
+
+    - `BEFORE_TEST`: Called before testing starts.
+        - **Context**: `optimizer`
+
+    - `AFTER_TEST`: Called after testing completes.
+        - **Context**: `optimizer`, `loss`, `test_metrics`
+
+    - `BEFORE_TEST_EPOCH`: Called before test epoch.
+        - **Context**: `optimizer`, `epoch`
+
+    - `AFTER_TEST_EPOCH`: Called after test epoch.
+        - **Context**: `optimizer`, `epoch`, `loss`, `test_metrics`
+
+    - `BEFORE_TEST_STEP`: Called before each test batch.
+        - **Context**: `optimizer`, `batch`, `batch_idx`, `epoch`
+
+    - `TEST_STEP`: Called for each test batch (must return loss).
+        - **Context**: `optimizer`, `batch`, `batch_idx`, `epoch`
+
+    - `AFTER_TEST_STEP`: Called after each test batch.
+        - **Context**: `optimizer`, `batch`, `batch_idx`, `epoch`, `loss`, `test_metrics`
+
+    ## Prediction Events
+
+    - `BEFORE_PREDICT`: Called before prediction starts.
+        - **Context**: `optimizer`
+
+    - `AFTER_PREDICT`: Called after prediction completes.
+        - **Context**: `optimizer`, `predictions`
+
+    - `BEFORE_PREDICT_EPOCH`: Called before prediction epoch.
+        - **Context**: `optimizer`, `epoch`
+
+    - `AFTER_PREDICT_EPOCH`: Called after prediction epoch.
+        - **Context**: `optimizer`, `epoch`, `predictions`
+
+    - `BEFORE_PREDICT_STEP`: Called before each prediction batch.
+        - **Context**: `optimizer`, `batch`, `batch_idx`, `epoch`
+
+    - `PREDICT_STEP`: Called for each prediction batch (must return predictions).
+        - **Context**: `optimizer`, `batch`, `batch_idx`, `epoch`
+
+    - `AFTER_PREDICT_STEP`: Called after each prediction batch.
+        - **Context**: `optimizer`, `batch`, `batch_idx`, `epoch`, `predictions`
     """
 
     # Training lifecycle events
