@@ -7,6 +7,14 @@ __author__ = ["Michal Szczygiel", "Arkadiusz Paterak", "Antoni Zięciak"]
 
 # Import main components
 from .events import Event, EventContext, charge
-from .trainer import Battery
+from .trainer import Battery, PredictResult, TestResult, TrainResult
 
-__all__ = ["Battery", "Event", "EventContext", "charge"]
+__all__ = [
+    "Battery",
+    "Event",
+    "EventContext",
+    "PredictResult",
+    "TestResult",
+    "TrainResult",
+    "charge",
+]
