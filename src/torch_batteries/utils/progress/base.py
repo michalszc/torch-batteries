@@ -44,11 +44,11 @@ class Progress(ABC):
         """
 
     @abstractmethod
-    def end_phase(self) -> float:
-        """End the current phase and return average loss.
+    def end_phase(self) -> float | dict[str, float]:
+        """End the current phase and return average metrics.
 
         Returns:
-            Average loss across all batches, or 0.0 if no samples processed.
+            Average loss (float) or dictionary of average metrics including loss.
         """
 
     @abstractmethod

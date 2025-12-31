@@ -1,5 +1,7 @@
 """Silent progress tracker (verbose=0)."""
 
+from typing import cast
+
 from .base import Progress
 from .types import Phase, ProgressMetrics
 
@@ -9,10 +11,8 @@ class SilentProgress(Progress):
 
     __slots__ = (
         "_current_phase",
-        "_total_loss",
+        "_total_metrics",
         "_total_samples",
-        "_train_loss",
-        "_val_loss",
     )
 
     def __init__(self, total_epochs: int = 1) -> None:  # noqa: ARG002
@@ -21,11 +21,9 @@ class SilentProgress(Progress):
         Args:
             total_epochs: Total number of epochs (unused, for interface compatibility).
         """
-        self._total_loss = 0.0
+        self._total_metrics: dict[str, float] = {}
         self._total_samples = 0
         self._current_phase: Phase | None = None
-        self._train_loss = 0.0
-        self._val_loss: float | None = None
 
     def start_epoch(self, epoch: int) -> None:
         """Start a new epoch (silent).
@@ -47,22 +45,28 @@ class SilentProgress(Progress):
             total_batches: Total number of batches (unused).
         """
         self._current_phase = phase
-        self._total_loss = 0.0
+        self._total_metrics = {}
         self._total_samples = 0
 
     def update(
         self, metrics: ProgressMetrics | None = None, batch_size: int | None = None
     ) -> None:
         """Update progress after processing a batch."""
-        if metrics and "loss" in metrics and batch_size is not None:
-            self._total_loss += metrics["loss"] * batch_size
+        if metrics and batch_size is not None:
+            for key, value in metrics.items():
+                if key not in self._total_metrics:
+                    self._total_metrics[key] = 0.0
+                self._total_metrics[key] += cast("float", value) * batch_size
             self._total_samples += batch_size
 
-    def end_phase(self) -> float:
-        """End the current phase and return average loss."""
-        return (
-            self._total_loss / self._total_samples if self._total_samples > 0 else 0.0
-        )
+    def end_phase(self) -> dict[str, float]:
+        """End the current phase and return average metrics."""
+        if self._total_samples > 0:
+            return {
+                key: total / self._total_samples
+                for key, total in self._total_metrics.items()
+            }
+        return {}
 
     def end_epoch(self) -> None:
         """End the current epoch (silent)."""

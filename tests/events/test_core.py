@@ -3,7 +3,7 @@
 import torch
 from torch import nn
 
-from torch_batteries.events import Event, EventHandler, charge
+from torch_batteries.events import Event, EventContext, EventHandler, charge
 
 
 class TestChargeDecorator:
@@ -13,7 +13,7 @@ class TestChargeDecorator:
         """Test that charge decorator sets _torch_batteries_event attribute."""
 
         @charge(Event.TRAIN_STEP)
-        def training_step(self: nn.Module, batch: torch.Tensor) -> torch.Tensor:
+        def training_step(self: nn.Module, context: EventContext) -> torch.Tensor:
             return torch.tensor(1.0)
 
         assert hasattr(training_step, "_torch_batteries_event")
@@ -22,13 +22,14 @@ class TestChargeDecorator:
     def test_charge_decorator_preserves_function(self) -> None:
         """Test that charge decorator preserves original function."""
 
-        def original_func(self: nn.Module, batch: str) -> str:
+        def original_func(self: nn.Module, context: EventContext) -> str:
             return "original_result"
 
         decorated = charge(Event.VALIDATION_STEP)(original_func)
 
         # Function should still work
-        assert decorated(nn.Module(), "test_batch") == "original_result"
+        context: EventContext = {}
+        assert decorated(nn.Module(), context) == "original_result"
         assert decorated._torch_batteries_event == Event.VALIDATION_STEP  # type: ignore[attr-defined] # noqa: SLF001
 
     def test_charge_decorator_with_different_events(self) -> None:
@@ -54,11 +55,11 @@ class DummyModel(nn.Module):
         self.linear = nn.Linear(1, 1)
 
     @charge(Event.TRAIN_STEP)
-    def training_step(self, batch: torch.Tensor) -> torch.Tensor:
+    def training_step(self, context: EventContext) -> torch.Tensor:
         return torch.tensor(0.0)
 
     @charge(Event.VALIDATION_STEP)
-    def validation_step(self, batch: torch.Tensor) -> torch.Tensor:
+    def validation_step(self, context: EventContext) -> torch.Tensor:
         return torch.tensor(0.3)
 
     def regular_method(self, batch: str) -> str:
@@ -83,7 +84,8 @@ class TestEventHandler:
         model = DummyModel()
         handler = EventHandler(model)
 
-        result = handler.call(Event.TRAIN_STEP, "test_batch")
+        context: EventContext = {"batch": "test_batch"}
+        result = handler.call(Event.TRAIN_STEP, context)
 
         assert torch.equal(result, torch.tensor(0.0))
 
@@ -92,7 +94,8 @@ class TestEventHandler:
         model = DummyModel()
         handler = EventHandler(model)
 
-        result = handler.call(Event.TEST_STEP, "test_batch")
+        context: EventContext = {"batch": "test_batch"}
+        result = handler.call(Event.TEST_STEP, context)
         assert result is None
 
     def test_has_handler_returns_correct_boolean(self) -> None:
@@ -111,20 +114,22 @@ class TestEventHandler:
         class TestModel(nn.Module):
             def __init__(self) -> None:
                 super().__init__()
-                self.call_args: dict[str, torch.Tensor] = {}
+                self.call_context: EventContext = {}
 
             @charge(Event.TRAIN_STEP)
-            def training_step(self, batch: dict) -> torch.Tensor:
-                self.call_args = batch
+            def training_step(self, context: EventContext) -> torch.Tensor:
+                self.call_context = context
                 return torch.tensor(1.0)
 
         model = TestModel()
         handler = EventHandler(model)
 
-        test_batch = {"input": torch.randn(2, 3), "target": torch.randn(2, 1)}
-        handler.call(Event.TRAIN_STEP, test_batch)
+        test_context: EventContext = {
+            "batch": {"input": torch.randn(2, 3), "target": torch.randn(2, 1)}
+        }
+        handler.call(Event.TRAIN_STEP, test_context)
 
-        assert model.call_args == test_batch
+        assert model.call_context == test_context
 
     def test_empty_model_has_no_handlers(self) -> None:
         """Test that model with no decorated methods has no handlers."""

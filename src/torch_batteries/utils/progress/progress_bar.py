@@ -1,6 +1,6 @@
 """Progress bar tracker (verbose=1)."""
 
-from typing import Any
+from typing import Any, cast
 
 from tqdm import tqdm
 
@@ -16,7 +16,7 @@ class BarProgress(Progress):
         "_current_phase",
         "_pbar",
         "_total_epochs",
-        "_total_loss",
+        "_total_metrics",
         "_total_samples",
     )
 
@@ -30,7 +30,7 @@ class BarProgress(Progress):
         self._current_epoch = 0
         self._current_phase: Phase | None = None
         self._pbar: Any | None = None
-        self._total_loss = 0.0
+        self._total_metrics: dict[str, float] = {}
         self._total_samples = 0
 
     def start_epoch(self, epoch: int) -> None:
@@ -40,7 +40,7 @@ class BarProgress(Progress):
     def start_phase(self, phase: Phase, total_batches: int = 0) -> None:
         """Start a new phase with progress bar."""
         self._current_phase = phase
-        self._total_loss = 0.0
+        self._total_metrics = {}
         self._total_samples = 0
         self._pbar = None
 
@@ -58,25 +58,36 @@ class BarProgress(Progress):
         self, metrics: ProgressMetrics | None = None, batch_size: int | None = None
     ) -> None:
         """Update progress bar with metrics."""
-        if metrics and "loss" in metrics and batch_size is not None:
-            self._total_loss += metrics["loss"] * batch_size
+        if metrics and batch_size is not None:
+            for key, value in metrics.items():
+                if key not in self._total_metrics:
+                    self._total_metrics[key] = 0.0
+                self._total_metrics[key] += cast("float", value) * batch_size
             self._total_samples += batch_size
 
         if self._pbar:
             if self._total_samples > 0:
-                avg_loss = self._total_loss / self._total_samples
-                self._pbar.set_postfix_str(f"Loss={avg_loss:.4f}")
+                # Display all metrics in progress bar
+                postfix_parts = []
+                for key, total_value in self._total_metrics.items():
+                    avg_value = total_value / self._total_samples
+                    metric_name = key.capitalize()
+                    postfix_parts.append(f"{metric_name}={avg_value:.4f}")
+                self._pbar.set_postfix_str(", ".join(postfix_parts))
             self._pbar.update(1)
 
-    def end_phase(self) -> float:
+    def end_phase(self) -> dict[str, float]:
         """End the current phase and close progress bar."""
         if self._pbar:
             self._pbar.close()
             self._pbar = None
 
-        return (
-            self._total_loss / self._total_samples if self._total_samples > 0 else 0.0
-        )
+        if self._total_samples > 0:
+            return {
+                key: total / self._total_samples
+                for key, total in self._total_metrics.items()
+            }
+        return {}
 
     def end_epoch(self) -> None:
         """End the current epoch (no output for verbose=1)."""

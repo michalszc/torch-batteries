@@ -2,11 +2,19 @@
 torch-batteries: A lightweight Python package for PyTorch workflow abstractions.
 """
 
-__version__ = "0.2.1"
+__version__ = "0.3.0"
 __author__ = ["Michal Szczygiel", "Arkadiusz Paterak", "Antoni Zięciak"]
 
 # Import main components
-from .events import Event, charge
-from .trainer import Battery
+from .events import Event, EventContext, charge
+from .trainer import Battery, PredictResult, TestResult, TrainResult
 
-__all__ = ["Battery", "Event", "charge"]
+__all__ = [
+    "Battery",
+    "Event",
+    "EventContext",
+    "PredictResult",
+    "TestResult",
+    "TrainResult",
+    "charge",
+]
