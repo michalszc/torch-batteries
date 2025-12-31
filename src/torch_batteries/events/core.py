@@ -144,7 +144,7 @@ class Event(Enum):
 
     - `AFTER_PREDICT_STEP`: Called after each prediction batch.
         - **Context**: `optimizer`, `batch`, `batch_idx`, `epoch`, `predictions`
-    """
+    """  # noqa: E501
 
     # Training lifecycle events
     BEFORE_TRAIN = "before_train"
