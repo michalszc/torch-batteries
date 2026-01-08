@@ -73,12 +73,13 @@ class Battery:
         optimizer: torch.optim.Optimizer | None = None,
         metrics: dict[str, Callable[[torch.Tensor, torch.Tensor], float | torch.Tensor]]
         | None = None,
+        callbacks: list | None = None,
     ):
         self._device = get_device(device)
         self._model = model.to(self._device)
         self._optimizer = optimizer
         self._metrics = metrics or {}
-        self._event_handler = EventHandler(self._model)
+        self._event_handler = EventHandler(self._model, callbacks=callbacks)
 
     @property
     def model(self) -> nn.Module:
@@ -150,6 +151,8 @@ class Battery:
             raise ValueError(msg)
 
         context: EventContext = {
+            "battery": self,
+            "model": self._model,
             "optimizer": self._optimizer,
         }
         self._event_handler.call(Event.BEFORE_TRAIN, context)
@@ -177,6 +180,8 @@ class Battery:
 
             if val_loader:
                 before_val_context: EventContext = {
+                    "battery": self,
+                    "model": self._model,
                     "optimizer": self._optimizer,
                     "epoch": epoch,
                     "train_metrics": train_metrics,
@@ -193,6 +198,8 @@ class Battery:
                         results["val_metrics"][key].append(value)
 
                 after_val_context: EventContext = {
+                    "battery": self,
+                    "model": self._model,
                     "optimizer": self._optimizer,
                     "epoch": epoch,
                     "train_metrics": train_metrics,
@@ -205,6 +212,8 @@ class Battery:
         progress.end_training()
 
         after_train_context: EventContext = {
+            "battery": self,
+            "model": self._model,
             "optimizer": self._optimizer,
             "epoch": epochs - 1,
             "train_metrics": train_metrics,
@@ -230,6 +239,8 @@ class Battery:
         """
         # Trigger BEFORE_TRAIN_EPOCH event
         epoch_context: EventContext = {
+            "battery": self,
+            "model": self._model,
             "optimizer": self._optimizer,
             "epoch": epoch,
         }
@@ -243,6 +254,8 @@ class Battery:
             batch = move_to_device(batch_data, self._device)
 
             before_step_context: EventContext = {
+                "battery": self,
+                "model": self._model,
                 "optimizer": self._optimizer,
                 "batch": batch,
                 "batch_idx": batch_idx,
@@ -254,6 +267,8 @@ class Battery:
             self._optimizer.zero_grad()  # type: ignore[union-attr]
 
             step_context: EventContext = {
+                "battery": self,
+                "model": self._model,
                 "optimizer": self._optimizer,
                 "batch": batch,
                 "batch_idx": batch_idx,
@@ -283,6 +298,8 @@ class Battery:
             batch_metrics = {"loss": loss.item(), **init_metrics, **step_metrics}
 
             after_step_context: EventContext = {
+                "battery": self,
+                "model": self._model,
                 "optimizer": self._optimizer,
                 "batch": batch,
                 "batch_idx": batch_idx,
@@ -302,6 +319,8 @@ class Battery:
 
         # Trigger AFTER_TRAIN_EPOCH event
         after_epoch_context: EventContext = {
+            "battery": self,
+            "model": self._model,
             "optimizer": self._optimizer,
             "epoch": epoch,
             "train_metrics": train_metrics,
@@ -332,6 +351,8 @@ class Battery:
 
         # Trigger BEFORE_VALIDATION_EPOCH event
         before_val_epoch_context: EventContext = {
+            "battery": self,
+            "model": self._model,
             "epoch": epoch,
         }
         self._event_handler.call(
@@ -347,6 +368,8 @@ class Battery:
                 batch = move_to_device(batch_data, self._device)
 
                 before_step_context: EventContext = {
+                    "battery": self,
+                    "model": self._model,
                     "batch": batch,
                     "batch_idx": batch_idx,
                     "epoch": epoch,
@@ -356,6 +379,8 @@ class Battery:
                 )
 
                 step_context: EventContext = {
+                    "battery": self,
+                    "model": self._model,
                     "batch": batch,
                     "batch_idx": batch_idx,
                     "epoch": epoch,
@@ -380,6 +405,8 @@ class Battery:
                 batch_metrics = {"loss": loss.item(), **init_metrics, **step_metrics}
 
                 after_step_context: EventContext = {
+                    "battery": self,
+                    "model": self._model,
                     "batch": batch,
                     "batch_idx": batch_idx,
                     "epoch": epoch,
@@ -400,6 +427,8 @@ class Battery:
 
         # Trigger AFTER_VALIDATION_EPOCH event
         after_val_epoch_context: EventContext = {
+            "battery": self,
+            "model": self._model,
             "epoch": epoch,
             "val_metrics": val_metrics,
         }
@@ -429,11 +458,15 @@ class Battery:
             raise ValueError(msg)
 
         before_test_context: EventContext = {
+            "battery": self,
+            "model": self._model,
             "optimizer": self._optimizer,
         }
         self._event_handler.call(Event.BEFORE_TEST, before_test_context)
 
         before_test_epoch_context: EventContext = {
+            "battery": self,
+            "model": self._model,
             "optimizer": self._optimizer,
             "epoch": 0,
         }
@@ -450,6 +483,8 @@ class Battery:
                 batch = move_to_device(batch_data, self._device)
 
                 before_step_context: EventContext = {
+                    "battery": self,
+                    "model": self._model,
                     "optimizer": self._optimizer,
                     "batch": batch,
                     "batch_idx": batch_idx,
@@ -458,6 +493,8 @@ class Battery:
                 self._event_handler.call(Event.BEFORE_TEST_STEP, before_step_context)
 
                 step_context: EventContext = {
+                    "battery": self,
+                    "model": self._model,
                     "optimizer": self._optimizer,
                     "batch": batch,
                     "batch_idx": batch_idx,
@@ -483,6 +520,8 @@ class Battery:
                 batch_metrics = {"loss": loss.item(), **init_metrics, **step_metrics}
 
                 after_step_context: EventContext = {
+                    "battery": self,
+                    "model": self._model,
                     "optimizer": self._optimizer,
                     "batch": batch,
                     "batch_idx": batch_idx,
@@ -499,6 +538,8 @@ class Battery:
         progress.end_epoch()
 
         after_test_epoch_context: EventContext = {
+            "battery": self,
+            "model": self._model,
             "optimizer": self._optimizer,
             "epoch": 0,
             "loss": test_metrics
@@ -513,6 +554,8 @@ class Battery:
         self._event_handler.call(Event.AFTER_TEST_EPOCH, after_test_epoch_context)
 
         after_test_context: EventContext = {
+            "battery": self,
+            "model": self._model,
             "optimizer": self._optimizer,
             "loss": test_metrics
             if isinstance(test_metrics, float)
@@ -560,11 +603,15 @@ class Battery:
             raise ValueError(msg)
 
         before_predict_context: EventContext = {
+            "battery": self,
+            "model": self._model,
             "optimizer": self._optimizer,
         }
         self._event_handler.call(Event.BEFORE_PREDICT, before_predict_context)
 
         before_predict_epoch_context: EventContext = {
+            "battery": self,
+            "model": self._model,
             "optimizer": self._optimizer,
             "epoch": 0,
         }
@@ -584,6 +631,8 @@ class Battery:
                 batch = move_to_device(batch_data, self._device)
 
                 before_step_context: EventContext = {
+                    "battery": self,
+                    "model": self._model,
                     "optimizer": self._optimizer,
                     "batch": batch,
                     "batch_idx": batch_idx,
@@ -592,6 +641,8 @@ class Battery:
                 self._event_handler.call(Event.BEFORE_PREDICT_STEP, before_step_context)
 
                 step_context: EventContext = {
+                    "battery": self,
+                    "model": self._model,
                     "optimizer": self._optimizer,
                     "batch": batch,
                     "batch_idx": batch_idx,
@@ -602,6 +653,8 @@ class Battery:
                     predictions.append(prediction)
 
                 after_step_context: EventContext = {
+                    "battery": self,
+                    "model": self._model,
                     "optimizer": self._optimizer,
                     "batch": batch,
                     "batch_idx": batch_idx,
@@ -617,6 +670,8 @@ class Battery:
         progress.end_epoch()
 
         after_predict_epoch_context: EventContext = {
+            "battery": self,
+            "model": self._model,
             "optimizer": self._optimizer,
             "epoch": 0,
             "predictions": predictions,
@@ -624,6 +679,8 @@ class Battery:
         self._event_handler.call(Event.AFTER_PREDICT_EPOCH, after_predict_epoch_context)
 
         after_predict_context: EventContext = {
+            "battery": self,
+            "model": self._model,
             "optimizer": self._optimizer,
             "predictions": predictions,
         }
