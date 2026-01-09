@@ -2,7 +2,7 @@
 
 from collections.abc import Callable
 from enum import Enum
-from typing import Any, TypeVar, TYPE_CHECKING
+from typing import Any, TypeVar
 
 import torch
 import torch.nn as nn
@@ -38,8 +38,8 @@ class EventContext(TypedDict, total=False):
         test_metrics: Dictionary of computed test metrics
     """
 
-    battery: Any
-    module: nn.Module
+    battery: "torch_batteries.Battery"
+    model: nn.Module
     optimizer: torch.optim.Optimizer | None
     batch: Any
     batch_idx: int
