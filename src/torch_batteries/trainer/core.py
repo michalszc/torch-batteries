@@ -64,7 +64,7 @@ class Battery:
         ```
     """
 
-    __slots__ = ("_device", "_event_handler", "_metrics", "_model", "_optimizer")
+    __slots__ = ("_device", "_event_handler", "_metrics", "_model", "_optimizer", "_stop_training")
 
     def __init__(
         self,
@@ -80,6 +80,7 @@ class Battery:
         self._optimizer = optimizer
         self._metrics = metrics or {}
         self._event_handler = EventHandler(self._model, callbacks=callbacks)
+        self._stop_training = False
 
     @property
     def model(self) -> nn.Module:
@@ -116,6 +117,16 @@ class Battery:
     ) -> None:
         """Set the metrics dictionary."""
         self._metrics = value or {}
+
+    @property
+    def stop_training(self) -> bool:
+        """Get the stop_training flag."""
+        return self._stop_training
+
+    @stop_training.setter
+    def stop_training(self, value: bool) -> None:
+        """Set the stop_training flag."""
+        self._stop_training = value
 
     def train(
         self,
@@ -167,6 +178,10 @@ class Battery:
         progress = ProgressFactory.create(verbose=verbose, total_epochs=epochs)
 
         for epoch in range(epochs):
+            if self._stop_training:
+                logger.info(f"Training stopped early at epoch {epoch}.")
+                break
+
             progress.start_epoch(epoch)
 
             train_metrics = self._train_epoch(train_loader, progress, epoch)

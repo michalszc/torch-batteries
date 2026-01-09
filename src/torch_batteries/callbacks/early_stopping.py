@@ -1,4 +1,4 @@
-from torch_batteries import EventContext, Event, charge
+from torch_batteries import EventContext, Event, charge, Battery
 from torch_batteries.utils.logging import get_logger
 
 import torch.nn as nn
@@ -68,7 +68,8 @@ class EarlyStopping:
 
         metrics = context["train_metrics"]
         model = context["model"]
-        self._check_for_early_stop(metrics, model)
+        battery = context["battery"]
+        self._check_for_early_stop(metrics, model, battery)
 
     @charge(Event.AFTER_VALIDATION)
     def run_on_validation_end(self, context: EventContext):
@@ -77,9 +78,10 @@ class EarlyStopping:
 
         metrics = context["val_metrics"]
         model = context["model"]
-        self._check_for_early_stop(metrics, model)
+        battery = context["battery"]
+        self._check_for_early_stop(metrics, model, battery)
 
-    def _check_for_early_stop(self, metrics: dict[str, float], model: nn.Module) -> None:
+    def _check_for_early_stop(self, metrics: dict[str, float], model: nn.Module, battery: Battery) -> None:
         """
         Check if early stopping condition is met and update internal state.
 
@@ -106,6 +108,7 @@ class EarlyStopping:
         else:
             self.epochs_no_improve += 1
             if self.epochs_no_improve >= self.patience:
+                battery.stop_training = True
                 if self.verbose:
                     self.logger.info(
                         f"Early stopping triggered. No improvement in '{self.metric}' for {self.patience} epochs."

@@ -3,6 +3,7 @@
 import pytest
 import torch
 
+from torch_batteries import Battery
 from torch_batteries.callbacks.early_stopping import EarlyStopping
 from torch_batteries.events import EventContext
 
@@ -50,31 +51,32 @@ class TestEarlyStopping:
         """Test _check_for_early_stop method in 'min' mode."""
         early_stopping = EarlyStopping(stage="val", metric="loss", mode="min", patience=2)
         model = torch.nn.Linear(1, 1)
+        battery = Battery(model=model)
 
         metrics = {"loss": 0.5}
-        early_stopping._check_for_early_stop(metrics, model)
+        early_stopping._check_for_early_stop(metrics, model, battery)
         assert early_stopping.best_score == 0.5
         assert early_stopping.epochs_no_improve == 0
 
         metrics = {"loss": 0.6}
-        early_stopping._check_for_early_stop(metrics, model)
+        early_stopping._check_for_early_stop(metrics, model, battery)
         assert early_stopping.epochs_no_improve == 1
 
         metrics = {"loss": 0.4}
-        early_stopping._check_for_early_stop(metrics, model)
+        early_stopping._check_for_early_stop(metrics, model, battery)
         assert early_stopping.best_score == 0.4
         assert early_stopping.epochs_no_improve == 0
 
         metrics = {"loss": 0.45}
-        early_stopping._check_for_early_stop(metrics, model)
+        early_stopping._check_for_early_stop(metrics, model, battery)
         assert early_stopping.epochs_no_improve == 1
 
         metrics = {"loss": 0.5}
-        early_stopping._check_for_early_stop(metrics, model)
+        early_stopping._check_for_early_stop(metrics, model, battery)
         assert early_stopping.epochs_no_improve == 2
 
         metrics = {"loss": 0.55}
-        early_stopping._check_for_early_stop(metrics, model)
+        early_stopping._check_for_early_stop(metrics, model, battery)
         assert early_stopping.epochs_no_improve == 3
         assert early_stopping.best_score == 0.4
 
@@ -82,31 +84,32 @@ class TestEarlyStopping:
         """Test _check_for_early_stop method in 'max' mode."""
         early_stopping = EarlyStopping(stage="val", metric="accuracy", mode="max", patience=2)
         model = torch.nn.Linear(1, 1)
+        battery = Battery(model=model)
 
         metrics = {"accuracy": 0.7}
-        early_stopping._check_for_early_stop(metrics, model)
+        early_stopping._check_for_early_stop(metrics, model, battery)
         assert early_stopping.best_score == 0.7
         assert early_stopping.epochs_no_improve == 0
 
         metrics = {"accuracy": 0.65}
-        early_stopping._check_for_early_stop(metrics, model)
+        early_stopping._check_for_early_stop(metrics, model, battery)
         assert early_stopping.epochs_no_improve == 1
 
         metrics = {"accuracy": 0.75}
-        early_stopping._check_for_early_stop(metrics, model)
+        early_stopping._check_for_early_stop(metrics, model, battery)
         assert early_stopping.best_score == 0.75
         assert early_stopping.epochs_no_improve == 0
 
         metrics = {"accuracy": 0.72}
-        early_stopping._check_for_early_stop(metrics, model)
+        early_stopping._check_for_early_stop(metrics, model, battery)
         assert early_stopping.epochs_no_improve == 1
 
         metrics = {"accuracy": 0.7}
-        early_stopping._check_for_early_stop(metrics, model)
+        early_stopping._check_for_early_stop(metrics, model, battery)
         assert early_stopping.epochs_no_improve == 2
 
         metrics = {"accuracy": 0.68}
-        early_stopping._check_for_early_stop(metrics, model)
+        early_stopping._check_for_early_stop(metrics, model, battery)
         assert early_stopping.epochs_no_improve == 3
         assert early_stopping.best_score == 0.75
 
@@ -114,23 +117,24 @@ class TestEarlyStopping:
         """Test that best weights are restored when restore_best_weights is True."""
         early_stopping = EarlyStopping(stage="val", metric="loss", mode="min", patience=1, restore_best_weights=True)
         model = torch.nn.Linear(1, 1)
+        battery = Battery(model=model)
 
         initial_weights = model.state_dict().copy()
 
         metrics = {"loss": 0.5}
-        early_stopping._check_for_early_stop(metrics, model)
+        early_stopping._check_for_early_stop(metrics, model, battery)
 
         for param in model.parameters():
             param.data += 1.0
 
         metrics = {"loss": 0.6}
-        early_stopping._check_for_early_stop(metrics, model)
+        early_stopping._check_for_early_stop(metrics, model, battery)
 
         for param in model.parameters():
             param.data += 1.0
 
         metrics = {"loss": 0.7}
-        early_stopping._check_for_early_stop(metrics, model)
+        early_stopping._check_for_early_stop(metrics, model, battery)
 
         for key in initial_weights:
             assert torch.equal(model.state_dict()[key], early_stopping.best_weights[key])
