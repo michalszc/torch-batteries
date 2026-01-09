@@ -5,7 +5,7 @@ from enum import Enum
 from typing import Any, TypeVar
 
 import torch
-import torch.nn as nn
+from torch import nn
 from typing_extensions import ParamSpec, TypedDict
 
 from torch_batteries.utils.logging import get_logger

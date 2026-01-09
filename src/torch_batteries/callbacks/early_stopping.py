@@ -1,10 +1,15 @@
-from torch_batteries import EventContext, Event, charge, Battery
+"""Early Stopping Callback for torch-batteries."""
+
+from torch import nn
+
+from torch_batteries import Battery, Event, EventContext, charge
 from torch_batteries.utils.logging import get_logger
 
-import torch.nn as nn
 
 class EarlyStopping:
-    """Early stops the training if selected metric doesn't improve after a given patience."""
+    """
+    Early stops the training if selected metric doesn't improve after a given patience.
+    """
 
     def __init__(
         self,
@@ -18,17 +23,20 @@ class EarlyStopping:
     ) -> None:
         """
         Args:
-            stage (str): One of 'train' or 'val' to indicate which stage's metric to monitor.
-            metric (str): The name of the metric to monitor.
-            min_delta (float): Minimum change in the monitored metric to qualify as an improvement.
-            patience (int): Number of epochs with no improvement after which training will be stopped.
-            verbose (bool): If True, prints a message when early stopping is triggered.
-            mode (str): One of 'min' or 'max'. In 'min' mode, training will stop when the
-                        monitored metric stops decreasing. In 'max' mode, it will stop when
-                        the metric stops increasing.
+            stage: One of 'train' or 'val' to indicate which stage's metric to monitor.
+            metric: The name of the metric to monitor.
+            min_delta: Minimum change in the monitored metric to qualify as an
+                        improvement.
+            patience: Number of epochs with no improvement after which training will be
+                        stopped.
+            verbose: If True, prints a message when early stopping is triggered.
+            mode: One of 'min' or 'max'. In 'min' mode, training will stop when the
+                        monitored metric stops decreasing. In 'max' mode, it will stop
+                        when the metric stops increasing.
         """
         if stage not in {"train", "val"}:
-            raise ValueError("stage must be one of 'train' or 'val'")
+            msg = "stage must be one of 'train' or 'val'"
+            raise ValueError(msg)
 
         self.stage = stage
         self.metric = metric
@@ -43,7 +51,8 @@ class EarlyStopping:
         self.epochs_no_improve = 0
 
         if mode not in {"min", "max"}:
-            raise ValueError("mode must be one of 'min' or 'max'")
+            msg = "mode must be one of 'min' or 'max'"
+            raise ValueError(msg)
         self.mode = mode
         if self.mode == "min":
             self.monitor_op = lambda current, best: current < best - self.min_delta
@@ -81,7 +90,9 @@ class EarlyStopping:
         battery = context["battery"]
         self._check_for_early_stop(metrics, model, battery)
 
-    def _check_for_early_stop(self, metrics: dict[str, float], model: nn.Module, battery: Battery) -> None:
+    def _check_for_early_stop(
+        self, metrics: dict[str, float], model: nn.Module, battery: Battery
+    ) -> None:
         """
         Check if early stopping condition is met and update internal state.
 
@@ -91,7 +102,8 @@ class EarlyStopping:
         """
 
         if self.metric not in metrics:
-            raise ValueError(f"Metric '{self.metric}' not found in training metrics.")
+            msg = f"Metric '{self.metric}' not found in training metrics."
+            raise ValueError(msg)
 
         current_score = metrics[self.metric]
         if self.best_score is None:
@@ -111,7 +123,9 @@ class EarlyStopping:
                 battery.stop_training = True
                 if self.verbose:
                     self.logger.info(
-                        f"Early stopping triggered. No improvement in '{self.metric}' for {self.patience} epochs."
+                        "Early stopping triggered. No improvement in '%s' for %d epochs.",
+                        self.metric,
+                        self.patience,
                     )
 
     @charge(Event.AFTER_TRAIN)

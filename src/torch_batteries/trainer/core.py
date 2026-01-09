@@ -64,7 +64,14 @@ class Battery:
         ```
     """
 
-    __slots__ = ("_device", "_event_handler", "_metrics", "_model", "_optimizer", "_stop_training")
+    __slots__ = (
+        "_device",
+        "_event_handler",
+        "_metrics",
+        "_model",
+        "_optimizer",
+        "_stop_training",
+    )
 
     def __init__(
         self,
@@ -179,7 +186,7 @@ class Battery:
 
         for epoch in range(epochs):
             if self._stop_training:
-                logger.info(f"Training stopped early at epoch {epoch}.")
+                logger.info("Training stopped early at epoch %d.", epoch)
                 break
 
             progress.start_epoch(epoch)
