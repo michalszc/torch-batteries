@@ -11,7 +11,7 @@ class EarlyStopping:
     Early stops the training if selected metric doesn't improve after a given patience.
     """
 
-    def __init__(   # noqa: PLR0913
+    def __init__(  # noqa: PLR0913
         self,
         stage: str,
         metric: str,
