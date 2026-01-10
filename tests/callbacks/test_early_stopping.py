@@ -70,7 +70,7 @@ class TestEarlyStopping:
         assert early_stopping.best_score == 0.5
         assert early_stopping.epochs_no_improve == 0
 
-        context: EventContext = {
+        context = {
             "model": model,
             "battery": battery,
             "val_metrics": {"loss": 0.6},
@@ -79,7 +79,7 @@ class TestEarlyStopping:
         early_stopping.run_on_validation_end(context)
         assert early_stopping.epochs_no_improve == 1
 
-        context: EventContext = {
+        context = {
             "model": model,
             "battery": battery,
             "val_metrics": {"loss": 0.4},
@@ -88,7 +88,7 @@ class TestEarlyStopping:
         assert early_stopping.best_score == 0.4
         assert early_stopping.epochs_no_improve == 0
 
-        context: EventContext = {
+        context = {
             "model": model,
             "battery": battery,
             "val_metrics": {"loss": 0.45},
@@ -96,7 +96,7 @@ class TestEarlyStopping:
         early_stopping.run_on_validation_end(context)
         assert early_stopping.epochs_no_improve == 1
 
-        context: EventContext = {
+        context = {
             "model": model,
             "battery": battery,
             "val_metrics": {"loss": 0.5},
@@ -104,7 +104,7 @@ class TestEarlyStopping:
         early_stopping.run_on_validation_end(context)
         assert early_stopping.epochs_no_improve == 2
 
-        context: EventContext = {
+        context = {
             "model": model,
             "battery": battery,
             "val_metrics": {"loss": 0.55},
@@ -196,7 +196,7 @@ class TestEarlyStopping:
         for param in model.parameters():
             param.data += 1.0
 
-        context: EventContext = {
+        context = {
             "model": model,
             "battery": battery,
             "val_metrics": {"loss": 0.6},
@@ -206,12 +206,14 @@ class TestEarlyStopping:
         for param in model.parameters():
             param.data += 1.0
 
-        context: EventContext = {
+        context = {
             "model": model,
             "battery": battery,
             "val_metrics": {"loss": 0.7},
         }
         early_stopping.run_on_validation_end(context)
+
+        assert early_stopping.best_weights is not None
 
         for key in initial_weights:
             assert torch.equal(

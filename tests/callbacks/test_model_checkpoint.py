@@ -1,6 +1,6 @@
 """Test for torch_batteries.callbacks.model_checkpoint.ModelCheckpoint module."""
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Callable
 
 import pytest
 import torch
@@ -43,7 +43,7 @@ class TestModelCheckpoint:
         with pytest.raises(ValueError, match="mode must be one of 'min' or 'max'"):
             ModelCheckpoint(stage="val", metric="accuracy", mode="invalid")
 
-    def test_run_on_validation_end(self, tmp_path) -> None:
+    def test_run_on_validation_end(self, tmp_path: object) -> None:
         """Test run_on_validation_end method."""
         checkpoint = ModelCheckpoint(
             stage="val",
@@ -64,7 +64,7 @@ class TestModelCheckpoint:
         assert checkpoint.best_model_path is not None
         assert torch.load(checkpoint.best_model_path) is not None
 
-    def test_run_on_train_epoch_end(self, tmp_path) -> None:
+    def test_run_on_train_epoch_end(self, tmp_path: object) -> None:
         """Test run_on_test_end method."""
         checkpoint = ModelCheckpoint(
             stage="train",
@@ -106,7 +106,7 @@ class TestModelCheckpoint:
         assert checkpoint.best_model_path is not None
         assert torch.load(checkpoint.best_model_path) is not None
 
-        context: EventContext = {
+        context = {
             "model": model,
             "val_metrics": {"accuracy": 0.85},
             "epoch": 2,
@@ -115,7 +115,7 @@ class TestModelCheckpoint:
         assert checkpoint.best_model_path is not None
         assert torch.load(checkpoint.best_model_path) is not None
 
-    def test_save_top_k_model(self, tmp_path) -> None:
+    def test_save_top_k_model(self, tmp_path: object) -> None:
         """Test saving top K models."""
         checkpoint = ModelCheckpoint(
             stage="val",
@@ -136,7 +136,7 @@ class TestModelCheckpoint:
         checkpoint.run_on_validation_end(context)
         assert len(checkpoint.best_k_models) == 1
 
-        context: EventContext = {
+        context = {
             "model": model,
             "val_metrics": {"accuracy": 0.85},
             "epoch": 2,
@@ -144,7 +144,7 @@ class TestModelCheckpoint:
         checkpoint.run_on_validation_end(context)
         assert len(checkpoint.best_k_models) == 2
 
-        context: EventContext = {
+        context = {
             "model": model,
             "val_metrics": {"accuracy": 0.65},
             "epoch": 3,
@@ -152,7 +152,7 @@ class TestModelCheckpoint:
         checkpoint.run_on_validation_end(context)
         assert len(checkpoint.best_k_models) == 2
 
-        context: EventContext = {
+        context = {
             "model": model,
             "val_metrics": {"accuracy": 0.9},
             "epoch": 4,

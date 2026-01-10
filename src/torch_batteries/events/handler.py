@@ -60,7 +60,8 @@ class EventHandler:
                 else:
                     if event not in self._event_handlers:
                         self._event_handlers[event] = []
-                    self._event_handlers[event].append(method)
+                    if isinstance(self._event_handlers[event], list):
+                        self._event_handlers[event].append(method)  # type: ignore
                 discovered_count += 1
                 logger.debug(
                     "Discovered handler '%s' for event '%s'", name, event.value
@@ -92,7 +93,8 @@ class EventHandler:
                         continue
                     if event not in self._event_handlers:
                         self._event_handlers[event] = []
-                    self._event_handlers[event].append(method)
+                    if isinstance(self._event_handlers[event], list):
+                        self._event_handlers[event].append(method)  # type: ignore
                     discovered_count += 1
                     logger.debug(
                         "Discovered handler '%s' for event '%s' in callback '%s'",
@@ -160,12 +162,16 @@ class EventHandler:
         """
         return list(self._event_handlers.keys())
 
-    def get_handler_info(self) -> dict[Event, str]:
+    def get_handler_info(self) -> dict[Event, list[str] | str]:
         """Get information about all registered handlers.
 
         Returns:
             Dictionary mapping events to handler method names
         """
-        return {
-            event: handler.__name__ for event, handler in self._event_handlers.items()
-        }
+        result: dict[Event, list[str] | str] = {}
+        for event, handler in self._event_handlers.items():
+            if isinstance(handler, list):
+                result[event] = [h.__name__ for h in handler]
+            else:
+                result[event] = handler.__name__
+        return result

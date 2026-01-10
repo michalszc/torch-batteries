@@ -1,5 +1,7 @@
 """Early Stopping Callback for torch-batteries."""
 
+from typing import Any
+
 from torch import nn
 
 from torch_batteries import Battery, Event, EventContext, charge
@@ -45,7 +47,7 @@ class EarlyStopping:
         self.patience = patience
         self.verbose = verbose
         self.restore_best_weights = restore_best_weights
-        self.best_weights = None
+        self.best_weights: dict[str, Any] | None = None
         self.logger = get_logger("EarlyStopping")
 
         self.best_score: float | None = None
@@ -82,7 +84,7 @@ class EarlyStopping:
         self._check_for_early_stop(metrics, model, battery)
 
     @charge(Event.AFTER_VALIDATION)
-    def run_on_validation_end(self, context: EventContext):
+    def run_on_validation_end(self, context: EventContext) -> None:
         if self.stage != "val":
             return
 
