@@ -127,7 +127,7 @@ class ModelCheckpoint:
             if self.mode == "min":
                 self.kth_best_model_path = max(
                     self.best_k_models,
-                    key=self.best_k_models.get, # type: ignore[arg-type]
+                    key=self.best_k_models.get,  # type: ignore[arg-type]
                 )
                 self.kth_best_score = self.best_k_models[self.kth_best_model_path]
             else:
