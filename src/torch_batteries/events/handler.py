@@ -61,7 +61,7 @@ class EventHandler:
                     if event not in self._event_handlers:
                         self._event_handlers[event] = []
                     if isinstance(self._event_handlers[event], list):
-                        self._event_handlers[event].append(method)  # type: ignore
+                        self._event_handlers[event].append(method) # type: ignore[union-attr]
                 discovered_count += 1
                 logger.debug(
                     "Discovered handler '%s' for event '%s'", name, event.value
@@ -94,7 +94,7 @@ class EventHandler:
                     if event not in self._event_handlers:
                         self._event_handlers[event] = []
                     if isinstance(self._event_handlers[event], list):
-                        self._event_handlers[event].append(method)  # type: ignore
+                        self._event_handlers[event].append(method)  # type: ignore[union-attr]
                     discovered_count += 1
                     logger.debug(
                         "Discovered handler '%s' for event '%s' in callback '%s'",

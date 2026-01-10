@@ -1,6 +1,6 @@
 """Test for torch_batteries.callbacks.model_checkpoint.ModelCheckpoint module."""
 
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING
 
 import pytest
 import torch

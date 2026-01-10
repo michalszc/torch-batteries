@@ -127,13 +127,13 @@ class ModelCheckpoint:
             if self.mode == "min":
                 self.kth_best_model_path = max(
                     self.best_k_models,
-                    key=self.best_k_models.get,  # type: ignore
+                    key=self.best_k_models.get, # type: ignore[arg-type]
                 )
                 self.kth_best_score = self.best_k_models[self.kth_best_model_path]
             else:
                 self.kth_best_model_path = min(
                     self.best_k_models,
-                    key=self.best_k_models.get,  # type: ignore
+                    key=self.best_k_models.get,  # type: ignore[arg-type]
                 )
                 self.kth_best_score = self.best_k_models[self.kth_best_model_path]
 
@@ -163,9 +163,9 @@ class ModelCheckpoint:
 
         if len(self.best_k_models) > self.save_top_k:
             if self.mode == "min":
-                worst_model = max(self.best_k_models, key=self.best_k_models.get)  # type: ignore
+                worst_model = max(self.best_k_models, key=self.best_k_models.get)  # type: ignore[arg-type]
             else:
-                worst_model = min(self.best_k_models, key=self.best_k_models.get)  # type: ignore
+                worst_model = min(self.best_k_models, key=self.best_k_models.get)  # type: ignore[arg-type]
             del self.best_k_models[worst_model]
             Path(worst_model).unlink()
 
