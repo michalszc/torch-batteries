@@ -1,10 +1,14 @@
 """Test for torch_batteries.callbacks.model_checkpoint.ModelCheckpoint module."""
 
+from typing import TYPE_CHECKING
+
 import pytest
 import torch
 
 from torch_batteries.callbacks.model_checkpoint import ModelCheckpoint
-from torch_batteries.events import EventContext
+
+if TYPE_CHECKING:
+    from torch_batteries.events import EventContext
 
 
 class TestModelCheckpoint:

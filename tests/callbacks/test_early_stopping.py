@@ -1,11 +1,15 @@
 """Test for torch_batteries.callbacks.early_stopping module."""
 
+from typing import TYPE_CHECKING
+
 import pytest
 import torch
 
 from torch_batteries import Battery
 from torch_batteries.callbacks.early_stopping import EarlyStopping
-from torch_batteries.events import EventContext
+
+if TYPE_CHECKING:
+    from torch_batteries.events import EventContext
 
 
 class TestEarlyStopping:

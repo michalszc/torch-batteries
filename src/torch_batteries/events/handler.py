@@ -1,7 +1,7 @@
 """Event handler for managing decorated methods."""
 
 from collections.abc import Callable
-from typing import Any
+from typing import Any, ClassVar
 
 from torch import nn
 
@@ -29,7 +29,7 @@ class EventHandler:
         ```
     """
 
-    MODEL_SPECIFIC_CALLBACKS = [
+    MODEL_SPECIFIC_CALLBACKS: ClassVar[list[Event]] = [
         Event.TRAIN_STEP,
         Event.VALIDATION_STEP,
         Event.TEST_STEP,

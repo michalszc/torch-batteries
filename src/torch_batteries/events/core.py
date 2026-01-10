@@ -2,12 +2,14 @@
 
 from collections.abc import Callable
 from enum import Enum
-from typing import Any, TypeVar
+from typing import TYPE_CHECKING, Any, TypeVar
 
 import torch
 from torch import nn
 from typing_extensions import ParamSpec, TypedDict
 
+if TYPE_CHECKING:
+    import torch_batteries
 from torch_batteries.utils.logging import get_logger
 
 P = ParamSpec("P")

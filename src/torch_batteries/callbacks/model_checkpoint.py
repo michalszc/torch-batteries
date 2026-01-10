@@ -1,5 +1,5 @@
-import os
 import re
+from pathlib import Path
 
 import torch
 from torch import nn
@@ -36,7 +36,7 @@ class ModelCheckpoint:
         ```
     """
 
-    def __init__(
+    def __init__(   # noqa: PLR0913
         self,
         stage: str,
         metric: str,
@@ -44,6 +44,7 @@ class ModelCheckpoint:
         save_dir: str = ".",
         save_path: str | None = None,
         save_top_k: int = 1,
+        *,
         verbose: bool = False,
     ) -> None:
         if stage not in {"train", "val"}:
@@ -164,24 +165,21 @@ class ModelCheckpoint:
             else:
                 worst_model = min(self.best_k_models, key=self.best_k_models.get)
             del self.best_k_models[worst_model]
-            os.remove(worst_model)
+            Path(worst_model).unlink()
 
     def _format_checkpoint_name(
         self,
         filename: str | None,
         metrics: dict[str, float],
         prefix: str | None = None,
+        *,
         auto_insert_metric_name: bool = True,
     ) -> str:
         if not filename:
-            # filename is not set, use default name
             filename = "{epoch}" + self.CHECKPOINT_JOIN_CHAR
 
-        # check and parse user passed keys in the string
         groups = re.findall(r"(\{.*?)[:\}]", filename)
 
-        # sort keys from longest to shortest to avoid replacing substring
-        # eg: if keys are "epoch" and "epoch_test", the latter must be replaced first
         groups = sorted(groups, key=lambda x: len(x), reverse=True)
 
         for group in groups:
@@ -192,7 +190,6 @@ class ModelCheckpoint:
                     group, name + self.CHECKPOINT_EQUALS_CHAR + "{" + name
                 )
 
-            # support for dots: https://stackoverflow.com/a/7934969
             filename = filename.replace(group, f"{{0[{name}]")
 
         filename = filename.format(metrics)

@@ -11,10 +11,11 @@ class EarlyStopping:
     Early stops the training if selected metric doesn't improve after a given patience.
     """
 
-    def __init__(
+    def __init__(   # noqa: PLR0913
         self,
         stage: str,
         metric: str,
+        *,
         min_delta: float = 0.0,
         patience: int = 5,
         verbose: bool = False,
@@ -123,7 +124,7 @@ class EarlyStopping:
                 battery.stop_training = True
                 if self.verbose:
                     self.logger.info(
-                        "Early stopping triggered. No improvement in '%s' for %d epochs.",
+                        "Early stopping applied. No improvement in '%s' for %d epochs.",
                         self.metric,
                         self.patience,
                     )
