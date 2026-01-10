@@ -2,11 +2,14 @@
 
 from collections.abc import Callable
 from enum import Enum
-from typing import Any, TypeVar
+from typing import TYPE_CHECKING, Any, TypeVar
 
 import torch
+from torch import nn
 from typing_extensions import ParamSpec, TypedDict
 
+if TYPE_CHECKING:
+    import torch_batteries
 from torch_batteries.utils.logging import get_logger
 
 P = ParamSpec("P")
@@ -23,6 +26,8 @@ class EventContext(TypedDict, total=False):
     to allow flexibility across different event types.
 
     Fields:
+        battery: The Battery instance managing training/testing/prediction
+        module: The model/module being trained/tested/predicted
         optimizer: The optimizer (if applicable)
         batch: Current batch data (typically tuple of tensors)
         batch_idx: Current batch index within epoch
@@ -35,6 +40,8 @@ class EventContext(TypedDict, total=False):
         test_metrics: Dictionary of computed test metrics
     """
 
+    battery: "torch_batteries.Battery"
+    model: nn.Module
     optimizer: torch.optim.Optimizer | None
     batch: Any
     batch_idx: int
