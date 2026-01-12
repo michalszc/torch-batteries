@@ -28,14 +28,19 @@ classifiers = [
 
 dependencies = [
     "torch>=2.9.0",
-    "tqdm>=4.67.1"
+    "tqdm>=4.67.1",
 ]
 
 [project.optional-dependencies]
 example = [
+    "ipykernel>=7.1.0",
     "matplotlib>=3.10.7",
     "numpy>=2.3.4",
-    "scikit-learn>=1.7.2"
+    "scikit-learn>=1.7.2",
+    "torchvision>=0.24.0",
+]
+wandb = [
+    "wandb>=0.16.0"
 ]
 
 [dependency-groups]

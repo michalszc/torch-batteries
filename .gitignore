@@ -208,3 +208,9 @@ __marimo__/
 
 # Documentation
 docs
+
+# Notebooks
+notebooks/data/
+
+# Weights & Biases
+wandb/
