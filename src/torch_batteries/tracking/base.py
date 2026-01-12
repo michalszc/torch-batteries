@@ -7,8 +7,6 @@ from typing import Any
 from torch import nn
 
 from torch_batteries.tracking.types import (
-    Artifact,
-    ArtifactMaterialization,
     Experiment,
     Project,
     Run,
@@ -94,24 +92,6 @@ class ExperimentTracker(ABC):
         pass
 
     @abstractmethod
-    def save_artifact(
-        self,
-        artifact: Artifact,
-        dependencies: list[str] | None = None,
-    ) -> ArtifactMaterialization:
-        """
-        Save an artifact and track its lineage.
-
-        Args:
-            artifact: The artifact to save
-            dependencies: Names of artifacts this depends on
-
-        Returns:
-            ArtifactMaterialization record
-        """
-        pass
-
-    @abstractmethod
     def finish(self, exit_code: int = 0) -> None:
         """
         Finish the tracking session.
@@ -130,32 +110,6 @@ class ExperimentTracker(ABC):
             summary: Summary metrics/info
         """
         pass
-
-    def log_file(
-        self,
-        file_path: str | Path,
-        name: str | None = None,
-        base_path: str | Path | None = None,
-    ) -> None:
-        """
-        Log a file as an artifact.
-
-        Args:
-            file_path: Path to the file
-            name: Optional name for the file in tracking system
-            base_path: Optional base path for relative paths
-        """
-        # Default implementation - can be overridden
-        file_path = Path(file_path)
-        name = name or file_path.name
-
-        # Create artifact and save it
-        artifact = Artifact(
-            name=name,
-            type=self._infer_artifact_type(file_path),
-            path=file_path,
-        )
-        self.save_artifact(artifact)
 
     def _infer_artifact_type(self, path: Path) -> Any:
         """

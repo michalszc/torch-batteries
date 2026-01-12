@@ -8,8 +8,6 @@ from torch import nn
 
 from torch_batteries.tracking.base import ExperimentTracker
 from torch_batteries.tracking.types import (
-    Artifact,
-    ArtifactMaterialization,
     Experiment,
     Project,
     Run,
@@ -93,16 +91,13 @@ class WandbTracker(ExperimentTracker):
         wandb_config = {
             "project": project.name,
             "entity": self._entity,
-            "notes": project.notes,
+            "notes": project.description,
         }
 
         # Add experiment info
         if experiment:
             wandb_config["group"] = experiment.name
             wandb_config["notes"] = experiment.description or wandb_config.get("notes")
-            wandb_config["tags"] = experiment.tags
-            # Merge base config
-            wandb_config["config"] = experiment.base_config.copy()
 
         # Add run info
         if run:
@@ -111,10 +106,8 @@ class WandbTracker(ExperimentTracker):
                 wandb_config["group"] = run.group
             if run.job_type:
                 wandb_config["job_type"] = run.job_type
-            if run.tags:
-                wandb_config["tags"] = wandb_config.get("tags", []) + run.tags
-            if run.notes:
-                wandb_config["notes"] = run.notes
+            if run.description:
+                wandb_config["notes"] = run.description
 
             # Merge run config
             if "config" not in wandb_config:
@@ -172,54 +165,6 @@ class WandbTracker(ExperimentTracker):
             return
 
         self._wandb.config.update(config)
-
-    def save_artifact(
-        self,
-        artifact: Artifact,
-        dependencies: list[str] | None = None,
-    ) -> ArtifactMaterialization:
-        """
-        Save an artifact to wandb.
-
-        Args:
-            artifact: The artifact to save
-            dependencies: Optional list of dependency artifact names
-
-        Returns:
-            ArtifactMaterialization record
-        """
-        if not self._is_initialized:
-            logger.warning("Tracker not initialized. Call init() first.")
-            return ArtifactMaterialization(
-                artifact=artifact,
-                run_id="unknown",
-                dependencies=dependencies or [],
-            )
-
-        # Create wandb artifact
-        wandb_artifact = self._wandb.Artifact(
-            name=artifact.name,
-            type=artifact.type.value,
-            description=artifact.metadata.get("description"),
-            metadata=artifact.metadata,
-        )
-
-        # Add file
-        wandb_artifact.add_file(str(artifact.path))
-
-        # Log artifact
-        self._run.log_artifact(wandb_artifact)
-
-        logger.info(f"Saved artifact: {artifact.name} ({artifact.type.value})")
-
-        # Create materialization record
-        return ArtifactMaterialization(
-            artifact=artifact,
-            run_id=self._run_id or "unknown",
-            timestamp=datetime.now(),
-            metadata=artifact.metadata,
-            dependencies=dependencies or [],
-        )
 
     def finish(self, exit_code: int = 0) -> None:
         """
