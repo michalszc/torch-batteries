@@ -4,12 +4,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from torch import nn
-
 from torch_batteries.tracking.base import ExperimentTracker
 from torch_batteries.tracking.types import (
-    Experiment,
-    Project,
     Run,
 )
 from torch_batteries.utils.logging import get_logger
@@ -21,48 +17,44 @@ class WandbTracker(ExperimentTracker):
     """
     Weights & Biases experiment tracker implementation.
 
-    Requires wandb to be installed: `pip install wandb`
-
     Example:
-        ```python
-        tracker = WandbTracker(entity="your-wandb-username")
-        tracker.init(
-            project=Project("mnist-research"),
-            experiment=Experiment("early-stopping-study"),
-            run=Run(name="patience-5", config={"patience": 5})
-        )
+    ```python
+    tracker = WandbTracker(project="your-wandb-project")
+    tracker.init(
+        run=Run(config={"lr": 0.001})
+    )
 
-        # During training
-        tracker.log_metrics({"train/loss": 0.5}, step=100)
+    # During training
+    tracker.log_metrics({"train/loss": 0.5}, step=100)
 
-        # Save model
-        tracker.save_artifact(
-            Artifact("best-model", ArtifactType.MODEL, "model.pth")
-        )
-
-        tracker.finish()
-        ```
+    tracker.finish()
+    ```
     """
 
-    def __init__(self, entity: str | None = None) -> None:
+    __slots__ = (
+        "_project",
+        "_entity",
+        "_run",
+        "_run_id",
+        "_is_initialized",
+    )
+
+    def __init__(self, project: str, entity: str | None = None,) -> None:
         """
         Initialize the wandb tracker.
 
         Args:
             entity: Optional wandb entity (username or team name)
         """
+        self._project = project
         self._entity = entity
-        self._wandb: Any = None
         self._run: Any = None
         self._run_id: str | None = None
         self._is_initialized = False
 
     def init(
         self,
-        project: Project,
-        experiment: Experiment | None = None,
-        run: Run | None = None,
-        **kwargs: Any,
+        run: Run,
     ) -> None:
         """
         Initialize wandb tracking session.
@@ -71,59 +63,47 @@ class WandbTracker(ExperimentTracker):
             project: The project configuration
             experiment: Optional experiment grouping
             run: Run configuration
-            **kwargs: Additional wandb.init() arguments
 
         Raises:
             ImportError: If wandb is not installed
+            RuntimeError: If it is already initialized
         """
         try:
             import wandb
         except ImportError as e:
             msg = (
-                "wandb is not installed. Install it with: pip install wandb\n"
-                "Or use: pip install torch-batteries[wandb]"
+                "wandb is not installed."
             )
             raise ImportError(msg) from e
 
-        self._wandb = wandb
+        if self.is_initialized:
+            raise RuntimeError("WandbTracker is already initialized.")
 
-        # Build wandb config
         wandb_config = {
-            "project": project.name,
+            "project": self._project,
             "entity": self._entity,
-            "notes": project.description,
+            "group": run.group,
+            "notes": run.description,
+            "tags": run.tags,
+            "job_type": run.job_type,
+            "name": run.name,
+            "config": run.config,
         }
 
-        # Add experiment info
-        if experiment:
-            wandb_config["group"] = experiment.name
-            wandb_config["notes"] = experiment.description or wandb_config.get("notes")
-
-        # Add run info
-        if run:
-            wandb_config["name"] = run.name
-            if run.group:
-                wandb_config["group"] = run.group
-            if run.job_type:
-                wandb_config["job_type"] = run.job_type
-            if run.description:
-                wandb_config["notes"] = run.description
-
-            # Merge run config
-            if "config" not in wandb_config:
-                wandb_config["config"] = {}
-            wandb_config["config"].update(run.config)
-
-        # Allow overriding with kwargs
-        wandb_config.update(kwargs)
-
-        # Initialize wandb
-        logger.info(f"Initializing wandb: project={project.name}")
         self._run = wandb.init(**wandb_config)
-        self._run_id = self._run.id
         self._is_initialized = True
 
-        logger.info(f"wandb run initialized: {self._run.url}")
+        logger.info(f"Initialized wandb: project={wandb_config['project']}, entity={wandb_config['entity']}, run_id={self.run_id}")
+
+    @property
+    def is_initialized(self) -> bool:
+        """
+        Check if the tracker has been initialized.
+
+        Returns:
+            bool: True if initialized, False otherwise
+        """
+        return self._is_initialized
 
     def log_metrics(
         self,
@@ -138,33 +118,33 @@ class WandbTracker(ExperimentTracker):
             metrics: Dictionary of metric names to values
             step: Optional step number
             prefix: Optional prefix for metric names
-        """
-        if not self._is_initialized:
-            logger.warning("Tracker not initialized. Call init() first.")
-            return
 
-        # Add prefix if provided
+        Raises:
+            RuntimeError: If the tracker is not initialized
+        """
+        self._assert_initialized()
+
         if prefix:
             metrics = {f"{prefix}{k}": v for k, v in metrics.items()}
 
-        # Log to wandb
         if step is not None:
-            self._wandb.log(metrics, step=step)
+            self._run.log(metrics, step=step)
         else:
-            self._wandb.log(metrics)
+            self._run.log(metrics)
 
-    def log_config(self, config: dict[str, Any]) -> None:
+    def update_config(self, config: dict[str, Any]) -> None:
         """
-        Log configuration to wandb.
+        Update the configuration of Run.
 
         Args:
             config: Configuration dictionary
-        """
-        if not self._is_initialized:
-            logger.warning("Tracker not initialized. Call init() first.")
-            return
 
-        self._wandb.config.update(config)
+        Raises:
+            RuntimeError: If the tracker is not initialized
+        """
+        self._assert_initialized()
+
+        self._run.config.update(config)
 
     def finish(self, exit_code: int = 0) -> None:
         """
@@ -172,9 +152,11 @@ class WandbTracker(ExperimentTracker):
 
         Args:
             exit_code: Exit code (0 for success, non-zero for failure)
+
+        Raises:
+            RuntimeError: If the tracker is not initialized
         """
-        if not self._is_initialized:
-            return
+        self._assert_initialized()
 
         self._run.finish(exit_code=exit_code)
         self._is_initialized = False
@@ -186,18 +168,18 @@ class WandbTracker(ExperimentTracker):
 
         Args:
             summary: Summary dictionary
-        """
-        if not self._is_initialized:
-            logger.warning("Tracker not initialized. Call init() first.")
-            return
 
+        Raises:
+            RuntimeError: If the tracker is not initialized
+        """
+        self._assert_initialized()
         for key, value in summary.items():
             self._run.summary[key] = value
 
     @property
     def run_id(self) -> str | None:
         """Get the current run ID."""
-        return self._run_id
+        return self._run.id
 
     @property
     def run_url(self) -> str | None:
@@ -205,3 +187,7 @@ class WandbTracker(ExperimentTracker):
         if self._run:
             return self._run.url
         return None
+
+    def _assert_initialized(self) -> None:
+        if not self.is_initialized:
+            raise RuntimeError("WandbTracker is not initialized. Call init().")

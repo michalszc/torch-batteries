@@ -7,8 +7,6 @@ from typing import Any
 from torch import nn
 
 from torch_batteries.tracking.types import (
-    Experiment,
-    Project,
     Run,
 )
 
@@ -18,49 +16,33 @@ class ExperimentTracker(ABC):
     Abstract base class for experiment tracking backends.
 
     Provides a unified interface for logging experiments, metrics, and artifacts
-    to various tracking services (wandb, MLflow, TensorBoard, etc.).
+    to various tracking services (e.g. Weights & Biases).
 
     The tracker is a standalone service that can be used independently or
-    integrated with training via the ExperimentTrackingCallback.
-
-    Example:
-        ```python
-        # Standalone usage
-        tracker = WandbTracker()
-        tracker.init(
-            project=Project("my-research"),
-            experiment=Experiment("lr-study"),
-            run=Run(config={"lr": 0.001})
-        )
-
-        # Log during training
-        tracker.log_metrics({"loss": 0.5, "accuracy": 0.92}, step=100)
-
-        # Save artifacts
-        tracker.save_artifact(
-            Asset("model", AssetType.MODEL, "model.pth")
-        )
-
-        tracker.finish()
-        ```
+    integrated with training via ExperimentTrackingCallback.
     """
 
     @abstractmethod
     def init(
         self,
-        project: Project,
-        experiment: Experiment | None = None,
-        run: Run | None = None,
-        **kwargs: Any,
+        run: Run,
     ) -> None:
         """
         Initialize the tracking session.
 
         Args:
-            project: The project this run belongs to
-            experiment: Optional experiment grouping
             run: Run configuration
-            **kwargs: Backend-specific configuration
+        """
+        pass
+
+    @property
+    @abstractmethod
+    def is_initialized(self) -> bool:
+        """
+        Check if the tracker has been initialized.
+
+        Returns:
+            bool: True if initialized, False otherwise
         """
         pass
 
@@ -82,19 +64,19 @@ class ExperimentTracker(ABC):
         pass
 
     @abstractmethod
-    def log_config(self, config: dict[str, Any]) -> None:
+    def update_config(self, config: dict[str, Any]) -> None:
         """
-        Log configuration/hyperparameters.
+        Update the configuration of Run.
 
         Args:
-            config: Configuration dictionary to log
+            config: Configuration dictionary
         """
         pass
 
     @abstractmethod
     def finish(self, exit_code: int = 0) -> None:
         """
-        Finish the tracking session.
+        Finish tracking the experiment.
 
         Args:
             exit_code: Exit code (0 for success, non-zero for failure)
@@ -104,30 +86,9 @@ class ExperimentTracker(ABC):
     @abstractmethod
     def log_summary(self, summary: dict[str, Any]) -> None:
         """
-        Log summary statistics that appear at the top level.
+        Log summary of the experiment.
 
         Args:
             summary: Summary metrics/info
         """
         pass
-
-    def _infer_artifact_type(self, path: Path) -> Any:
-        """
-        Infer artifact type from file extension.
-
-        Args:
-            path: File path
-
-        Returns:
-            ArtifactType enum value
-        """
-        from torch_batteries.tracking.types import ArtifactType
-
-        suffix = path.suffix.lower()
-        if suffix in {".pth", ".pt", ".ckpt", ".h5"}:
-            return ArtifactType.MODEL
-        if suffix in {".png", ".jpg", ".jpeg", ".svg"}:
-            return ArtifactType.PLOT
-        if suffix in {".csv", ".json", ".jsonl"}:
-            return ArtifactType.METRICS
-        return ArtifactType.CONFIG
