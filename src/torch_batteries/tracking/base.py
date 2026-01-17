@@ -1,10 +1,7 @@
 """Base interface for experiment trackers."""
 
 from abc import ABC, abstractmethod
-from pathlib import Path
 from typing import Any
-
-from torch import nn
 
 from torch_batteries.tracking.types import (
     Run,
@@ -33,7 +30,6 @@ class ExperimentTracker(ABC):
         Args:
             run: Run configuration
         """
-        pass
 
     @property
     @abstractmethod
@@ -44,7 +40,6 @@ class ExperimentTracker(ABC):
         Returns:
             bool: True if initialized, False otherwise
         """
-        pass
 
     @abstractmethod
     def log_metrics(
@@ -61,7 +56,6 @@ class ExperimentTracker(ABC):
             step: Optional step number (epoch, iteration, etc.)
             prefix: Optional prefix for metric names (e.g., "train/", "val/")
         """
-        pass
 
     @abstractmethod
     def update_config(self, config: dict[str, Any]) -> None:
@@ -71,7 +65,6 @@ class ExperimentTracker(ABC):
         Args:
             config: Configuration dictionary
         """
-        pass
 
     @abstractmethod
     def finish(self, exit_code: int = 0) -> None:
@@ -81,7 +74,6 @@ class ExperimentTracker(ABC):
         Args:
             exit_code: Exit code (0 for success, non-zero for failure)
         """
-        pass
 
     @abstractmethod
     def log_summary(self, summary: dict[str, Any]) -> None:
@@ -91,4 +83,3 @@ class ExperimentTracker(ABC):
         Args:
             summary: Summary metrics/info
         """
-        pass

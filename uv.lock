@@ -2197,16 +2197,16 @@ wheels = [
 
 [[package]]
 name = "torch-batteries"
-version = "0.4.0"
+version = "0.4.1"
 source = { editable = "." }
 dependencies = [
-    { name = "ipykernel" },
     { name = "torch" },
     { name = "tqdm" },
 ]
 
 [package.optional-dependencies]
 example = [
+    { name = "ipykernel" },
     { name = "matplotlib" },
     { name = "numpy" },
     { name = "scikit-learn" },
@@ -2252,12 +2252,12 @@ types = [
 
 [package.metadata]
 requires-dist = [
-    { name = "ipykernel", extras = ["example"], specifier = ">=7.1.0" },
+    { name = "ipykernel", marker = "extra == 'example'", specifier = ">=7.1.0" },
     { name = "matplotlib", marker = "extra == 'example'", specifier = ">=3.10.7" },
     { name = "numpy", marker = "extra == 'example'", specifier = ">=2.3.4" },
     { name = "scikit-learn", marker = "extra == 'example'", specifier = ">=1.7.2" },
     { name = "torch", specifier = ">=2.9.0" },
-    { name = "torchvision", marker = "extra == 'example'", specifier = ">=0.24.0" },
+    { name = "torchvision", marker = "extra == 'example'", specifier = ">=0.24.1" },
     { name = "tqdm", specifier = ">=4.67.1" },
     { name = "wandb", marker = "extra == 'wandb'", specifier = ">=0.16.0" },
 ]

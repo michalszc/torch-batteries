@@ -1,7 +1,5 @@
 """Weights & Biases (wandb) tracker implementation."""
 
-from datetime import datetime
-from pathlib import Path
 from typing import Any
 
 from torch_batteries.tracking.base import ExperimentTracker
@@ -32,14 +30,14 @@ class WandbTracker(ExperimentTracker):
     """
 
     __slots__ = (
-        "_project",
         "_entity",
+        "_is_initialized",
+        "_project",
         "_run",
         "_run_id",
-        "_is_initialized",
     )
 
-    def __init__(self, project: str, entity: str | None = None,) -> None:
+    def __init__(self, project: str, entity: str | None = None) -> None:
         """
         Initialize the wandb tracker.
 
@@ -69,15 +67,14 @@ class WandbTracker(ExperimentTracker):
             RuntimeError: If it is already initialized
         """
         try:
-            import wandb
+            import wandb  # noqa: PLC0415
         except ImportError as e:
-            msg = (
-                "wandb is not installed."
-            )
+            msg = "wandb is not installed."
             raise ImportError(msg) from e
 
         if self.is_initialized:
-            raise RuntimeError("WandbTracker is already initialized.")
+            msg = "WandbTracker is already initialized."
+            raise RuntimeError(msg)
 
         wandb_config = {
             "project": self._project,
@@ -93,7 +90,12 @@ class WandbTracker(ExperimentTracker):
         self._run = wandb.init(**wandb_config)
         self._is_initialized = True
 
-        logger.info(f"Initialized wandb: project={wandb_config['project']}, entity={wandb_config['entity']}, run_id={self.run_id}")
+        logger.info(
+            "Initialized wandb: project=%s, entity=%s, run_id=%s",
+            wandb_config["project"],
+            wandb_config["entity"],
+            self.run_id,
+        )
 
     @property
     def is_initialized(self) -> bool:
@@ -190,4 +192,5 @@ class WandbTracker(ExperimentTracker):
 
     def _assert_initialized(self) -> None:
         if not self.is_initialized:
-            raise RuntimeError("WandbTracker is not initialized. Call init().")
+            msg = "WandbTracker is not initialized. Call init()."
+            raise RuntimeError(msg)

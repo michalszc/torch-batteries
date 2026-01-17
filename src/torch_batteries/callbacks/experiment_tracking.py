@@ -1,7 +1,5 @@
 """Experiment tracking callback for automatic logging."""
 
-from typing import Any
-
 from torch_batteries import Event, EventContext, charge
 from torch_batteries.tracking.base import ExperimentTracker
 from torch_batteries.tracking.types import Run
@@ -65,7 +63,7 @@ class ExperimentTrackingCallback:
         self._global_step = 0
 
     @charge(Event.BEFORE_TRAIN)
-    def on_train_start(self, ctx: EventContext) -> None:
+    def on_train_start(self, _: EventContext) -> None:
         """
         Initialize tracker and log configuration.
 
