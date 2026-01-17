@@ -41,7 +41,7 @@ class TestModelCheckpoint:
     def test_invalid_mode(self) -> None:
         """Test ModelCheckpoint initialization with invalid mode."""
         with pytest.raises(ValueError, match="mode must be one of 'min' or 'max'"):
-            ModelCheckpoint(stage="val", metric="accuracy", mode="invalid")
+            ModelCheckpoint(stage="val", metric="accuracy", mode="invalid")  # type: ignore[arg-type]
 
     def test_run_on_validation_end(self, tmp_path: object) -> None:
         """Test run_on_validation_end method."""

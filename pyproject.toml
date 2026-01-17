@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "torch-batteries"
-version = "0.4.0"
+version = "0.4.1"
 description = "A lightweight Python package that supplies batteries-included abstractions for PyTorch workflows"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -37,10 +37,10 @@ example = [
     "matplotlib>=3.10.7",
     "numpy>=2.3.4",
     "scikit-learn>=1.7.2",
-    "torchvision>=0.24.0",
+    "torchvision>=0.24.1",
 ]
 wandb = [
-    "wandb>=0.16.0"
+    "wandb>=0.16.0",
 ]
 
 [dependency-groups]
