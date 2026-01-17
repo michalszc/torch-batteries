@@ -214,3 +214,7 @@ notebooks/data/
 
 # Weights & Biases
 wandb/
+
+# uv
+# Ignored because uv is not the primary package manager used in this project
+uv.lock
