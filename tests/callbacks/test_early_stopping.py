@@ -37,7 +37,7 @@ class TestEarlyStopping:
     def test_invalid_stage(self) -> None:
         """Test EarlyStopping initialization with invalid stage."""
         with pytest.raises(ValueError, match="stage must be one of 'train' or 'val'"):
-            EarlyStopping(stage="invalid", metric="loss")
+            EarlyStopping(stage="invalid", metric="loss")  # type: ignore[arg-type]
 
     def test_invalid_mode(self) -> None:
         """Test EarlyStopping initialization with invalid mode."""

@@ -1,5 +1,6 @@
 import re
 from pathlib import Path
+from typing import Literal
 
 import torch
 from torch import nn
@@ -38,7 +39,7 @@ class ModelCheckpoint:
 
     def __init__(  # noqa: PLR0913
         self,
-        stage: str,
+        stage: Literal["train", "val"],
         metric: str,
         mode: str = "max",
         save_dir: str = ".",
@@ -166,8 +167,7 @@ class ModelCheckpoint:
                 worst_model = max(self.best_k_models, key=self.best_k_models.get)  # type: ignore[arg-type]
             else:
                 worst_model = min(self.best_k_models, key=self.best_k_models.get)  # type: ignore[arg-type]
-            del self.best_k_models[worst_model]
-            Path(worst_model).unlink()
+            self._delete_saved_model(worst_model)
 
     def _format_checkpoint_name(
         self,
@@ -178,7 +178,7 @@ class ModelCheckpoint:
         auto_insert_metric_name: bool = True,
     ) -> str:
         if not filename:
-            filename = "{epoch}" + self.CHECKPOINT_JOIN_CHAR
+            filename = "{epoch}"
 
         groups = re.findall(r"(\{.*?)[:\}]", filename)
 
@@ -200,3 +200,7 @@ class ModelCheckpoint:
             filename = self.CHECKPOINT_JOIN_CHAR.join([prefix, filename])
 
         return filename
+
+    def _delete_saved_model(self, filepath: str) -> None:
+        del self.best_k_models[filepath]
+        Path(filepath).unlink()

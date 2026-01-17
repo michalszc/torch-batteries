@@ -1,6 +1,6 @@
 """Early Stopping Callback for torch-batteries."""
 
-from typing import Any
+from typing import Any, Literal
 
 from torch import nn
 
@@ -15,7 +15,7 @@ class EarlyStopping:
 
     def __init__(  # noqa: PLR0913
         self,
-        stage: str,
+        stage: Literal["train", "val"],
         metric: str,
         *,
         min_delta: float = 0.0,

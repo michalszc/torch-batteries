@@ -36,7 +36,7 @@ class TestModelCheckpoint:
     def test_invalid_stage(self) -> None:
         """Test ModelCheckpoint initialization with invalid stage."""
         with pytest.raises(ValueError, match="stage must be one of 'train' or 'val'"):
-            ModelCheckpoint(stage="invalid", metric="accuracy")
+            ModelCheckpoint(stage="invalid", metric="accuracy")  # type: ignore[arg-type]
 
     def test_invalid_mode(self) -> None:
         """Test ModelCheckpoint initialization with invalid mode."""
