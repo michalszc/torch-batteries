@@ -43,7 +43,7 @@ class ModelCheckpoint:
         self,
         stage: Literal["train", "val"],
         metric: str,
-        mode: str = "max",
+        mode: Literal["min", "max"] = "max",
         save_dir: str = ".",
         save_path: str | None = None,
         save_top_k: int = 1,
