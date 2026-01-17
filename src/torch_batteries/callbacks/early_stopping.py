@@ -1,11 +1,13 @@
 """Early Stopping Callback for torch-batteries."""
 
-from typing import Any
+from typing import Any, Literal
 
 from torch import nn
 
 from torch_batteries import Battery, Event, EventContext, charge
 from torch_batteries.utils.logging import get_logger
+
+logger = get_logger("EarlyStopping")
 
 
 class EarlyStopping:
@@ -15,13 +17,13 @@ class EarlyStopping:
 
     def __init__(  # noqa: PLR0913
         self,
-        stage: str,
+        stage: Literal["train", "val"],
         metric: str,
         *,
         min_delta: float = 0.0,
         patience: int = 5,
         verbose: bool = False,
-        mode: str = "min",
+        mode: Literal["min", "max"] = "min",
         restore_best_weights: bool = False,
     ) -> None:
         """
@@ -41,26 +43,35 @@ class EarlyStopping:
             msg = "stage must be one of 'train' or 'val'"
             raise ValueError(msg)
 
-        self.stage = stage
-        self.metric = metric
-        self.min_delta = min_delta
-        self.patience = patience
-        self.verbose = verbose
-        self.restore_best_weights = restore_best_weights
-        self.best_weights: dict[str, Any] | None = None
-        self.logger = get_logger("EarlyStopping")
+        self._stage = stage
+        self._metric = metric
+        self._min_delta = min_delta
+        self._patience = patience
+        self._verbose = verbose
+        self._restore_best_weights = restore_best_weights
+        self._best_weights: dict[str, Any] | None = None
 
-        self.best_score: float | None = None
-        self.epochs_no_improve = 0
+        self._best_score: float | None = None
+        self._epochs_no_improve = 0
 
         if mode not in {"min", "max"}:
             msg = "mode must be one of 'min' or 'max'"
             raise ValueError(msg)
-        self.mode = mode
-        if self.mode == "min":
-            self.monitor_op = lambda current, best: current < best - self.min_delta
+        self._mode = mode
+        if self._mode == "min":
+            self._monitor_op = lambda current, best: current < best - self._min_delta
         else:
-            self.monitor_op = lambda current, best: current > best + self.min_delta
+            self._monitor_op = lambda current, best: current > best + self._min_delta
+
+    @property
+    def best_score(self) -> float | None:
+        """Get the best score observed so far."""
+        return self._best_score
+
+    @property
+    def best_weights(self) -> dict[str, Any] | None:
+        """Get the best model weights observed so far."""
+        return self._best_weights
 
     @charge(Event.BEFORE_TRAIN)
     def run_on_train_start(self, _: EventContext) -> None:
@@ -70,12 +81,12 @@ class EarlyStopping:
         Args:
             _: The event context (not used here).
         """
-        self.best_score = None
-        self.epochs_no_improve = 0
+        self._best_score = None
+        self._epochs_no_improve = 0
 
     @charge(Event.AFTER_TRAIN_EPOCH)
     def run_on_epoch_end(self, context: EventContext) -> None:
-        if self.stage != "train":
+        if self._stage != "train":
             return
 
         metrics = context["train_metrics"]
@@ -85,7 +96,7 @@ class EarlyStopping:
 
     @charge(Event.AFTER_VALIDATION)
     def run_on_validation_end(self, context: EventContext) -> None:
-        if self.stage != "val":
+        if self._stage != "val":
             return
 
         metrics = context["val_metrics"]
@@ -104,36 +115,36 @@ class EarlyStopping:
             model: The model being trained.
         """
 
-        if self.metric not in metrics:
-            msg = f"Metric '{self.metric}' not found in training metrics."
+        if self._metric not in metrics:
+            msg = f"Metric '{self._metric}' not found in training metrics."
             raise ValueError(msg)
 
-        current_score = metrics[self.metric]
-        if self.best_score is None:
-            self.best_score = current_score
-            if self.restore_best_weights:
-                self.best_weights = model.state_dict()
+        current_score = metrics[self._metric]
+        if self._best_score is None:
+            self._best_score = current_score
+            if self._restore_best_weights:
+                self._best_weights = model.state_dict()
             return
 
-        if self.monitor_op(current_score, self.best_score):
-            self.best_score = current_score
-            self.epochs_no_improve = 0
-            if self.restore_best_weights:
-                self.best_weights = model.state_dict()
+        if self._monitor_op(current_score, self._best_score):
+            self._best_score = current_score
+            self._epochs_no_improve = 0
+            if self._restore_best_weights:
+                self._best_weights = model.state_dict()
         else:
-            self.epochs_no_improve += 1
-            if self.epochs_no_improve >= self.patience:
+            self._epochs_no_improve += 1
+            if self._epochs_no_improve >= self._patience:
                 battery.stop_training = True
-                if self.verbose:
-                    self.logger.info(
+                if self._verbose:
+                    logger.info(
                         "Early stopping applied. No improvement in '%s' for %d epochs.",
-                        self.metric,
-                        self.patience,
+                        self._metric,
+                        self._patience,
                     )
 
     @charge(Event.AFTER_TRAIN)
     def run_on_train_end(self, context: EventContext) -> None:
-        if self.restore_best_weights and self.best_weights is not None:
-            context["model"].load_state_dict(self.best_weights)
-            if self.verbose:
-                self.logger.info("Restored best model weights from early stopping.")
+        if self._restore_best_weights and self._best_weights is not None:
+            context["model"].load_state_dict(self._best_weights)
+            if self._verbose:
+                logger.info("Restored best model weights from early stopping.")

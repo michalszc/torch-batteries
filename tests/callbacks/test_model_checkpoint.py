@@ -25,18 +25,18 @@ class TestModelCheckpoint:
             save_top_k=3,
             verbose=True,
         )
-        assert checkpoint.stage == "val"
-        assert checkpoint.metric == "accuracy"
-        assert checkpoint.mode == "max"
-        assert checkpoint.save_dir == "./checkpoints"
-        assert checkpoint.save_path == "best_model.pth"
-        assert checkpoint.save_top_k == 3
-        assert checkpoint.verbose is True
+        assert checkpoint._stage == "val"  # noqa: SLF001
+        assert checkpoint._metric == "accuracy"  # noqa: SLF001
+        assert checkpoint._mode == "max"  # noqa: SLF001
+        assert checkpoint._save_dir == "./checkpoints"  # noqa: SLF001
+        assert checkpoint._save_path == "best_model.pth"  # noqa: SLF001
+        assert checkpoint._save_top_k == 3  # noqa: SLF001
+        assert checkpoint._verbose is True  # noqa: SLF001
 
     def test_invalid_stage(self) -> None:
         """Test ModelCheckpoint initialization with invalid stage."""
         with pytest.raises(ValueError, match="stage must be one of 'train' or 'val'"):
-            ModelCheckpoint(stage="invalid", metric="accuracy")
+            ModelCheckpoint(stage="invalid", metric="accuracy")  # type: ignore[arg-type]
 
     def test_invalid_mode(self) -> None:
         """Test ModelCheckpoint initialization with invalid mode."""
