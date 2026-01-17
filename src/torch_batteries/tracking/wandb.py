@@ -87,7 +87,7 @@ class WandbTracker(ExperimentTracker):
             "config": run.config,
         }
 
-        self._run = wandb.init(**wandb_config)
+        self._run = wandb.init(**wandb_config)  # type: ignore[arg-type]
         self._is_initialized = True
 
         logger.info(
@@ -181,13 +181,15 @@ class WandbTracker(ExperimentTracker):
     @property
     def run_id(self) -> str | None:
         """Get the current run ID."""
-        return self._run.id
+        if self._run:
+            return str(self._run.id)
+        return None
 
     @property
     def run_url(self) -> str | None:
         """Get the wandb run URL."""
         if self._run:
-            return self._run.url
+            return str(self._run.url)
         return None
 
     def _assert_initialized(self) -> None:

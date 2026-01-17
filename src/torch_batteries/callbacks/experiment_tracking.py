@@ -1,5 +1,7 @@
 """Experiment tracking callback for automatic logging."""
 
+from typing import Any
+
 from torch_batteries import Event, EventContext, charge
 from torch_batteries.tracking.base import ExperimentTracker
 from torch_batteries.tracking.types import Run
@@ -71,7 +73,7 @@ class ExperimentTrackingCallback:
             ctx: Event context
         """
         self.tracker.init(
-            run=self.run,
+            run=self.run if self.run is not None else Run(),
         )
 
         logger.info("Experiment tracking started")
@@ -103,14 +105,16 @@ class ExperimentTrackingCallback:
             return
 
         # Get metrics from context
-        metrics = {
-            "epoch": self._current_epoch,
+        metrics: dict[str, float] = {
+            "epoch": float(self._current_epoch),
         }
         if ctx.get("loss") is not None:
             metrics["loss"] = float(ctx["loss"])
 
         if ctx.get("train_metrics"):
-            metrics.update(ctx["train_metrics"])
+            train_metrics = ctx["train_metrics"]
+            if isinstance(train_metrics, dict):
+                metrics.update({k: float(v) for k, v in train_metrics.items()})
 
         # Log with train/ prefix
         if metrics:
@@ -130,14 +134,16 @@ class ExperimentTrackingCallback:
         """
         assert self.tracker.is_initialized, "Expected tracker to be initialized."
 
+        metrics: dict[str, Any] = {}
+        metrics["epoch"] = float(self._current_epoch)
         val_metrics = ctx.get("val_metrics")
-        val_metrics["epoch"] = self._current_epoch
-        if val_metrics:
-            self.tracker.log_metrics(
-                val_metrics,
-                step=self._global_step,
-                prefix="val/",
-            )
+        if val_metrics and isinstance(val_metrics, dict):
+            metrics.update({k: float(v) for k, v in val_metrics.items()})
+        self.tracker.log_metrics(
+            metrics,
+            step=self._global_step,
+            prefix="val/",
+        )
 
     @charge(Event.AFTER_TRAIN)
     def on_train_end(self, ctx: EventContext) -> None:
@@ -149,7 +155,7 @@ class ExperimentTrackingCallback:
         """
         assert self.tracker.is_initialized, "Expected tracker to be initialized."
 
-        summary = {
+        summary: dict[str, Any] = {
             "total_epochs": self._current_epoch,
             "total_steps": self._global_step,
         }
