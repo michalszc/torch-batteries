@@ -8,6 +8,8 @@ from torch import nn
 from torch_batteries import Event, EventContext, charge
 from torch_batteries.utils.logging import get_logger
 
+logger = get_logger("ModelCheckpoint")
+
 
 class ModelCheckpoint:
     """
@@ -52,38 +54,51 @@ class ModelCheckpoint:
             msg = "stage must be one of 'train' or 'val'"
             raise ValueError(msg)
 
-        self.stage = stage
-        self.metric = metric
-        self.save_dir = save_dir
-        self.save_path = save_path
-        self.save_top_k = save_top_k
-        self.best_k_models: dict[str, float] = {}
-        self.verbose = verbose
+        self._stage = stage
+        self._metric = metric
+        self._save_dir = save_dir
+        self._save_path = save_path
+        self._save_top_k = save_top_k
+        self._best_k_models: dict[str, float] = {}
+        self._verbose = verbose
 
-        self.best_model_path: str | None = None
-        self.kth_best_model_path: str | None = None
+        self._best_model_path: str | None = None
+        self._kth_best_model_path: str | None = None
 
         if mode not in {"min", "max"}:
             msg = "mode must be one of 'min' or 'max'"
             raise ValueError(msg)
-        self.mode = mode
-        if self.mode == "min":
-            self.monitor_op = lambda current, best: current < best
-            self.best_score = float("inf")
-            self.kth_best_score = float("inf")
+        self._mode = mode
+        if self._mode == "min":
+            self._monitor_op = lambda current, best: current < best
+            self._best_score = float("inf")
+            self._kth_best_score = float("inf")
         else:
-            self.monitor_op = lambda current, best: current > best
-            self.best_score = float("-inf")
-            self.kth_best_score = float("-inf")
-
-        self.log = get_logger("ModelCheckpoint")
+            self._monitor_op = lambda current, best: current > best
+            self._best_score = float("-inf")
+            self._kth_best_score = float("-inf")
 
         self.CHECKPOINT_JOIN_CHAR = "-"
         self.CHECKPOINT_EQUALS_CHAR = "="
 
+    @property
+    def best_model_path(self) -> str | None:
+        """Returns the path of the best saved model."""
+        return self._best_model_path
+
+    @property
+    def best_score(self) -> float | None:
+        """Returns the best score achieved by the monitored metric."""
+        return self._best_score
+
+    @property
+    def best_k_models(self) -> dict[str, float]:
+        """Returns a dictionary of the top K saved models and their scores."""
+        return self._best_k_models
+
     @charge(Event.AFTER_TRAIN_EPOCH)
     def run_on_train_epoch_end(self, context: EventContext) -> None:
-        if self.stage != "train":
+        if self._stage != "train":
             return
 
         metrics = context["train_metrics"]
@@ -94,7 +109,7 @@ class ModelCheckpoint:
 
     @charge(Event.AFTER_VALIDATION)
     def run_on_validation_end(self, context: EventContext) -> None:
-        if self.stage != "val":
+        if self._stage != "val":
             return
 
         metrics = context["val_metrics"]
@@ -104,55 +119,55 @@ class ModelCheckpoint:
             self._save_top_k_model(context["model"], metrics)
 
     def _save_best_model(self, model: nn.Module, metrics: dict[str, float]) -> bool:
-        current_score = metrics.get(self.metric)
+        current_score = metrics.get(self._metric)
         if current_score is None:
             return False
 
-        if self.monitor_op(current_score, self.best_score):
-            self.best_score = current_score
-            self.best_model_path = self._save_model(model, metrics, current_score)
+        if self._monitor_op(current_score, self._best_score):
+            self._best_score = current_score
+            self._best_model_path = self._save_model(model, metrics, current_score)
             return True
         return False
 
     def _save_top_k_model(self, model: nn.Module, metrics: dict[str, float]) -> None:
-        current_score = metrics.get(self.metric)
+        current_score = metrics.get(self._metric)
         if current_score is None:
             return
 
-        if len(self.best_k_models) < self.save_top_k or self.monitor_op(
-            current_score, self.kth_best_score
+        if len(self._best_k_models) < self._save_top_k or self._monitor_op(
+            current_score, self._kth_best_score
         ):
             self._save_model(model, metrics, current_score)
 
-        if len(self.best_k_models) == self.save_top_k:
-            if self.mode == "min":
-                self.kth_best_model_path = max(
-                    self.best_k_models,
-                    key=self.best_k_models.get,  # type: ignore[arg-type]
+        if len(self._best_k_models) == self._save_top_k:
+            if self._mode == "min":
+                self._kth_best_model_path = max(
+                    self._best_k_models,
+                    key=self._best_k_models.get,  # type: ignore[arg-type]
                 )
-                self.kth_best_score = self.best_k_models[self.kth_best_model_path]
+                self._kth_best_score = self._best_k_models[self._kth_best_model_path]
             else:
-                self.kth_best_model_path = min(
-                    self.best_k_models,
-                    key=self.best_k_models.get,  # type: ignore[arg-type]
+                self._kth_best_model_path = min(
+                    self._best_k_models,
+                    key=self._best_k_models.get,  # type: ignore[arg-type]
                 )
-                self.kth_best_score = self.best_k_models[self.kth_best_model_path]
+                self._kth_best_score = self._best_k_models[self._kth_best_model_path]
 
     def _save_model(
         self, model: nn.Module, metrics: dict[str, float], current_score: float
     ) -> str:
         filename = self._format_checkpoint_name(
-            self.save_path,
+            self._save_path,
             metrics,
             auto_insert_metric_name=True,
         )
-        filepath = f"{self.save_dir}/{filename}.pth"
+        filepath = f"{self._save_dir}/{filename}.pth"
         torch.save(model.state_dict(), filepath)
-        if self.verbose:
-            self.log.info(
+        if self._verbose:
+            logger.info(
                 "Saved model checkpoint at: %s with %s: %.2f",
                 filepath,
-                self.metric,
+                self._metric,
                 current_score,
             )
 
@@ -160,13 +175,13 @@ class ModelCheckpoint:
         return filepath
 
     def _update_top_k_models(self, filepath: str, current_score: float) -> None:
-        self.best_k_models[filepath] = current_score
+        self._best_k_models[filepath] = current_score
 
-        if len(self.best_k_models) > self.save_top_k:
-            if self.mode == "min":
-                worst_model = max(self.best_k_models, key=self.best_k_models.get)  # type: ignore[arg-type]
+        if len(self._best_k_models) > self._save_top_k:
+            if self._mode == "min":
+                worst_model = max(self._best_k_models, key=self._best_k_models.get)  # type: ignore[arg-type]
             else:
-                worst_model = min(self.best_k_models, key=self.best_k_models.get)  # type: ignore[arg-type]
+                worst_model = min(self._best_k_models, key=self._best_k_models.get)  # type: ignore[arg-type]
             self._delete_saved_model(worst_model)
 
     def _format_checkpoint_name(
@@ -202,5 +217,5 @@ class ModelCheckpoint:
         return filename
 
     def _delete_saved_model(self, filepath: str) -> None:
-        del self.best_k_models[filepath]
+        del self._best_k_models[filepath]
         Path(filepath).unlink()
