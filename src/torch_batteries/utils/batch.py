@@ -20,7 +20,7 @@ def get_batch_size(batch: Any) -> int:
     Returns:
         Number of samples in the batch
 
-    Example:
+    Examples:
         ```python
         # Single tensor batch
         batch = torch.randn(32, 10)

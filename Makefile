@@ -49,12 +49,11 @@ validate-version: ## Check if versions match and differ from PyPI
 	@bash scripts/validate_version.sh
 
 docs: ## Generate HTML documentation using pdoc
-	pdoc -o docs src/torch_batteries
+	pdoc -o docs --docformat google src/torch_batteries
 	@echo "📚 Documentation generated in docs/ directory"
 
 docs-serve: ## Generate documentation and serve it locally
-	pdoc -o docs src/torch_batteries
-	@echo "📚 Documentation generated in docs/ directory"
+	make docs
 	@echo "🌐 Starting local server at http://localhost:8000"
 	@echo "Press Ctrl+C to stop the server"
 	cd docs && python -m http.server 8000

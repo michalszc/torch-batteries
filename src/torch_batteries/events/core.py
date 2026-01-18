@@ -191,10 +191,9 @@ class Event(Enum):
 
 
 def charge(event: Event) -> Callable[[Callable[P, R]], Callable[P, R]]:
-    """
-    Decorator to mark methods for specific training events.
+    """Decorator to mark methods for specific training events.
 
-    All event handlers should accept a single EventContext parameter containing
+    All event handlers should accept a single `EventContext` parameter containing
     relevant context for the event. Different events populate different fields.
 
     Args:
@@ -203,11 +202,8 @@ def charge(event: Event) -> Callable[[Callable[P, R]], Callable[P, R]]:
     Returns:
         Decorated function with event metadata
 
-    Example:
+    Examples:
         ```python
-        from torch_batteries import charge, Event
-        from torch_batteries.events import EventContext
-
         @charge(Event.TRAIN_STEP)
         def training_step(self, context: EventContext):
             batch = context["batch"]

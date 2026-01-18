@@ -1,6 +1,13 @@
 """Trainer module for torch-batteries package.
 
-This module provides the Battery trainer class and associated types.
+Provides the main Battery trainer class for PyTorch model training,
+testing, and prediction with event-driven workflow control.
+
+Main Classes:
+- Battery: Main trainer class with event-driven architecture
+- TrainResult: Return type for training results
+- TestResult: Return type for test results
+- PredictResult: Return type for prediction results
 """
 
 from .core import Battery

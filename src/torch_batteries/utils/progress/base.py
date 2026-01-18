@@ -6,7 +6,17 @@ from .types import Phase, ProgressMetrics
 
 
 class Progress(ABC):
-    """Abstract base class for progress tracking during training."""
+    """Abstract base class for progress tracking during training.
+
+    Defines the interface for progress trackers that display training progress
+    in different formats (progress bars, simple text, or silent).
+
+    All progress implementations must implement these methods to track:
+    - Epoch start/end
+    - Phase start/end (train, validation, test, predict)
+    - Batch-level updates with metrics
+    - Training completion
+    """
 
     @abstractmethod
     def start_epoch(self, epoch: int) -> None:
@@ -48,12 +58,17 @@ class Progress(ABC):
         """End the current phase and return average metrics.
 
         Returns:
-            Average loss (float) or dictionary of average metrics including loss.
+            Either a single float (average loss) or a dictionary containing
+            average loss and other metrics calculated during the phase.
         """
 
     @abstractmethod
     def end_epoch(self) -> None:
-        """End the current epoch and display summary."""
+        """End the current epoch and display summary.
+
+        Called after all phases in an epoch are complete. May display
+        a summary of metrics or remain silent depending on verbosity.
+        """
 
     @abstractmethod
     def end_training(self) -> None:

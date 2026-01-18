@@ -11,9 +11,20 @@ logger = get_logger("EarlyStopping")
 
 
 class EarlyStopping:
-    """
-    Early stops the training if selected metric doesn't improve after a given patience.
-    """
+    """Early stops the training if selected metric doesn't improve after a given patience.
+
+    Args:
+        stage: One of 'train' or 'val' to indicate which stage's metric to monitor
+        metric: The name of the metric to monitor
+        min_delta: Minimum change in the monitored metric to qualify as an improvement
+        patience: Number of epochs with no improvement after which training will be stopped
+        verbose: If True, prints a message when early stopping is triggered
+        mode: One of 'min' or 'max'. In 'min' mode, training will stop when the
+              monitored metric stops decreasing. In 'max' mode, it will stop
+              when the metric stops increasing
+        restore_best_weights: If True, restore model weights from the epoch with the
+                             best value of the monitored metric
+    """  # noqa: E501
 
     def __init__(  # noqa: PLR0913
         self,
@@ -26,19 +37,6 @@ class EarlyStopping:
         mode: Literal["min", "max"] = "min",
         restore_best_weights: bool = False,
     ) -> None:
-        """
-        Args:
-            stage: One of 'train' or 'val' to indicate which stage's metric to monitor.
-            metric: The name of the metric to monitor.
-            min_delta: Minimum change in the monitored metric to qualify as an
-                        improvement.
-            patience: Number of epochs with no improvement after which training will be
-                        stopped.
-            verbose: If True, prints a message when early stopping is triggered.
-            mode: One of 'min' or 'max'. In 'min' mode, training will stop when the
-                        monitored metric stops decreasing. In 'max' mode, it will stop
-                        when the metric stops increasing.
-        """
         if stage not in {"train", "val"}:
             msg = "stage must be one of 'train' or 'val'"
             raise ValueError(msg)
@@ -86,6 +84,11 @@ class EarlyStopping:
 
     @charge(Event.AFTER_TRAIN_EPOCH)
     def run_on_epoch_end(self, context: EventContext) -> None:
+        """Check early stopping after training epoch ends.
+
+        Args:
+            context: Event context containing training metrics.
+        """
         if self._stage != "train":
             return
 
@@ -96,6 +99,11 @@ class EarlyStopping:
 
     @charge(Event.AFTER_VALIDATION)
     def run_on_validation_end(self, context: EventContext) -> None:
+        """Check early stopping after validation ends.
+
+        Args:
+            context: Event context containing validation metrics.
+        """
         if self._stage != "val":
             return
 
@@ -144,6 +152,11 @@ class EarlyStopping:
 
     @charge(Event.AFTER_TRAIN)
     def run_on_train_end(self, context: EventContext) -> None:
+        """Restore best model weights after training ends if configured.
+
+        Args:
+            context: Event context containing the model.
+        """
         if self._restore_best_weights and self._best_weights is not None:
             context["model"].load_state_dict(self._best_weights)
             if self._verbose:
