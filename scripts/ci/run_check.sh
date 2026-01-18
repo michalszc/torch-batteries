@@ -14,7 +14,7 @@ run_check_with_summary() {
 
     echo "## $icon $title" >> $GITHUB_STEP_SUMMARY
 
-    if $make_command > "$output_file" 2>&1; then
+    if bash -lc "$make_command" > "$output_file" 2>&1; then
         echo "✅ **$success_message**" >> $GITHUB_STEP_SUMMARY
     else
         echo "❌ **$error_message**" >> $GITHUB_STEP_SUMMARY
