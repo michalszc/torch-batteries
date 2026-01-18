@@ -10,7 +10,11 @@ from .types import Phase, ProgressMetrics
 
 
 class SimpleProgress(Progress):
-    """Progress tracker that displays simple text output (verbose=2)."""
+    """Progress tracker that displays simple text output (verbose=2).
+
+    Prints epoch summaries with metrics after each epoch completes.
+    Provides detailed text-based feedback without progress bars.
+    """
 
     __slots__ = (
         "_current_epoch",
@@ -61,7 +65,12 @@ class SimpleProgress(Progress):
     def update(
         self, metrics: ProgressMetrics | None = None, batch_size: int | None = None
     ) -> None:
-        """Update progress with metrics."""
+        """Update progress with batch metrics (accumulated for epoch summary).
+
+        Args:
+            metrics: Dictionary of metrics for the current batch.
+            batch_size: Number of samples in the batch for weighted averaging.
+        """
         if metrics and batch_size is not None:
             for key, value in metrics.items():
                 if key not in self._total_metrics:
@@ -70,7 +79,11 @@ class SimpleProgress(Progress):
             self._total_samples += batch_size
 
     def end_phase(self) -> dict[str, float]:
-        """End the current phase and return average metrics."""
+        """End the current phase and return average metrics.
+
+        Returns:
+            Dictionary of average metrics calculated across all batches in the phase.
+        """
         if self._total_samples > 0:
             avg_metrics = {
                 key: total / self._total_samples

@@ -6,14 +6,40 @@ import torch
 
 
 def get_device(device: str | torch.device = "auto") -> torch.device:
-    """
-    Get the available device (CUDA, MPS or CPU).
+    """Get PyTorch device for model and data placement.
+
+    Automatically detects and returns the best available device (CUDA > MPS > CPU)
+    when set to 'auto', or returns the specified device.
+
+    Args:
+        device: Device specification. Can be:
+            - 'auto': Automatically detect best available device
+            - str: Device string like 'cuda', 'cpu', 'mps', 'cuda:0'
+            - torch.device: PyTorch device object
 
     Returns:
-        torch.device: The available device.
+        torch.device object ready for use
+
+    Examples:
+        ```python
+        # Auto-detect best device
+        device = get_device('auto')  # Returns cuda, mps, or cpu
+
+        # Explicitly specify device
+        device = get_device('cuda')
+        device = get_device('cpu')
+
+        # Pass device object
+        device = get_device(torch.device('cuda:1'))
+        ```
     """
 
     def _get_auto_device() -> torch.device:
+        """Detect best available device.
+
+        Returns:
+            torch.device: CUDA if available, else MPS if available, else CPU.
+        """
         if (
             torch.cuda.is_available()
             and hasattr(torch.cuda, "is_built")
@@ -47,7 +73,7 @@ def move_to_device(data: Any, device: torch.device) -> Any:
     Returns:
         Data moved to the specified device
 
-    Example:
+    Examples:
         ```python
         device = torch.device('cuda')
         batch = (torch.randn(32, 10), torch.randn(32, 1))

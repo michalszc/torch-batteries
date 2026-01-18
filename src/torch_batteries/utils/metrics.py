@@ -36,22 +36,22 @@ def calculate_metrics(
         Dictionary mapping metric names to their calculated float values.
         Only successfully calculated metrics are included.
 
-    Example:
+    Examples:
         ```python
-        import torch.nn.functional as F
+         import torch.nn.functional as F
 
-        def mae(pred, target):
-            return F.l1_loss(pred, target)
+         def mae(pred, target):
+             return F.l1_loss(pred, target)
 
-        def rmse(pred, target):
-            return torch.sqrt(F.mse_loss(pred, target))
+         def rmse(pred, target):
+             return torch.sqrt(F.mse_loss(pred, target))
 
-        metrics_dict = {'mae': mae, 'rmse': rmse}
-        pred = torch.tensor([[1.0], [2.0], [3.0]])
-        target = torch.tensor([[1.1], [2.2], [2.9]])
+         metrics_dict = {'mae': mae, 'rmse': rmse}
+         pred = torch.tensor([[1.0], [2.0], [3.0]])
+         target = torch.tensor([[1.1], [2.2], [2.9]])
 
-        results = calculate_metrics(metrics_dict, pred, target)
-        # returns: {'mae': 0.133..., 'rmse': 0.141...}
+         results = calculate_metrics(metrics_dict, pred, target)
+         # returns: {'mae': 0.133..., 'rmse': 0.141...}
         ```
 
     Note:
