@@ -18,7 +18,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        check: [lint, docs, format-check, type-check, test, validate-version]
+        check: [lint, format-check, type-check, test, validate-version, docs]
 
     steps:
     - uses: actions/checkout@v4
@@ -37,7 +37,7 @@ jobs:
       if: matrix.check != 'validate-version' || github.event_name == 'pull_request'
       run: |
         case "${{ matrix.check }}" in
-          lint|format-check|type-check|test|validate-version)
+          lint|format-check|type-check|test|validate-version|docs)
             ./scripts/ci/run_check.sh "${{ matrix.check }}"
             ;;
           *)
