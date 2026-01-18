@@ -1,8 +1,11 @@
 """Weights & Biases (wandb) tracker implementation."""
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-import wandb
+if TYPE_CHECKING:
+    from wandb.sdk.wandb_run import Run as WandbRun
+else:
+    WandbRun = Any
 
 from torch_batteries.tracking.base import ExperimentTracker
 from torch_batteries.tracking.types import (
@@ -49,12 +52,12 @@ class WandbTracker(ExperimentTracker):
         """
         self._project = project
         self._entity = entity
-        self._run: Any = None
+        self._run: WandbRun | None = None
         self._run_id: str | None = None
         self._is_initialized = False
 
     @property
-    def run(self) -> wandb.sdk.wandb_run.Run | None:
+    def run(self) -> WandbRun | None:
         """Get the tracked wandb run."""
         return self._run
 
@@ -105,7 +108,9 @@ class WandbTracker(ExperimentTracker):
             "config": run.config,
         }
 
-        self._run = wandb.init(**wandb_config)
+        wandb_run = wandb.init(**wandb_config)  # type: ignore[arg-type]
+
+        self._run = wandb_run
         self._is_initialized = True
 
         logger.info(
@@ -142,15 +147,15 @@ class WandbTracker(ExperimentTracker):
         Raises:
             RuntimeError: If the tracker is not initialized
         """
-        self._assert_initialized()
+        wandb_run = self._require_run()
 
         if prefix:
             metrics = {f"{prefix}{k}": v for k, v in metrics.items()}
 
         if step is not None:
-            self._run.log(metrics, step=step)
+            wandb_run.log(metrics, step=step)
         else:
-            self._run.log(metrics)
+            wandb_run.log(metrics)
 
     def finish(self, exit_code: int = 0) -> None:
         """
@@ -162,9 +167,9 @@ class WandbTracker(ExperimentTracker):
         Raises:
             RuntimeError: If the tracker is not initialized
         """
-        self._assert_initialized()
+        wandb_run = self._require_run()
 
-        self._run.finish(exit_code=exit_code)
+        wandb_run.finish(exit_code=exit_code)
         self._is_initialized = False
         logger.info("wandb run finished")
 
@@ -178,9 +183,9 @@ class WandbTracker(ExperimentTracker):
         Raises:
             RuntimeError: If the tracker is not initialized
         """
-        self._assert_initialized()
+        wandb_run = self._require_run()
         for key, value in summary.items():
-            self._run.summary[key] = value
+            wandb_run.summary[key] = value
 
     @property
     def run_id(self) -> str | None:
@@ -196,7 +201,8 @@ class WandbTracker(ExperimentTracker):
             return str(self._run.url)
         return None
 
-    def _assert_initialized(self) -> None:
-        if not self.is_initialized:
+    def _require_run(self) -> WandbRun:
+        if not self.is_initialized or self._run is None:
             msg = "WandbTracker is not initialized. Call init()."
             raise RuntimeError(msg)
+        return self._run

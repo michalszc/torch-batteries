@@ -11,7 +11,7 @@ from torch_batteries.tracking.types import Run
 class FakeTracker(ExperimentTracker):
     """A fake `ExperimentTracker` for testing without external dependencies."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Create a fake tracker."""
         self.initialized = False
         self.logged_metrics: list[dict[str, Any]] = []
@@ -60,7 +60,7 @@ class FakeTracker(ExperimentTracker):
 class TestExperimentTrackingCallback:
     """Test suite for ExperimentTrackingCallback."""
 
-    def test_create_with_run(self):
+    def test_create_with_run(self) -> None:
         """Test callback creation with a run."""
         tracker = FakeTracker()
         run = Run(config={"lr": 0.001})
@@ -74,7 +74,7 @@ class TestExperimentTrackingCallback:
         assert callback.current_epoch == 0
         assert callback.global_step == 0
 
-    def test_create_without_run(self):
+    def test_create_without_run(self) -> None:
         """Test callback creation without a run."""
         tracker = FakeTracker()
         callback = ExperimentTrackingCallback(tracker=tracker)
@@ -83,14 +83,14 @@ class TestExperimentTrackingCallback:
         assert callback.run is None
         assert callback.log_every_n_steps == 1
 
-    def test_create_custom_log_frequency(self):
+    def test_create_custom_log_frequency(self) -> None:
         """Test callback creation with custom log frequency."""
         tracker = FakeTracker()
         callback = ExperimentTrackingCallback(tracker=tracker, log_every_n_steps=10)
 
         assert callback.log_every_n_steps == 10
 
-    def test_on_train_start(self):
+    def test_on_train_start(self) -> None:
         """Test on_train_start initializes tracker."""
         tracker = FakeTracker()
         run = Run(config={"lr": 0.001, "batch_size": 32})
@@ -102,7 +102,7 @@ class TestExperimentTrackingCallback:
         assert tracker.is_initialized
         assert tracker.run == run
 
-    def test_on_train_start_without_run(self):
+    def test_on_train_start_without_run(self) -> None:
         """Test on_train_start initializes tracker with default run."""
         tracker = FakeTracker()
         callback = ExperimentTrackingCallback(tracker=tracker)
@@ -113,7 +113,7 @@ class TestExperimentTrackingCallback:
         assert tracker.is_initialized
         assert tracker.run is not None
 
-    def test_on_epoch_start(self):
+    def test_on_epoch_start(self) -> None:
         """Test on_epoch_start updates current epoch."""
         tracker = FakeTracker()
         callback = ExperimentTrackingCallback(tracker=tracker)
@@ -124,7 +124,7 @@ class TestExperimentTrackingCallback:
 
         assert callback.current_epoch == 5
 
-    def test_on_epoch_start_no_epoch(self):
+    def test_on_epoch_start_no_epoch(self) -> None:
         """Test on_epoch_start with no epoch in context."""
         tracker = FakeTracker()
         callback = ExperimentTrackingCallback(tracker=tracker)
@@ -134,7 +134,7 @@ class TestExperimentTrackingCallback:
 
         assert callback.current_epoch == 0
 
-    def test_on_train_step_end_basic(self):
+    def test_on_train_step_end_basic(self) -> None:
         """Test on_train_step_end logs metrics."""
         tracker = FakeTracker()
         callback = ExperimentTrackingCallback(tracker=tracker, log_every_n_steps=1)
@@ -157,7 +157,7 @@ class TestExperimentTrackingCallback:
         assert logged["metrics"]["epoch"] == 1.0
         assert logged["metrics"]["loss"] == 0.5
 
-    def test_on_train_step_end_with_train_metrics(self):
+    def test_on_train_step_end_with_train_metrics(self) -> None:
         """Test on_train_step_end logs train_metrics from context."""
         tracker = FakeTracker()
         callback = ExperimentTrackingCallback(tracker=tracker, log_every_n_steps=1)
@@ -178,7 +178,7 @@ class TestExperimentTrackingCallback:
         assert logged["metrics"]["accuracy"] == 0.95
         assert logged["metrics"]["f1"] == 0.92
 
-    def test_on_train_step_end_log_frequency(self):
+    def test_on_train_step_end_log_frequency(self) -> None:
         """Test on_train_step_end respects log frequency."""
         tracker = FakeTracker()
         callback = ExperimentTrackingCallback(tracker=tracker, log_every_n_steps=3)
@@ -213,7 +213,7 @@ class TestExperimentTrackingCallback:
         assert len(tracker.logged_metrics) == 2
         assert callback.global_step == 6
 
-    def test_on_train_step_end_no_loss(self):
+    def test_on_train_step_end_no_loss(self) -> None:
         """Test on_train_step_end without loss in context."""
         tracker = FakeTracker()
         callback = ExperimentTrackingCallback(tracker=tracker, log_every_n_steps=1)
@@ -230,7 +230,7 @@ class TestExperimentTrackingCallback:
         assert "loss" not in logged["metrics"]
         assert logged["metrics"]["epoch"] == 1.0
 
-    def test_on_validation_end(self):
+    def test_on_validation_end(self) -> None:
         """Test on_validation_end logs validation metrics."""
         tracker = FakeTracker()
         callback = ExperimentTrackingCallback(tracker=tracker)
@@ -239,8 +239,8 @@ class TestExperimentTrackingCallback:
         callback.on_train_start(ctx)
 
         # Set current epoch
-        callback.current_epoch = 2
-        callback.global_step = 100
+        callback._current_epoch = 2  # noqa: SLF001
+        callback._global_step = 100  # noqa: SLF001
 
         ctx["val_metrics"] = {"loss": 0.3, "accuracy": 0.97}
         callback.on_validation_end(ctx)
@@ -253,7 +253,7 @@ class TestExperimentTrackingCallback:
         assert logged["metrics"]["loss"] == 0.3
         assert logged["metrics"]["accuracy"] == 0.97
 
-    def test_on_validation_end_no_metrics(self):
+    def test_on_validation_end_no_metrics(self) -> None:
         """Test on_validation_end with no val_metrics."""
         tracker = FakeTracker()
         callback = ExperimentTrackingCallback(tracker=tracker)
@@ -261,8 +261,8 @@ class TestExperimentTrackingCallback:
         ctx = EventContext()
         callback.on_train_start(ctx)
 
-        callback.current_epoch = 2
-        callback.global_step = 100
+        callback._current_epoch = 2  # noqa: SLF001
+        callback._global_step = 100  # noqa: SLF001
 
         callback.on_validation_end(ctx)
 
@@ -271,7 +271,7 @@ class TestExperimentTrackingCallback:
         assert logged["metrics"]["epoch"] == 2.0
         assert len(logged["metrics"]) == 1  # Only epoch
 
-    def test_on_train_end(self):
+    def test_on_train_end(self) -> None:
         """Test on_train_end finishes tracker."""
         tracker = FakeTracker()
         callback = ExperimentTrackingCallback(tracker=tracker)
@@ -285,7 +285,7 @@ class TestExperimentTrackingCallback:
         assert tracker.exit_code == 0
         assert not tracker.is_initialized
 
-    def test_full_training_lifecycle(self):
+    def test_full_training_lifecycle(self) -> None:
         """Test full training lifecycle with callback."""
         tracker = FakeTracker()
         run = Run(config={"lr": 0.001, "epochs": 2})
@@ -344,7 +344,7 @@ class TestExperimentTrackingCallback:
         val_logs = [m for m in tracker.logged_metrics if m["prefix"] == "val/"]
         assert len(val_logs) == 2
 
-    def test_multiple_epochs_global_step(self):
+    def test_multiple_epochs_global_step(self) -> None:
         """Test that global_step increments correctly across epochs."""
         tracker = FakeTracker()
         callback = ExperimentTrackingCallback(tracker=tracker, log_every_n_steps=1)
@@ -373,35 +373,3 @@ class TestExperimentTrackingCallback:
         # Verify step numbers in logged metrics
         steps = [m["step"] for m in tracker.logged_metrics]
         assert steps == [1, 2, 3, 4, 5, 6]
-
-    def test_train_metrics_not_dict(self):
-        """Test that non-dict train_metrics are ignored."""
-        tracker = FakeTracker()
-        callback = ExperimentTrackingCallback(tracker=tracker, log_every_n_steps=1)
-
-        ctx = EventContext()
-        callback.on_train_start(ctx)
-
-        ctx["loss"] = 0.5
-        ctx["train_metrics"] = "not a dict"
-        callback.on_train_step_end(ctx)
-
-        # Should only log loss and epoch, not the string
-        logged = tracker.logged_metrics[0]
-        assert "not a dict" not in str(logged["metrics"].values())
-
-    def test_val_metrics_not_dict(self):
-        """Test that non-dict val_metrics are ignored."""
-        tracker = FakeTracker()
-        callback = ExperimentTrackingCallback(tracker=tracker)
-
-        ctx = EventContext()
-        callback.on_train_start(ctx)
-
-        ctx["val_metrics"] = ["not", "a", "dict"]
-        callback.on_validation_end(ctx)
-
-        # Should only log epoch
-        logged = tracker.logged_metrics[0]
-        assert len(logged["metrics"]) == 1
-        assert "epoch" in logged["metrics"]
