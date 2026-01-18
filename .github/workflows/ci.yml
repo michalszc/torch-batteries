@@ -34,6 +34,7 @@ jobs:
       run: pip install -e . --group dev
 
     - name: Run ${{ matrix.check }}
+      if: matrix.check != 'validate-version' || github.event_name == 'pull_request'
       run: |
         case "${{ matrix.check }}" in
           lint|format-check|type-check|test|validate-version)

@@ -9,7 +9,11 @@ from .types import Phase, ProgressMetrics
 
 
 class BarProgress(Progress):
-    """Progress tracker that displays progress bars (verbose=1)."""
+    """Progress tracker that displays progress bars using tqdm (verbose=1).
+
+    Shows a progress bar for each phase with real-time metrics updates.
+    Provides visual feedback during training without verbose text output.
+    """
 
     __slots__ = (
         "_current_epoch",
@@ -38,7 +42,12 @@ class BarProgress(Progress):
         self._current_epoch = epoch
 
     def start_phase(self, phase: Phase, total_batches: int = 0) -> None:
-        """Start a new phase with progress bar."""
+        """Start a new phase with a progress bar.
+
+        Args:
+            phase: The training phase (train, validation, test, predict).
+            total_batches: Total number of batches to process in this phase.
+        """
         self._current_phase = phase
         self._total_metrics = {}
         self._total_samples = 0
@@ -57,7 +66,12 @@ class BarProgress(Progress):
     def update(
         self, metrics: ProgressMetrics | None = None, batch_size: int | None = None
     ) -> None:
-        """Update progress bar with metrics."""
+        """Update progress bar with current batch metrics.
+
+        Args:
+            metrics: Dictionary of metrics (e.g., loss, accuracy) for the current batch.
+            batch_size: Number of samples in the batch for weighted averaging.
+        """
         if metrics and batch_size is not None:
             for key, value in metrics.items():
                 if key not in self._total_metrics:
@@ -77,7 +91,11 @@ class BarProgress(Progress):
             self._pbar.update(1)
 
     def end_phase(self) -> dict[str, float]:
-        """End the current phase and close progress bar."""
+        """End the current phase, close progress bar, and return average metrics.
+
+        Returns:
+            Dictionary of average metrics calculated across all batches in the phase.
+        """
         if self._pbar:
             self._pbar.close()
             self._pbar = None

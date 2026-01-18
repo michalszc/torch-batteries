@@ -22,47 +22,19 @@ logger = get_logger("trainer")
 
 
 class Battery:
-    """
-    A flexible trainer class that uses decorated methods to define training behavior.
+    """A flexible trainer class that uses decorated methods to define training behavior.
 
-    The Battery class discovers methods decorated with @charge(Event.*) to automatically
+    The Battery class discovers methods decorated with `@charge(Event.*)` to automatically
     configure training, validation, testing, and prediction workflows.
 
     Args:
-        model: PyTorch model (nn.Module)
-        device: PyTorch device (cpu, cuda, etc.). If 'auto', detects available device.
-        optimizer: Optional optimizer for training
-        metrics: Optional dict of metric functions {name: callable(pred, target)}.
-                These metrics are automatically calculated for each batch.
-
-    Example:
-        ```python
-        class MyModel(nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.linear = nn.Linear(10, 1)
-
-            def forward(self, x):
-                return self.linear(x)
-
-            @charge(Event.TRAIN_STEP)
-            def training_step(self, batch):
-                x, y = batch
-                pred = self(x)
-                loss = F.mse_loss(pred, y)
-                return loss
-
-            @charge(Event.VALIDATION_STEP)
-            def validation_step(self, batch):
-                x, y = batch
-                pred = self(x)
-                loss = F.mse_loss(pred, y)
-                return loss
-
-        battery = Battery(model, optimizer=optimizer)  # Auto-detects device
-        battery.train(train_loader, val_loader, epochs=10)
-        ```
-    """
+        model: PyTorch model
+        device: PyTorch device. If 'auto', detects available device automatically.
+        optimizer: Optimizer for training (optional)
+        metrics: Dictionary of metric functions {name: callable(pred, target)}.
+                 These metrics are automatically calculated for each batch.
+        callbacks: List of callback instances for training events (optional)
+    """  # noqa: E501
 
     __slots__ = (
         "_device",

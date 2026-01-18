@@ -13,19 +13,19 @@ logger = get_logger("events.handler")
 
 
 class EventHandler:
-    """
-    Handles discovery and execution of methods decorated with @charge.
+    """Handles discovery and execution of methods decorated with `@charge`.
 
-    This class discovers methods on a model that are decorated with @charge
+    This class discovers methods on a model that are decorated with `@charge`
     and provides methods to call them based on events.
 
     Args:
         model: PyTorch model containing decorated methods
+        callbacks: Optional list of callback objects with decorated methods
 
-    Example:
+    Examples:
         ```python
         handler = EventHandler(model)
-        loss = handler.call(Event.TRAIN_STEP, batch)
+        loss = handler.call(Event.TRAIN_STEP, context)
         ```
     """
 

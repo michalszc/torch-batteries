@@ -7,7 +7,11 @@ from .types import Phase, ProgressMetrics
 
 
 class SilentProgress(Progress):
-    """Progress tracker that produces no output (verbose=0)."""
+    """Progress tracker that produces no output (verbose=0).
+
+    Tracks metrics internally but displays nothing to the console.
+    Useful for production environments or when logging is handled externally.
+    """
 
     __slots__ = (
         "_current_phase",
@@ -51,7 +55,12 @@ class SilentProgress(Progress):
     def update(
         self, metrics: ProgressMetrics | None = None, batch_size: int | None = None
     ) -> None:
-        """Update progress after processing a batch."""
+        """Update progress with batch metrics (silent, but tracked internally).
+
+        Args:
+            metrics: Dictionary of metrics for the current batch.
+            batch_size: Number of samples in the batch for weighted averaging.
+        """
         if metrics and batch_size is not None:
             for key, value in metrics.items():
                 if key not in self._total_metrics:

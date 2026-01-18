@@ -1,3 +1,5 @@
+"""Model Checkpoint Callback for torch-batteries."""
+
 import re
 from pathlib import Path
 from typing import Literal
@@ -12,32 +14,31 @@ logger = get_logger("ModelCheckpoint")
 
 
 class ModelCheckpoint:
-    """
-    Saves the model when a monitored metric improves.
+    """Saves the model when a monitored metric improves.
 
     Args:
-        stage: One of 'train' or 'val' to indicate which stage's metric to monitor.
-        metric: The name of the metric to monitor.
+        stage: One of 'train' or 'val' to indicate which stage's metric to monitor
+        metric: The name of the metric to monitor
         mode: One of 'min' or 'max'. In 'min' mode, the model is saved when the
-                    monitored metric decreases. In 'max' mode, it is saved when the
-                    metric increases.
-        save_dir: Directory to save the model checkpoints. Defaults to the current
-                    directory.
+              monitored metric decreases. In 'max' mode, it is saved when the
+              metric increases
+        save_dir: Directory to save the model checkpoints (defaults to current directory)
         save_path: Filename for the saved model. If None, defaults to
-                    'epochs-metric=value.pth'.
-        save_top_k: Saves specified number of best models. Defaults to 1.
+                   'epochs-metric=value.pth'
+        save_top_k: Saves specified number of best models (defaults to 1)
+        verbose: If True, prints messages when saving checkpoints
 
-    Example:
+    Examples:
         ```python
         checkpoint = ModelCheckpoint(
-                        stage="val",
-                        metric="accuracy",
-                        mode="max",
-                        save_path="best_model.pth"
-                    )
+            stage="val",
+            metric="accuracy",
+            mode="max",
+            save_path="best_model.pth"
+        )
         battery = Battery(model=model, callbacks=[checkpoint])
         ```
-    """
+    """  # noqa: E501
 
     def __init__(  # noqa: PLR0913
         self,
@@ -98,6 +99,11 @@ class ModelCheckpoint:
 
     @charge(Event.AFTER_TRAIN_EPOCH)
     def run_on_train_epoch_end(self, context: EventContext) -> None:
+        """Save model checkpoint after training epoch if metric improved.
+
+        Args:
+            context: Event context containing training metrics and model.
+        """
         if self._stage != "train":
             return
 
@@ -109,6 +115,11 @@ class ModelCheckpoint:
 
     @charge(Event.AFTER_VALIDATION)
     def run_on_validation_end(self, context: EventContext) -> None:
+        """Save model checkpoint after validation if metric improved.
+
+        Args:
+            context: Event context containing validation metrics and model.
+        """
         if self._stage != "val":
             return
 
@@ -119,6 +130,15 @@ class ModelCheckpoint:
             self._save_top_k_model(context["model"], metrics)
 
     def _save_best_model(self, model: nn.Module, metrics: dict[str, float]) -> bool:
+        """Save model if it achieves new best score.
+
+        Args:
+            model: The PyTorch model to save.
+            metrics: Dictionary of current metrics.
+
+        Returns:
+            True if model was saved as new best, False otherwise.
+        """
         current_score = metrics.get(self._metric)
         if current_score is None:
             return False
@@ -130,6 +150,12 @@ class ModelCheckpoint:
         return False
 
     def _save_top_k_model(self, model: nn.Module, metrics: dict[str, float]) -> None:
+        """Save model if it's in top-k best models.
+
+        Args:
+            model: The PyTorch model to save.
+            metrics: Dictionary of current metrics.
+        """
         current_score = metrics.get(self._metric)
         if current_score is None:
             return
@@ -156,6 +182,16 @@ class ModelCheckpoint:
     def _save_model(
         self, model: nn.Module, metrics: dict[str, float], current_score: float
     ) -> str:
+        """Save model to disk and update top-k tracking.
+
+        Args:
+            model: The PyTorch model to save.
+            metrics: Dictionary of current metrics.
+            current_score: The current metric score.
+
+        Returns:
+            Path to the saved model file.
+        """
         filename = self._format_checkpoint_name(
             self._save_path,
             metrics,
@@ -175,6 +211,12 @@ class ModelCheckpoint:
         return filepath
 
     def _update_top_k_models(self, filepath: str, current_score: float) -> None:
+        """Update top-k models tracking and remove worst model if needed.
+
+        Args:
+            filepath: Path to the newly saved model.
+            current_score: The metric score of the saved model.
+        """
         self._best_k_models[filepath] = current_score
 
         if len(self._best_k_models) > self._save_top_k:
@@ -192,6 +234,17 @@ class ModelCheckpoint:
         *,
         auto_insert_metric_name: bool = True,
     ) -> str:
+        """Format checkpoint filename with metrics values.
+
+        Args:
+            filename: Template filename with placeholders like {epoch}, {metric}.
+            metrics: Dictionary of metric values to insert.
+            prefix: Optional prefix to add to filename.
+            auto_insert_metric_name: Whether to add metric names to values.
+
+        Returns:
+            Formatted checkpoint filename.
+        """
         if not filename:
             filename = "{epoch}"
 
@@ -217,5 +270,10 @@ class ModelCheckpoint:
         return filename
 
     def _delete_saved_model(self, filepath: str) -> None:
+        """Delete a saved model file from disk and tracking.
+
+        Args:
+            filepath: Path to the model file to delete.
+        """
         del self._best_k_models[filepath]
         Path(filepath).unlink()
