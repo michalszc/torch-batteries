@@ -3,6 +3,8 @@
 from abc import ABC, abstractmethod
 from typing import Any
 
+from torch import nn
+
 from torch_batteries.tracking.types import (
     Run,
 )
@@ -73,4 +75,24 @@ class ExperimentTracker(ABC):
 
         Args:
             summary: Summary metrics/info
+        """
+
+    @abstractmethod
+    def log_model(
+        self,
+        model: nn.Module,
+        name: str = "model",
+        *,
+        aliases: list[str] | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        """Log a trained model artifact.
+
+        Trackers that support artifact logging (e.g. W&B) can override this.
+
+        Args:
+            model: Trained PyTorch model
+            name: Artifact base name
+            aliases: Optional artifact aliases (backend-specific)
+            metadata: Optional artifact metadata (backend-specific)
         """

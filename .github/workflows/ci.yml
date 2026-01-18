@@ -31,7 +31,7 @@ jobs:
         cache-dependency-path: 'pyproject.toml'
 
     - name: Install dependencies
-      run: 	pip install -e . --group dev
+      run: pip install -e . --group dev
 
     - name: Run ${{ matrix.check }}
       run: |

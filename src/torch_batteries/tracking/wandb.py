@@ -1,11 +1,12 @@
 """Weights & Biases (wandb) tracker implementation."""
 
-from typing import TYPE_CHECKING, Any
+import tempfile
+from pathlib import Path
+from typing import Any
 
-if TYPE_CHECKING:
-    from wandb.sdk.wandb_run import Run as WandbRun
-else:
-    WandbRun = Any
+import torch
+from torch import nn
+from wandb.sdk.wandb_run import Run as WandbRun
 
 from torch_batteries.tracking.base import ExperimentTracker
 from torch_batteries.tracking.types import (
@@ -186,6 +187,52 @@ class WandbTracker(ExperimentTracker):
         wandb_run = self._require_run()
         for key, value in summary.items():
             wandb_run.summary[key] = value
+
+    def log_model(
+        self,
+        model: nn.Module,
+        name: str = "model",
+        *,
+        aliases: list[str] | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        """Log a model checkpoint as a W&B artifact.
+        Args:
+            model: Trained PyTorch model
+            name: Name of the model artifact
+            aliases: Optional list of aliases for the artifact
+            metadata: Optional metadata dictionary for the artifact
+        Raises:
+            RuntimeError: If the tracker is not initialized
+        """
+        wandb_run = self._require_run()
+
+        try:
+            import wandb  # noqa: PLC0415
+        except ImportError as e:
+            msg = "wandb is not installed."
+            raise ImportError(msg) from e
+
+        artifact_name = f"{name}-{self.run_id}" if self.run_id else name
+        artifact_metadata: dict[str, Any] = {
+            "torch_version": getattr(torch, "__version__", None),
+            **(metadata or {}),
+        }
+
+        with tempfile.TemporaryDirectory(prefix="torch_batteries_") as tmpdir:
+            model_path = Path(tmpdir) / f"{name}.pt"
+            torch.save({"state_dict": model.state_dict()}, model_path)
+
+            artifact = wandb.Artifact(
+                name=artifact_name,
+                type="model",
+                metadata=artifact_metadata,
+            )
+            artifact.add_file(str(model_path), name=f"{name}.pt")
+
+            wandb_run.log_artifact(artifact, aliases=aliases or ["latest"])
+
+        logger.info("Logged wandb model artifact: %s", artifact_name)
 
     @property
     def run_id(self) -> str | None:

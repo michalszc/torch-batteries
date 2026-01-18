@@ -24,7 +24,7 @@ jobs:
           cache-dependency-path: 'pyproject.toml'
 
       - name: Install dependencies
-        run: 	pip install -e . --group docs
+        run: pip install -e . --group docs
 
       - name: Generate documentation
         run: make docs

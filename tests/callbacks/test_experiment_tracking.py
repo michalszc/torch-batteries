@@ -243,7 +243,7 @@ class TestExperimentTrackingCallback:
         callback._global_step = 100  # noqa: SLF001
 
         ctx["val_metrics"] = {"loss": 0.3, "accuracy": 0.97}
-        callback.on_validation_end(ctx)
+        callback.on_validation_epoch_end(ctx)
 
         assert len(tracker.logged_metrics) == 1
         logged = tracker.logged_metrics[0]
@@ -264,7 +264,7 @@ class TestExperimentTrackingCallback:
         callback._current_epoch = 2  # noqa: SLF001
         callback._global_step = 100  # noqa: SLF001
 
-        callback.on_validation_end(ctx)
+        callback.on_validation_epoch_end(ctx)
 
         assert len(tracker.logged_metrics) == 1
         logged = tracker.logged_metrics[0]
@@ -310,7 +310,7 @@ class TestExperimentTrackingCallback:
 
         # Validation
         ctx["val_metrics"] = {"loss": 0.35, "accuracy": 0.95}
-        callback.on_validation_end(ctx)
+        callback.on_validation_epoch_end(ctx)
 
         # Epoch 2
         ctx["epoch"] = 2
@@ -324,7 +324,7 @@ class TestExperimentTrackingCallback:
 
         # Validation
         ctx["val_metrics"] = {"loss": 0.25, "accuracy": 0.97}
-        callback.on_validation_end(ctx)
+        callback.on_validation_epoch_end(ctx)
 
         # End training
         callback.on_train_end(ctx)

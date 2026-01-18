@@ -143,8 +143,8 @@ class ExperimentTrackingCallback:
             prefix="train/",
         )
 
-    @charge(Event.AFTER_VALIDATION)
-    def on_validation_end(self, ctx: EventContext) -> None:
+    @charge(Event.AFTER_VALIDATION_EPOCH)
+    def on_validation_epoch_end(self, ctx: EventContext) -> None:
         """
         Log validation metrics.
 
@@ -181,9 +181,20 @@ class ExperimentTrackingCallback:
         if ctx.get("train_metrics"):
             summary["train_metrics"] = ctx["train_metrics"]
         if ctx.get("val_metrics"):
-            summary["final_val_metrics"] = ctx["val_metrics"]
+            summary["val_metrics"] = ctx["val_metrics"]
 
         self.tracker.log_summary(summary)
+
+        model = ctx.get("model")
+        if model is not None:
+            self.tracker.log_model(
+                model,
+                name="model",
+                metadata={
+                    "epoch": self._current_epoch,
+                    "global_step": self._global_step,
+                },
+            )
 
         self.tracker.finish()
         logger.info("Experiment tracking finished")
