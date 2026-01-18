@@ -56,6 +56,15 @@ class FakeTracker(ExperimentTracker):
         """Log summary statistics."""
         self.summary_data.update(summary)
 
+    def log_model(
+        self,
+        model: Any,
+        name: str,
+        aliases: list[str] | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        """Log a model (no-op for fake tracker)."""
+
 
 class TestExperimentTrackingCallback:
     """Test suite for ExperimentTrackingCallback."""
