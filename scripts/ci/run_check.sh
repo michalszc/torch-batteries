@@ -106,6 +106,17 @@ case "$1" in
             "Linting failed!" \
             "Run \`make lint-fix\` to auto-fix issues"
         ;;
+    docs)
+        run_check_with_summary \
+            "docs" \
+            "📚" \
+            "Documentation Build" \
+            "make docs && git diff --exit-code -- docs" \
+            "docs_output.txt" \
+            "Documentation builds cleanly and is up-to-date!" \
+            "Documentation build produced changes or failed!" \
+            "Verify why the docs build failed"
+        ;;
     format-check)
         run_check_with_summary \
             "format-check" \

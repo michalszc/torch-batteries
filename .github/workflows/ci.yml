@@ -18,7 +18,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        check: [lint, format-check, type-check, test, validate-version]
+        check: [lint, docs, format-check, type-check, test, validate-version]
 
     steps:
     - uses: actions/checkout@v4
