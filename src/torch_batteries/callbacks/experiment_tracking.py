@@ -47,8 +47,8 @@ class ExperimentTrackingCallback:
         "_current_epoch",
         "_global_step",
         "_log_every_n_steps",
-        "run",
-        "tracker",
+        "_run",
+        "_tracker",
     )
 
     def __init__(
@@ -65,12 +65,22 @@ class ExperimentTrackingCallback:
             run: Optional run configuration
             log_freq: How often to log metrics (in steps)
         """
-        self.tracker = tracker
-        self.run = run
+        self._tracker = tracker
+        self._run = run
         self._log_every_n_steps = log_every_n_steps
 
         self._current_epoch = 0
         self._global_step = 0
+
+    @property
+    def tracker(self) -> ExperimentTracker:
+        """Get the experiment tracker."""
+        return self._tracker
+
+    @property
+    def run(self) -> Run | None:
+        """Get the run configuration."""
+        return self._run
 
     @property
     def global_step(self) -> int:

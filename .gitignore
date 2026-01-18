@@ -211,6 +211,8 @@ docs
 
 # Notebooks
 notebooks/data/
+notebooks/**/*.pt
+notebooks/**/*.pth
 
 # Weights & Biases
 wandb/

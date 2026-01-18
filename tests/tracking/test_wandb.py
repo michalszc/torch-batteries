@@ -7,11 +7,11 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from torch_batteries.tracking import WandbTracker
 from torch_batteries.tracking.types import Run
-from torch_batteries.tracking.wandb import WandbTracker
 
 
-@pytest.fixture
+@pytest.fixture(autouse=True)
 def mock_wandb(mocker: Any) -> MagicMock:
     """Mock the wandb module."""
     # Create a mock wandb module
@@ -111,9 +111,8 @@ class TestWandbTracker:
 
         mocker.patch("builtins.__import__", side_effect=mock_import)
 
-        tracker = WandbTracker(project="test-project")
         with pytest.raises(ImportError, match="wandb is not installed"):
-            tracker.init(run=Run())
+            WandbTracker(project="test-project")
 
     def test_log_metrics_basic(self, mock_wandb: MagicMock) -> None:
         """Test logging metrics without step or prefix."""

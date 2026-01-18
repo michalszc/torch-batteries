@@ -41,6 +41,7 @@ class WandbTracker(ExperimentTracker):
         "_project",
         "_run",
         "_run_id",
+        "_wandb",
     )
 
     def __init__(self, project: str, entity: str | None = None) -> None:
@@ -51,6 +52,13 @@ class WandbTracker(ExperimentTracker):
             project: Wandb project name
             entity: Optional wandb entity (username or team name)
         """
+        try:
+            import wandb  # noqa: PLC0415
+        except ImportError as e:
+            msg = "wandb is not installed."
+            raise ImportError(msg) from e
+
+        self._wandb = wandb
         self._project = project
         self._entity = entity
         self._run: WandbRun | None = None
@@ -85,14 +93,8 @@ class WandbTracker(ExperimentTracker):
             run: Run configuration
 
         Raises:
-            ImportError: If wandb is not installed
             RuntimeError: If it is already initialized
         """
-        try:
-            import wandb  # noqa: PLC0415
-        except ImportError as e:
-            msg = "wandb is not installed."
-            raise ImportError(msg) from e
 
         if self.is_initialized:
             msg = "WandbTracker is already initialized."
@@ -109,7 +111,7 @@ class WandbTracker(ExperimentTracker):
             "config": run.config,
         }
 
-        wandb_run = wandb.init(**wandb_config)  # type: ignore[arg-type]
+        wandb_run = self._wandb.init(**wandb_config)  # type: ignore[arg-type]
 
         self._run = wandb_run
         self._is_initialized = True
@@ -207,12 +209,6 @@ class WandbTracker(ExperimentTracker):
         """
         wandb_run = self._require_run()
 
-        try:
-            import wandb  # noqa: PLC0415
-        except ImportError as e:
-            msg = "wandb is not installed."
-            raise ImportError(msg) from e
-
         artifact_name = f"{name}-{self.run_id}" if self.run_id else name
         artifact_metadata: dict[str, Any] = {
             "torch_version": getattr(torch, "__version__", None),
@@ -223,7 +219,7 @@ class WandbTracker(ExperimentTracker):
             model_path = Path(tmpdir) / f"{name}.pt"
             torch.save({"state_dict": model.state_dict()}, model_path)
 
-            artifact = wandb.Artifact(
+            artifact = self._wandb.Artifact(
                 name=artifact_name,
                 type="model",
                 metadata=artifact_metadata,

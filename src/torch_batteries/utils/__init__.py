@@ -10,11 +10,13 @@ Provides helper functions and classes for:
 """
 
 from . import batch, device, formatting, logging, metrics, progress
+from .device import get_device
 
 __all__ = [
     "batch",
     "device",
     "formatting",
+    "get_device",
     "logging",
     "metrics",
     "progress",

@@ -61,6 +61,8 @@ class Battery:
         self._event_handler = EventHandler(self._model, callbacks=callbacks)
         self._stop_training = False
 
+        logger.info("Battery initialized on device: %s", self._device)
+
     @property
     def model(self) -> nn.Module:
         """Get the model."""

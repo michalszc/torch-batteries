@@ -60,6 +60,7 @@ __all__ = [
     "callbacks",
     "charge",
     "events",
+    "tracking",
     "trainer",
     "utils",
 ]
