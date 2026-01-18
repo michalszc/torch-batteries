@@ -2,6 +2,8 @@
 
 from typing import Any
 
+from torch import nn
+
 from torch_batteries import EventContext
 from torch_batteries.callbacks.experiment_tracking import ExperimentTrackingCallback
 from torch_batteries.tracking.base import ExperimentTracker
@@ -58,8 +60,9 @@ class FakeTracker(ExperimentTracker):
 
     def log_model(
         self,
-        model: Any,
-        name: str,
+        model: nn.Module,
+        name: str = "model",
+        *,
         aliases: list[str] | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> None:
