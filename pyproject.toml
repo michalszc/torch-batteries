@@ -65,6 +65,7 @@ build = [
 ]
 docs = [
     "pdoc>=14.0.0",
+    "wandb>=0.16.0",
 ]
 dev = [
     {include-group = "test"},
