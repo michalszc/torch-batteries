@@ -58,15 +58,6 @@ class ExperimentTracker(ABC):
         """
 
     @abstractmethod
-    def update_config(self, config: dict[str, Any]) -> None:
-        """
-        Update the configuration of Run.
-
-        Args:
-            config: Configuration dictionary
-        """
-
-    @abstractmethod
     def finish(self, exit_code: int = 0) -> None:
         """
         Finish tracking the experiment.

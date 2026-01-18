@@ -43,11 +43,19 @@ class ExperimentTrackingCallback:
     ```
     """
 
+    __slots__ = (
+        "_current_epoch",
+        "_global_step",
+        "_log_every_n_steps",
+        "run",
+        "tracker",
+    )
+
     def __init__(
         self,
         tracker: ExperimentTracker,
         run: Run | None = None,
-        log_freq: int = 1,
+        log_every_n_steps: int = 1,
     ) -> None:
         """
         Initialize the experiment tracking callback.
@@ -59,10 +67,25 @@ class ExperimentTrackingCallback:
         """
         self.tracker = tracker
         self.run = run
-        self.log_freq = log_freq
+        self._log_every_n_steps = log_every_n_steps
 
         self._current_epoch = 0
         self._global_step = 0
+
+    @property
+    def global_step(self) -> int:
+        """Current global step."""
+        return self._global_step
+
+    @property
+    def current_epoch(self) -> int:
+        """Current epoch."""
+        return self._current_epoch
+
+    @property
+    def log_every_n_steps(self) -> int:
+        """How often to log metrics (in steps)."""
+        return self._log_every_n_steps
 
     @charge(Event.BEFORE_TRAIN)
     def on_train_start(self, _: EventContext) -> None:
@@ -100,11 +123,9 @@ class ExperimentTrackingCallback:
 
         self._global_step += 1
 
-        # Log every log_freq steps
-        if self._global_step % self.log_freq != 0:
+        if self._global_step % self.log_every_n_steps != 0:
             return
 
-        # Get metrics from context
         metrics: dict[str, float] = {
             "epoch": float(self._current_epoch),
         }
@@ -116,13 +137,11 @@ class ExperimentTrackingCallback:
             if isinstance(train_metrics, dict):
                 metrics.update({k: float(v) for k, v in train_metrics.items()})
 
-        # Log with train/ prefix
-        if metrics:
-            self.tracker.log_metrics(
-                metrics,
-                step=self._global_step,
-                prefix="train/",
-            )
+        self.tracker.log_metrics(
+            metrics,
+            step=self._global_step,
+            prefix="train/",
+        )
 
     @charge(Event.AFTER_VALIDATION)
     def on_validation_end(self, ctx: EventContext) -> None:

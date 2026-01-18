@@ -2,6 +2,8 @@
 
 from typing import Any
 
+import wandb
+
 from torch_batteries.tracking.base import ExperimentTracker
 from torch_batteries.tracking.types import (
     Run,
@@ -42,6 +44,7 @@ class WandbTracker(ExperimentTracker):
         Initialize the wandb tracker.
 
         Args:
+            project: Wandb project name
             entity: Optional wandb entity (username or team name)
         """
         self._project = project
@@ -49,6 +52,21 @@ class WandbTracker(ExperimentTracker):
         self._run: Any = None
         self._run_id: str | None = None
         self._is_initialized = False
+
+    @property
+    def run(self) -> wandb.sdk.wandb_run.Run | None:
+        """Get the tracked wandb run."""
+        return self._run
+
+    @property
+    def entity(self) -> str | None:
+        """Get the wandb entity."""
+        return self._entity
+
+    @property
+    def project(self) -> str:
+        """Get the wandb project."""
+        return self._project
 
     def init(
         self,
@@ -133,20 +151,6 @@ class WandbTracker(ExperimentTracker):
             self._run.log(metrics, step=step)
         else:
             self._run.log(metrics)
-
-    def update_config(self, config: dict[str, Any]) -> None:
-        """
-        Update the configuration of Run.
-
-        Args:
-            config: Configuration dictionary
-
-        Raises:
-            RuntimeError: If the tracker is not initialized
-        """
-        self._assert_initialized()
-
-        self._run.config.update(config)
 
     def finish(self, exit_code: int = 0) -> None:
         """

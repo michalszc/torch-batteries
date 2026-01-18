@@ -70,6 +70,7 @@ dev = [
     {include-group = "types"},
     {include-group = "build"},
     {include-group = "docs"},
+    "wandb>=0.16.0",
 ]
 
 [project.urls]
