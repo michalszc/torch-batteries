@@ -42,8 +42,8 @@ def get_device(device: str | torch.device = "auto") -> torch.device:
         """
         if (
             torch.cuda.is_available()
-            and hasattr(torch.cuda, "is_built")
-            and torch.cuda.is_built()
+            and hasattr(torch.backends.cuda, "is_built")
+            and torch.backends.cuda.is_built()
         ):
             return torch.device("cuda")
         if (

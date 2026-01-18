@@ -16,7 +16,7 @@ A lightweight Python package that supplies batteries-included abstractions for:
 - Model training loops
 - Evaluation workflows
 - Metrics computation
-- Seamless Weights & Biases tracking
+- Experiment tracking (Weights & Biases)
 
 Designed to reduce boilerplate and standardize experiment code.
 
@@ -26,6 +26,14 @@ Designed to reduce boilerplate and standardize experiment code.
 pip install torch-batteries
 ```
 
+### Optional Dependencies
+
+For experiment tracking with Weights & Biases:
+
+```bash
+pip install torch-batteries[wandb]
+```
+
 ## Examples
 
 Explore practical examples demonstrating torch-batteries features:
@@ -33,3 +41,5 @@ Explore practical examples demonstrating torch-batteries features:
 | Example | Description | Notebook | Colab |
 |---------|-------------|----------|-------|
 | **Function Fitting with MLP** | Train a neural network to approximate a polynomial function using the event-driven training approach | [function_fitting.ipynb](notebooks/function_fitting.ipynb) | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/michalszc/torch-batteries/blob/master/notebooks/function_fitting.ipynb) |
+| **Image Classification with CNN** | Train a Convolutional Neural Network (CNN) for image classification | [image_classification.ipynb](notebooks/image_classification.ipynb) | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/michalszc/torch-batteries/blob/master/notebooks/image_classification.ipynb) |
+| **Learning Rate Sweep with Early Stopping** | Conduct a learning rate sweep on MNIST classification with aggressive early stopping and log results to Weights & Biases | [lr_sweep_early_stopping.ipynb](notebooks/lr_sweep_early_stopping.ipynb) | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/michalszc/torch-batteries/blob/master/notebooks/lr_sweep_early_stopping.ipynb) |

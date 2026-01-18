@@ -208,3 +208,15 @@ __marimo__/
 
 # Documentation
 docs
+
+# Notebooks
+notebooks/data/
+notebooks/**/*.pt
+notebooks/**/*.pth
+
+# Weights & Biases
+wandb/
+
+# uv
+# Ignored because uv is not the primary package manager used in this project
+uv.lock

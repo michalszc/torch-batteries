@@ -39,11 +39,14 @@ battery.train(train_loader, val_loader, epochs=10)
 ```
 """
 
-__version__ = "0.4.2"
+__version__ = "0.5.0"
 __author__ = ["Michal Szczygiel", "Arkadiusz Paterak", "Antoni Zięciak"]
 
 # Import main components
 from .events import Event, EventContext, charge
+from .tracking import (
+    Run,
+)
 from .trainer import Battery, PredictResult, TestResult, TrainResult
 
 __all__ = [
@@ -51,11 +54,13 @@ __all__ = [
     "Event",
     "EventContext",
     "PredictResult",
+    "Run",
     "TestResult",
     "TrainResult",
     "callbacks",
     "charge",
     "events",
+    "tracking",
     "trainer",
     "utils",
 ]
