@@ -213,6 +213,7 @@ docs
 notebooks/data/
 notebooks/**/*.pt
 notebooks/**/*.pth
+notebooks/tensorboard/
 
 # Weights & Biases
 wandb/

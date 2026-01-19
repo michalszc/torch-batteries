@@ -43,6 +43,9 @@ wandb = [
     "wandb>=0.16.0",
     "nbformat>=5.10.4",
 ]
+tensorboard = [
+    "tensorboard>=2.20.0",
+]
 
 [dependency-groups]
 test = [
