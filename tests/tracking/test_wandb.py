@@ -7,8 +7,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from torch_batteries.tracking import WandbTracker
 from torch_batteries.tracking.types import Run
+from torch_batteries.tracking.wandb import WandbTracker
 
 
 @pytest.fixture(autouse=True)
