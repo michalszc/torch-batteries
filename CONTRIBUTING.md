@@ -70,13 +70,17 @@ pre-commit run --all-files
 ```
 torch-batteries/
 ├── src/torch_batteries/    # Main package source
+│   ├── callbacks/          # Training callbacks
 │   ├── events/             # Event system
+│   ├── tracking/           # Experiment tracking
 │   ├── trainer/            # Training system
 │   └── utils/              # Utility functions
 │       ├── progress/       # Progress tracking
 │       └── ...             # Other utilities (batch, device, logging)
 ├── tests/                  # Test files (mirrors src/ structure)
+│   ├── callbacks/          # Callbacks tests
 │   ├── events/             # Event system tests
+│   ├── tracking/           # Tracking tests
 │   ├── trainer/            # Trainer tests
 │   ├── utils/              # Utility tests
 │   │   ├── progress/       # Progress tracking tests
