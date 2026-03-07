@@ -3,6 +3,7 @@
 <p align="center">
    <a href="https://pypi.org/project/torch-batteries/"><img src="https://img.shields.io/pypi/v/torch-batteries" alt="PyPI version"></a>
    <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT"></a>
+   <a href="https://michalszc.github.io/torch-batteries/"><img src="https://img.shields.io/badge/docs-online-blue.svg" alt="Docs"></a>
 </p>
 
 <p align="center">
