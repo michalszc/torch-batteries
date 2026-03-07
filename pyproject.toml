@@ -44,6 +44,16 @@ wandb = [
     "wandb>=0.16.0",
     "nbformat>=5.10.4",
 ]
+all = [
+    "ipykernel>=7.1.0",
+    "matplotlib>=3.10.7",
+    "numpy>=2.3.4",
+    "scikit-learn>=1.7.2",
+    "seaborn>=0.13.2",
+    "torchvision>=0.24.1",
+    "wandb>=0.16.0",
+    "nbformat>=5.10.4",
+]
 
 [dependency-groups]
 test = [
@@ -64,16 +74,14 @@ build = [
     "twine>=4.0.0",
 ]
 docs = [
-    "pdoc>=14.0.0",
-    "wandb>=0.16.0",
+    "pdoc>=14.0.0"
 ]
 dev = [
     {include-group = "test"},
     {include-group = "lint"},
     {include-group = "types"},
     {include-group = "build"},
-    {include-group = "docs"},
-    "wandb>=0.16.0",
+    {include-group = "docs"}
 ]
 
 [project.urls]
