@@ -4,9 +4,15 @@ on:
   push:
     branches:
         - master
+    paths:
+      - "src/**"
+      - "tests/**"
   pull_request:
     branches:
         - master
+    paths:
+      - "src/**"
+      - "tests/**"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -31,7 +37,7 @@ jobs:
         cache-dependency-path: 'pyproject.toml'
 
     - name: Install dependencies
-      run: pip install -e . --group dev
+      run: pip install -e .[all] --group dev
 
     - name: Run ${{ matrix.check }}
       if: matrix.check != 'validate-version' || github.event_name == 'pull_request'

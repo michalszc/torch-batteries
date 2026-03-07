@@ -9,7 +9,7 @@ install: ## Install package
 	pip install -e .
 
 install-dev: ## Install package with development dependencies
-	pip install -e .[example] --group dev
+	pip install -e .[all] --group dev
 	pre-commit install
 
 test: ## Run tests
