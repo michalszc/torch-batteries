@@ -130,7 +130,7 @@ class WandbTracker(ExperimentTracker):
 
         wandb_run = self._wandb.init(**wandb_config)  # type: ignore[arg-type]
 
-        self._run = wandb_run
+        self._run = wandb_run  # type: ignore[assignment]
         self._is_initialized = True
 
         logger.info(
