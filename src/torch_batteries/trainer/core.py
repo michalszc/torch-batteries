@@ -8,6 +8,7 @@ from torch import nn
 from torch.utils.data import DataLoader
 
 from torch_batteries.events import Event, EventContext, EventHandler
+from torch_batteries.trainer.context import copy_history_context
 from torch_batteries.trainer.types import PredictResult, TestResult, TrainResult
 from torch_batteries.utils.batch import get_batch_size
 from torch_batteries.utils.device import get_device, move_to_device
@@ -157,6 +158,9 @@ class Battery:
         }
 
         progress = ProgressFactory.create(verbose=verbose, total_epochs=epochs)
+        train_metrics: dict[str, float] = {}
+        val_metrics: dict[str, float] = {}
+        last_epoch = -1
 
         for epoch in range(epochs):
             if self._stop_training:
@@ -174,6 +178,16 @@ class Battery:
                         results["train_metrics"][key] = []
                     results["train_metrics"][key].append(value)
 
+            after_epoch_context: EventContext = {
+                "battery": self,
+                "model": self._model,
+                "optimizer": self._optimizer,
+                "epoch": epoch,
+                "train_metrics": train_metrics,
+                **copy_history_context(results),
+            }
+            self._event_handler.call(Event.AFTER_TRAIN_EPOCH, after_epoch_context)
+
             if val_loader:
                 before_val_context: EventContext = {
                     "battery": self,
@@ -181,6 +195,7 @@ class Battery:
                     "optimizer": self._optimizer,
                     "epoch": epoch,
                     "train_metrics": train_metrics,
+                    **copy_history_context(results),
                 }
                 self._event_handler.call(Event.BEFORE_VALIDATION, before_val_context)
 
@@ -200,10 +215,12 @@ class Battery:
                     "epoch": epoch,
                     "train_metrics": train_metrics,
                     "val_metrics": val_metrics,
+                    **copy_history_context(results),
                 }
                 self._event_handler.call(Event.AFTER_VALIDATION, after_val_context)
 
             progress.end_epoch()
+            last_epoch = epoch
 
         progress.end_training()
 
@@ -211,10 +228,11 @@ class Battery:
             "battery": self,
             "model": self._model,
             "optimizer": self._optimizer,
-            "epoch": epochs - 1,
+            "epoch": last_epoch,
             "train_metrics": train_metrics,
+            **copy_history_context(results),
         }
-        if val_loader and "val_metrics" in locals():
+        if val_loader and val_metrics:
             after_train_context["val_metrics"] = val_metrics
         self._event_handler.call(Event.AFTER_TRAIN, after_train_context)
 
@@ -301,6 +319,7 @@ class Battery:
                 "batch_idx": batch_idx,
                 "epoch": epoch,
                 "loss": loss.item(),
+                "train_loss": loss.item(),
                 "train_metrics": batch_metrics,
             }
             self._event_handler.call(Event.AFTER_TRAIN_STEP, after_step_context)
@@ -309,21 +328,7 @@ class Battery:
             progress.update(cast("ProgressMetrics", batch_metrics), num_samples)
 
         avg_metrics = progress.end_phase()
-        train_metrics = (
-            avg_metrics if isinstance(avg_metrics, dict) else {"loss": avg_metrics}
-        )
-
-        # Trigger AFTER_TRAIN_EPOCH event
-        after_epoch_context: EventContext = {
-            "battery": self,
-            "model": self._model,
-            "optimizer": self._optimizer,
-            "epoch": epoch,
-            "train_metrics": train_metrics,
-        }
-        self._event_handler.call(Event.AFTER_TRAIN_EPOCH, after_epoch_context)
-
-        return train_metrics
+        return avg_metrics if isinstance(avg_metrics, dict) else {"loss": avg_metrics}
 
     def _validate_epoch(
         self, dataloader: DataLoader, progress: Progress, epoch: int
@@ -407,6 +412,7 @@ class Battery:
                     "batch_idx": batch_idx,
                     "epoch": epoch,
                     "loss": loss.item(),
+                    "val_loss": loss.item(),
                     "val_metrics": batch_metrics,
                 }
                 self._event_handler.call(
@@ -523,6 +529,7 @@ class Battery:
                     "batch_idx": batch_idx,
                     "epoch": 0,
                     "loss": loss.item(),
+                    "test_loss": loss.item(),
                     "test_metrics": batch_metrics,
                 }
                 self._event_handler.call(Event.AFTER_TEST_STEP, after_step_context)
@@ -532,20 +539,23 @@ class Battery:
 
         test_metrics = progress.end_phase()
         progress.end_epoch()
+        test_loss = (
+            test_metrics
+            if isinstance(test_metrics, float)
+            else test_metrics.get("loss", 0.0)
+        )
+        test_metrics_context = (
+            test_metrics if isinstance(test_metrics, dict) else {"loss": test_metrics}
+        )
 
         after_test_epoch_context: EventContext = {
             "battery": self,
             "model": self._model,
             "optimizer": self._optimizer,
             "epoch": 0,
-            "loss": test_metrics
-            if isinstance(test_metrics, float)
-            else test_metrics.get("loss", 0.0),
-            "test_metrics": (
-                test_metrics
-                if isinstance(test_metrics, dict)
-                else {"loss": test_metrics}
-            ),
+            "loss": test_loss,
+            "test_loss": test_loss,
+            "test_metrics": test_metrics_context,
         }
         self._event_handler.call(Event.AFTER_TEST_EPOCH, after_test_epoch_context)
 
@@ -553,14 +563,9 @@ class Battery:
             "battery": self,
             "model": self._model,
             "optimizer": self._optimizer,
-            "loss": test_metrics
-            if isinstance(test_metrics, float)
-            else test_metrics.get("loss", 0.0),
-            "test_metrics": (
-                test_metrics
-                if isinstance(test_metrics, dict)
-                else {"loss": test_metrics}
-            ),
+            "loss": test_loss,
+            "test_loss": test_loss,
+            "test_metrics": test_metrics_context,
         }
         self._event_handler.call(Event.AFTER_TEST, after_test_context)
 

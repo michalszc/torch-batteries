@@ -47,6 +47,29 @@ class TestChargeDecorator:
         assert predict_func._torch_batteries_event == Event.PREDICT_STEP  # type: ignore[attr-defined] # noqa: SLF001
 
 
+class TestEventContext:
+    """Test cases for EventContext type structure."""
+
+    def test_event_context_supports_phase_loss_and_history_fields(self) -> None:
+        """Test EventContext supports current and historical metric fields."""
+        context: EventContext = {
+            "loss": 0.5,
+            "train_loss": 0.5,
+            "val_loss": 0.4,
+            "test_loss": 0.3,
+            "train_metrics": {"accuracy": 0.8},
+            "val_metrics": {"accuracy": 0.75},
+            "test_metrics": {"accuracy": 0.7},
+            "history_train_loss": [0.6, 0.5],
+            "history_val_loss": [0.5, 0.4],
+            "history_train_metrics": {"accuracy": [0.7, 0.8]},
+            "history_val_metrics": {"accuracy": [0.65, 0.75]},
+        }
+
+        assert context["train_loss"] == context["loss"]
+        assert context["history_train_metrics"]["accuracy"] == [0.7, 0.8]
+
+
 class DummyModel(nn.Module):
     """Dummy model for testing EventHandler."""
 
