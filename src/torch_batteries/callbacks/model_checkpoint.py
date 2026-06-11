@@ -250,7 +250,7 @@ class ModelCheckpoint:
 
         groups = re.findall(r"(\{.*?)[:\}]", filename)
 
-        groups = sorted(groups, key=lambda x: len(x), reverse=True)
+        groups = sorted(groups, key=len, reverse=True)
 
         for group in groups:
             name = group[1:]
