@@ -19,28 +19,28 @@ class TestGetDevice:
             device = get_device("auto")
             assert device.type == "cpu"
 
-    @patch("torch.cuda.is_available", return_value=True, create=True)
-    @patch("torch.cuda.is_built", return_value=True, create=True)
+    @patch("torch.cuda.is_available", return_value=True)
+    @patch("torch.backends.cuda.is_built", return_value=True)
     def test_auto_device_cuda(
-        self, mock_cuda_available: MagicMock, mock_cuda_built: MagicMock
+        self, mock_cuda_built: MagicMock, mock_cuda_available: MagicMock
     ) -> None:
-        """Test auto device detection uses MPS when CUDA unavailable."""
+        """Test auto device detection uses CUDA when available and built."""
         with (
-            patch("torch.backends.mps.is_available", return_value=False, create=True),
-            patch("torch.backends.mps.is_built", return_value=False, create=True),
+            patch("torch.backends.mps.is_available", return_value=False),
+            patch("torch.backends.mps.is_built", return_value=False),
         ):
             device = get_device("auto")
             assert device.type == "cuda"
 
-    @patch("torch.cuda.is_available", return_value=False, create=True)
-    @patch("torch.cuda.is_built", return_value=False, create=True)
+    @patch("torch.cuda.is_available", return_value=False)
+    @patch("torch.backends.cuda.is_built", return_value=False)
     def test_auto_device_mps(
-        self, mock_cuda_available: MagicMock, mock_cuda_built: MagicMock
+        self, mock_cuda_built: MagicMock, mock_cuda_available: MagicMock
     ) -> None:
         """Test auto device detection uses MPS when CUDA unavailable."""
         with (
-            patch("torch.backends.mps.is_available", return_value=True, create=True),
-            patch("torch.backends.mps.is_built", return_value=True, create=True),
+            patch("torch.backends.mps.is_available", return_value=True),
+            patch("torch.backends.mps.is_built", return_value=True),
         ):
             device = get_device("auto")
             assert device.type == "mps"
