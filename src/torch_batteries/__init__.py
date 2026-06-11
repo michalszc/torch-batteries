@@ -39,7 +39,7 @@ battery.train(train_loader, val_loader, epochs=10)
 ```
 """
 
-__version__ = "0.5.2"
+__version__ = "0.5.3"
 __author__ = ["Michal Szczygiel", "Arkadiusz Paterak", "Antoni Zięciak"]
 
 # Import main components
