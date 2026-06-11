@@ -188,10 +188,21 @@ class ExperimentTrackingCallback:
             "total_epochs": self._current_epoch,
             "total_steps": self._global_step,
         }
-        if ctx.get("train_metrics"):
+        if ctx.get("history_train_metrics"):
+            summary["train_metrics"] = ctx["history_train_metrics"]
+        elif ctx.get("train_metrics"):
             summary["train_metrics"] = ctx["train_metrics"]
-        if ctx.get("val_metrics"):
+
+        if ctx.get("history_train_loss"):
+            summary["train_loss"] = ctx["history_train_loss"]
+
+        if ctx.get("history_val_metrics"):
+            summary["val_metrics"] = ctx["history_val_metrics"]
+        elif ctx.get("val_metrics"):
             summary["val_metrics"] = ctx["val_metrics"]
+
+        if ctx.get("history_val_loss"):
+            summary["val_loss"] = ctx["history_val_loss"]
 
         self.tracker.log_summary(summary)
 

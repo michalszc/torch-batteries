@@ -49,6 +49,52 @@ class SimpleModel(nn.Module):
         return self(x)  # type: ignore[no-any-return]
 
 
+class ContextRecorder:
+    """Record selected event contexts for trainer tests."""
+
+    def __init__(self) -> None:
+        self.after_train: list[EventContext] = []
+        self.before_validation: list[EventContext] = []
+        self.after_validation: list[EventContext] = []
+        self.after_train_step: list[EventContext] = []
+        self.after_validation_step: list[EventContext] = []
+        self.after_test_step: list[EventContext] = []
+        self.after_test: list[EventContext] = []
+
+    @charge(Event.AFTER_TRAIN)
+    def record_after_train(self, context: EventContext) -> None:
+        self.after_train.append(context.copy())
+
+    @charge(Event.BEFORE_VALIDATION)
+    def record_before_validation(self, context: EventContext) -> None:
+        self.before_validation.append(context.copy())
+
+    @charge(Event.AFTER_VALIDATION)
+    def record_after_validation(self, context: EventContext) -> None:
+        self.after_validation.append(context.copy())
+
+    @charge(Event.AFTER_TRAIN_STEP)
+    def record_after_train_step(self, context: EventContext) -> None:
+        self.after_train_step.append(context.copy())
+
+    @charge(Event.AFTER_VALIDATION_STEP)
+    def record_after_validation_step(self, context: EventContext) -> None:
+        self.after_validation_step.append(context.copy())
+
+    @charge(Event.AFTER_TEST_STEP)
+    def record_after_test_step(self, context: EventContext) -> None:
+        self.after_test_step.append(context.copy())
+
+    @charge(Event.AFTER_TEST)
+    def record_after_test(self, context: EventContext) -> None:
+        self.after_test.append(context.copy())
+
+
+def mae(pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+    """Mean absolute error metric used in trainer context tests."""
+    return torch.mean(torch.abs(pred - target))
+
+
 class TestBattery:
     """Test cases for Battery trainer class."""
 
@@ -182,6 +228,77 @@ class TestBattery:
         assert len(result["train_loss"]) == 1
         assert len(result["val_loss"]) == 1
 
+    def test_train_event_context_includes_metric_history(self) -> None:
+        """Test training lifecycle contexts include copied metric history."""
+        recorder = ContextRecorder()
+        model = SimpleModel()
+        optimizer = optim.SGD(model.parameters(), lr=0.01)
+        battery = Battery(
+            model,
+            optimizer=optimizer,
+            metrics={"mae": mae},
+            callbacks=[recorder],
+        )
+        train_loader = self.create_simple_data_loader(batch_size=2, num_samples=4)
+        val_loader = self.create_simple_data_loader(batch_size=2, num_samples=4)
+
+        result = battery.train(train_loader, val_loader, epochs=2, verbose=0)
+
+        after_train = recorder.after_train[-1]
+        assert after_train["history_train_loss"] == result["train_loss"]
+        assert after_train["history_val_loss"] == result["val_loss"]
+        assert after_train["history_train_metrics"] == result["train_metrics"]
+        assert after_train["history_val_metrics"] == result["val_metrics"]
+        assert len(after_train["history_train_loss"]) == 2
+        assert len(after_train["history_val_loss"]) == 2
+        assert len(after_train["history_train_metrics"]["mae"]) == 2
+        assert len(after_train["history_val_metrics"]["mae"]) == 2
+        assert isinstance(after_train["train_metrics"]["mae"], float)
+        assert isinstance(after_train["val_metrics"]["mae"], float)
+
+    def test_validation_event_context_includes_available_history(self) -> None:
+        """Test validation boundary contexts expose history accumulated so far."""
+        recorder = ContextRecorder()
+        model = SimpleModel()
+        optimizer = optim.SGD(model.parameters(), lr=0.01)
+        battery = Battery(
+            model,
+            optimizer=optimizer,
+            metrics={"mae": mae},
+            callbacks=[recorder],
+        )
+        train_loader = self.create_simple_data_loader(batch_size=2, num_samples=4)
+        val_loader = self.create_simple_data_loader(batch_size=2, num_samples=4)
+
+        battery.train(train_loader, val_loader, epochs=2, verbose=0)
+
+        assert len(recorder.before_validation[0]["history_train_loss"]) == 1
+        assert recorder.before_validation[0]["history_val_loss"] == []
+        assert len(recorder.before_validation[1]["history_train_loss"]) == 2
+        assert len(recorder.before_validation[1]["history_val_loss"]) == 1
+        assert len(recorder.after_validation[-1]["history_train_loss"]) == 2
+        assert len(recorder.after_validation[-1]["history_val_loss"]) == 2
+        assert isinstance(recorder.after_validation[-1]["val_metrics"]["mae"], float)
+
+    def test_step_event_contexts_include_phase_specific_loss(self) -> None:
+        """Test step contexts keep loss alias and add phase-specific loss keys."""
+        recorder = ContextRecorder()
+        model = SimpleModel()
+        optimizer = optim.SGD(model.parameters(), lr=0.01)
+        battery = Battery(model, optimizer=optimizer, callbacks=[recorder])
+        train_loader = self.create_simple_data_loader(batch_size=2, num_samples=4)
+        val_loader = self.create_simple_data_loader(batch_size=2, num_samples=4)
+
+        battery.train(train_loader, val_loader, epochs=1, verbose=0)
+
+        train_step_context = recorder.after_train_step[0]
+        assert train_step_context["train_loss"] == train_step_context["loss"]
+        assert train_step_context["train_metrics"]["loss"] == train_step_context["loss"]
+
+        val_step_context = recorder.after_validation_step[0]
+        assert val_step_context["val_loss"] == val_step_context["loss"]
+        assert val_step_context["val_metrics"]["loss"] == val_step_context["loss"]
+
     def test_validate_epoch_without_handler_raises_error(self) -> None:
         """Test validation without validation step handler raises error."""
 
@@ -244,6 +361,23 @@ class TestBattery:
         assert "test_loss" in result
         # Don't assert exact value since it's computed, just assert it's a float
         assert isinstance(result["test_loss"], float)
+
+    def test_test_event_context_includes_phase_specific_loss(self) -> None:
+        """Test test contexts keep loss alias and add test_loss."""
+        recorder = ContextRecorder()
+        model = SimpleModel()
+        battery = Battery(model, callbacks=[recorder])
+        test_loader = self.create_simple_data_loader(batch_size=2, num_samples=4)
+
+        battery.test(test_loader, verbose=0)
+
+        test_step_context = recorder.after_test_step[0]
+        assert test_step_context["test_loss"] == test_step_context["loss"]
+        assert test_step_context["test_metrics"]["loss"] == test_step_context["loss"]
+
+        after_test_context = recorder.after_test[-1]
+        assert after_test_context["test_loss"] == after_test_context["loss"]
+        assert after_test_context["test_metrics"]["loss"] == after_test_context["loss"]
 
     def test_predict_without_handler_raises_error(self) -> None:
         """Test prediction without predict step handler raises ValueError."""
