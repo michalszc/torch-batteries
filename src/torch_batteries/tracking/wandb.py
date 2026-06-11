@@ -1,12 +1,12 @@
 """Weights & Biases (wandb) tracker implementation."""
 
 import tempfile
+from collections.abc import MutableMapping
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 import torch
 from torch import nn
-from wandb.sdk.wandb_run import Run as WandbRun
 
 from torch_batteries.tracking.base import ExperimentTracker
 from torch_batteries.tracking.types import (
@@ -15,6 +15,20 @@ from torch_batteries.tracking.types import (
 from torch_batteries.utils.logging import get_logger
 
 logger = get_logger("wandb_tracker")
+
+
+class _WandbRun(Protocol):
+    """Runtime shape of the W&B run methods used by this tracker."""
+
+    id: Any
+    url: Any
+    summary: MutableMapping[str, Any]
+
+    def log(self, metrics: dict[str, float], step: int | None = None) -> None: ...
+
+    def finish(self, exit_code: int = 0) -> None: ...
+
+    def log_artifact(self, artifact: Any, aliases: list[str]) -> None: ...
 
 
 class WandbTracker(ExperimentTracker):
@@ -55,18 +69,21 @@ class WandbTracker(ExperimentTracker):
         try:
             import wandb  # noqa: PLC0415
         except ImportError as e:
-            msg = "wandb is not installed."
+            msg = (
+                "wandb is not installed. "
+                "Install it with `pip install torch-batteries[wandb]`."
+            )
             raise ImportError(msg) from e
 
         self._wandb = wandb
         self._project = project
         self._entity = entity
-        self._run: WandbRun | None = None
+        self._run: _WandbRun | None = None
         self._run_id: str | None = None
         self._is_initialized = False
 
     @property
-    def run(self) -> WandbRun | None:
+    def run(self) -> _WandbRun | None:
         """Get the tracked wandb run."""
         return self._run
 
@@ -244,7 +261,7 @@ class WandbTracker(ExperimentTracker):
             return str(self._run.url)
         return None
 
-    def _require_run(self) -> WandbRun:
+    def _require_run(self) -> _WandbRun:
         if not self.is_initialized or self._run is None:
             msg = "WandbTracker is not initialized. Call init()."
             raise RuntimeError(msg)
