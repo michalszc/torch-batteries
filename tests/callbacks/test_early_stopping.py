@@ -217,7 +217,7 @@ class TestEarlyStopping:
             param.data += 1.0
 
         for key, initial_weight in initial_weights.items():
-            assert torch.equal(saved_weights[key], initial_weight)
+            assert torch.equal(saved_weights[key], initial_weight.cpu())
 
         context = {
             "model": model,
