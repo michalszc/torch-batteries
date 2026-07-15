@@ -1,6 +1,23 @@
 """Data types for trainer module."""
 
+from dataclasses import dataclass, field
 from typing import Any, TypedDict
+
+import torch
+
+
+@dataclass(slots=True)
+class StepOutput:
+    """Explicit output from a training, validation, or test step.
+
+    Predictions and targets are required when automatic ``Battery`` metrics are
+    configured. Metrics returned here override automatic metrics with the same name.
+    """
+
+    loss: torch.Tensor
+    predictions: torch.Tensor | None = None
+    targets: torch.Tensor | None = None
+    metrics: dict[str, float | torch.Tensor] = field(default_factory=dict)
 
 
 class TrainResult(TypedDict, total=False):

@@ -1,7 +1,7 @@
 """Battery trainer class for torch-batteries."""
 
 from collections.abc import Callable
-from typing import cast
+from typing import Any, cast
 
 import torch
 from torch import nn
@@ -9,7 +9,12 @@ from torch.utils.data import DataLoader
 
 from torch_batteries.events import Event, EventContext, EventHandler
 from torch_batteries.trainer.context import copy_history_context
-from torch_batteries.trainer.types import PredictResult, TestResult, TrainResult
+from torch_batteries.trainer.types import (
+    PredictResult,
+    StepOutput,
+    TestResult,
+    TrainResult,
+)
 from torch_batteries.utils.batch import get_batch_size
 from torch_batteries.utils.device import get_device, move_to_device
 from torch_batteries.utils.logging import get_logger
@@ -109,6 +114,74 @@ class Battery:
     def stop_training(self, value: bool) -> None:
         """Set the stop_training flag."""
         self._stop_training = value
+
+    @staticmethod
+    def _validate_loss(loss: Any, phase: str) -> torch.Tensor:
+        """Validate and return a scalar loss tensor from a step."""
+        if not isinstance(loss, torch.Tensor):
+            msg = f"{phase} step loss must be a torch.Tensor."
+            raise TypeError(msg)
+        if loss.ndim != 0:
+            msg = f"{phase} step loss must be a scalar tensor."
+            raise ValueError(msg)
+        return loss
+
+    @staticmethod
+    def _normalize_step_metrics(
+        metrics: dict[str, float | torch.Tensor], phase: str
+    ) -> dict[str, float]:
+        """Convert supported scalar step metrics to Python floats."""
+        normalized: dict[str, float] = {}
+        for name, value in metrics.items():
+            if isinstance(value, torch.Tensor):
+                if value.ndim != 0:
+                    msg = f"Metric '{name}' returned by {phase} step must be scalar."
+                    raise ValueError(msg)
+                normalized[name] = value.item()
+                continue
+            try:
+                normalized[name] = float(value)
+            except (TypeError, ValueError) as error:
+                msg = f"Metric '{name}' returned by {phase} step must be numeric."
+                raise TypeError(msg) from error
+        return normalized
+
+    def _parse_step_result(
+        self, result: Any, phase: str
+    ) -> tuple[torch.Tensor, dict[str, float]]:
+        """Validate a step result and calculate configured automatic metrics."""
+        if isinstance(result, StepOutput):
+            loss = self._validate_loss(result.loss, phase)
+            automatic_metrics: dict[str, float] = {}
+            if self._metrics:
+                if result.predictions is None or result.targets is None:
+                    msg = (
+                        f"{phase} step must return StepOutput with predictions and "
+                        "targets when Battery metrics are configured."
+                    )
+                    raise ValueError(msg)
+                automatic_metrics = calculate_metrics(
+                    self._metrics, result.predictions, result.targets
+                )
+            manual_metrics = self._normalize_step_metrics(result.metrics, phase)
+            return loss, {**automatic_metrics, **manual_metrics}
+
+        if self._metrics:
+            msg = (
+                f"{phase} step must return StepOutput with predictions and targets "
+                "when Battery metrics are configured."
+            )
+            raise ValueError(msg)
+
+        if isinstance(result, tuple):
+            if len(result) != 2 or not isinstance(result[1], dict):
+                msg = f"{phase} step tuple must be (loss, metrics_dict)."
+                raise TypeError(msg)
+            loss = self._validate_loss(result[0], phase)
+            metrics = self._normalize_step_metrics(result[1], phase)
+            return loss, metrics
+
+        return self._validate_loss(result, phase), {}
 
     def train(
         self,
@@ -290,26 +363,12 @@ class Battery:
             }
             result = self._event_handler.call(Event.TRAIN_STEP, step_context)
 
-            # Handle flexible return: either loss or (loss, metrics_dict)
-            step_metrics = {}
-            if isinstance(result, tuple):
-                loss, step_metrics = result
-                assert loss is not None, "Training step must return a loss value."
-            else:
-                loss = result
-                assert loss is not None, "Training step must return a loss value."
+            loss, step_metrics = self._parse_step_result(result, "Training")
 
             loss.backward()
             self._optimizer.step()  # type: ignore[union-attr]
 
-            init_metrics = {}
-            if self._metrics and len(batch) >= 2:
-                with torch.no_grad():
-                    pred = self._model(batch[0])
-                    target = batch[1]
-                    init_metrics = calculate_metrics(self._metrics, pred, target)
-
-            batch_metrics = {"loss": loss.item(), **init_metrics, **step_metrics}
+            batch_metrics = {"loss": loss.item(), **step_metrics}
 
             after_step_context: EventContext = {
                 "battery": self,
@@ -388,22 +447,8 @@ class Battery:
                 }
                 result = self._event_handler.call(Event.VALIDATION_STEP, step_context)
 
-                # Handle flexible return: either loss or (loss, metrics_dict)
-                step_metrics = {}
-                if isinstance(result, tuple):
-                    loss, step_metrics = result
-                    assert loss is not None, "Validation step must return a loss value."
-                else:
-                    loss = result
-                    assert loss is not None, "Validation step must return a loss value."
-
-                init_metrics = {}
-                if self._metrics and len(batch) >= 2:
-                    pred = self._model(batch[0])
-                    target = batch[1]
-                    init_metrics = calculate_metrics(self._metrics, pred, target)
-
-                batch_metrics = {"loss": loss.item(), **init_metrics, **step_metrics}
+                loss, step_metrics = self._parse_step_result(result, "Validation")
+                batch_metrics = {"loss": loss.item(), **step_metrics}
 
                 after_step_context: EventContext = {
                     "battery": self,
@@ -504,22 +549,8 @@ class Battery:
                 }
                 result = self._event_handler.call(Event.TEST_STEP, step_context)
 
-                # Handle flexible return: either loss or (loss, metrics_dict)
-                step_metrics = {}
-                if isinstance(result, tuple):
-                    loss, step_metrics = result
-                    assert loss is not None, "Test step must return a loss value."
-                else:
-                    loss = result
-                    assert loss is not None, "Test step must return a loss value."
-
-                init_metrics = {}
-                if self._metrics and len(batch) >= 2:
-                    pred = self._model(batch[0])
-                    target = batch[1]
-                    init_metrics = calculate_metrics(self._metrics, pred, target)
-
-                batch_metrics = {"loss": loss.item(), **init_metrics, **step_metrics}
+                loss, step_metrics = self._parse_step_result(result, "Test")
+                batch_metrics = {"loss": loss.item(), **step_metrics}
 
                 after_step_context: EventContext = {
                     "battery": self,

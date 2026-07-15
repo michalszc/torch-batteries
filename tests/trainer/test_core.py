@@ -5,10 +5,10 @@ from unittest.mock import MagicMock, patch
 import pytest
 import torch
 from torch import nn, optim
-from torch.utils.data import DataLoader, TensorDataset
+from torch.utils.data import DataLoader, Dataset, TensorDataset
 
 from torch_batteries.events import Event, EventContext, charge
-from torch_batteries.trainer import Battery
+from torch_batteries.trainer import Battery, StepOutput
 
 
 class SimpleModel(nn.Module):
@@ -22,25 +22,31 @@ class SimpleModel(nn.Module):
         return self.linear(x)  # type: ignore[no-any-return]
 
     @charge(Event.TRAIN_STEP)
-    def training_step(self, context: EventContext) -> torch.Tensor:
+    def training_step(self, context: EventContext) -> StepOutput:
         batch = context["batch"]
         x, y = batch
         pred = self(x)
-        return nn.functional.mse_loss(pred, y)
+        return StepOutput(
+            loss=nn.functional.mse_loss(pred, y), predictions=pred, targets=y
+        )
 
     @charge(Event.VALIDATION_STEP)
-    def validation_step(self, context: EventContext) -> torch.Tensor:
+    def validation_step(self, context: EventContext) -> StepOutput:
         batch = context["batch"]
         x, y = batch
         pred = self(x)
-        return nn.functional.mse_loss(pred, y)
+        return StepOutput(
+            loss=nn.functional.mse_loss(pred, y), predictions=pred, targets=y
+        )
 
     @charge(Event.TEST_STEP)
-    def test_step(self, context: EventContext) -> torch.Tensor:
+    def test_step(self, context: EventContext) -> StepOutput:
         batch = context["batch"]
         x, y = batch
         pred = self(x)
-        return nn.functional.mse_loss(pred, y)
+        return StepOutput(
+            loss=nn.functional.mse_loss(pred, y), predictions=pred, targets=y
+        )
 
     @charge(Event.PREDICT_STEP)
     def predict_step(self, context: EventContext) -> torch.Tensor:
@@ -378,6 +384,207 @@ class TestBattery:
         after_test_context = recorder.after_test[-1]
         assert after_test_context["test_loss"] == after_test_context["loss"]
         assert after_test_context["test_metrics"]["loss"] == after_test_context["loss"]
+
+    def test_automatic_metrics_use_single_forward_per_phase(self) -> None:
+        """Automatic metrics reuse predictions returned by each step."""
+
+        class CountingModel(SimpleModel):
+            def __init__(self) -> None:
+                super().__init__()
+                self.forward_calls = 0
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                self.forward_calls += 1
+                return super().forward(x)
+
+        model = CountingModel()
+        optimizer = optim.SGD(model.parameters(), lr=0.01)
+        battery = Battery(model, optimizer=optimizer, metrics={"mae": mae})
+        loader = self.create_simple_data_loader(batch_size=2, num_samples=4)
+
+        battery.train(loader, loader, epochs=1, verbose=0)
+        assert model.forward_calls == 4
+
+        model.forward_calls = 0
+        battery.test(loader, verbose=0)
+        assert model.forward_calls == 2
+
+    def test_step_output_supports_dictionary_batches(self) -> None:
+        """Automatic metrics do not depend on positional batch fields."""
+
+        class DictionaryDataset(Dataset):
+            def __len__(self) -> int:
+                return 4
+
+            def __getitem__(self, index: int) -> dict[str, torch.Tensor]:
+                return {
+                    "features": torch.full((2,), float(index)),
+                    "label": torch.tensor([float(index)]),
+                }
+
+        class DictionaryModel(nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.linear = nn.Linear(2, 1)
+
+            @charge(Event.TRAIN_STEP)
+            def training_step(self, context: EventContext) -> StepOutput:
+                batch = context["batch"]
+                predictions = self.linear(batch["features"])
+                targets = batch["label"]
+                return StepOutput(
+                    loss=nn.functional.mse_loss(predictions, targets),
+                    predictions=predictions,
+                    targets=targets,
+                )
+
+        model = DictionaryModel()
+        battery = Battery(
+            model,
+            optimizer=optim.SGD(model.parameters(), lr=0.01),
+            metrics={"mae": mae},
+        )
+
+        result = battery.train(DataLoader(DictionaryDataset(), batch_size=2), verbose=0)
+
+        assert "mae" in result["train_metrics"]
+
+    def test_step_output_supports_multiple_inputs(self) -> None:
+        """Steps can explicitly expose predictions from multi-input batches."""
+
+        class MultiInputModel(nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.linear = nn.Linear(2, 1)
+
+            @charge(Event.TRAIN_STEP)
+            def training_step(self, context: EventContext) -> StepOutput:
+                left, right, targets = context["batch"]
+                predictions = self.linear(torch.cat((left, right), dim=1))
+                return StepOutput(
+                    loss=nn.functional.mse_loss(predictions, targets),
+                    predictions=predictions,
+                    targets=targets,
+                )
+
+        model = MultiInputModel()
+        battery = Battery(
+            model,
+            optimizer=optim.SGD(model.parameters(), lr=0.01),
+            metrics={"mae": mae},
+        )
+        loader = DataLoader(
+            TensorDataset(torch.randn(4, 1), torch.randn(4, 1), torch.randn(4, 1)),
+            batch_size=2,
+        )
+
+        result = battery.train(loader, verbose=0)
+
+        assert "mae" in result["train_metrics"]
+
+    def test_automatic_metrics_require_explicit_step_output(self) -> None:
+        """Legacy step returns cannot drive automatic metrics safely."""
+
+        class LegacyModel(nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.linear = nn.Linear(10, 1)
+
+            @charge(Event.TRAIN_STEP)
+            def training_step(self, context: EventContext) -> torch.Tensor:
+                x, targets = context["batch"]
+                return nn.functional.mse_loss(self.linear(x), targets)
+
+        model = LegacyModel()
+        battery = Battery(
+            model,
+            optimizer=optim.SGD(model.parameters(), lr=0.01),
+            metrics={"mae": mae},
+        )
+
+        with pytest.raises(ValueError, match="must return StepOutput"):
+            battery.train(self.create_simple_data_loader(), verbose=0)
+
+    def test_manual_step_metrics_override_automatic_metrics(self) -> None:
+        """Explicit step metrics retain precedence over automatic metrics."""
+
+        class ManualMetricModel(SimpleModel):
+            @charge(Event.TRAIN_STEP)
+            def training_step(self, context: EventContext) -> StepOutput:
+                x, targets = context["batch"]
+                predictions = self(x)
+                return StepOutput(
+                    loss=nn.functional.mse_loss(predictions, targets),
+                    predictions=predictions,
+                    targets=targets,
+                    metrics={"mae": torch.tensor(123.0)},
+                )
+
+        model = ManualMetricModel()
+        battery = Battery(
+            model,
+            optimizer=optim.SGD(model.parameters(), lr=0.01),
+            metrics={"mae": mae},
+        )
+
+        result = battery.train(self.create_simple_data_loader(), verbose=0)
+
+        assert result["train_metrics"]["mae"] == [123.0]
+
+    def test_legacy_tuple_metrics_remain_supported(self) -> None:
+        """Manual tuple metrics remain valid without automatic metrics."""
+
+        class TupleMetricModel(nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.linear = nn.Linear(10, 1)
+
+            @charge(Event.TRAIN_STEP)
+            def training_step(
+                self, context: EventContext
+            ) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
+                x, targets = context["batch"]
+                loss = nn.functional.mse_loss(self.linear(x), targets)
+                return loss, {"manual": torch.tensor(2.0)}
+
+        model = TupleMetricModel()
+        battery = Battery(model, optimizer=optim.SGD(model.parameters(), lr=0.01))
+
+        result = battery.train(self.create_simple_data_loader(), verbose=0)
+
+        assert result["train_metrics"]["manual"] == [2.0]
+
+    @pytest.mark.parametrize(
+        ("step_result", "error_type", "message"),
+        [
+            (1.0, TypeError, "loss must be a torch.Tensor"),
+            (torch.ones(2), ValueError, "loss must be a scalar tensor"),
+            (
+                (torch.tensor(1.0), {"bad": torch.ones(2)}),
+                ValueError,
+                "must be scalar",
+            ),
+        ],
+    )
+    def test_invalid_step_results_raise_clear_errors(
+        self, step_result: object, error_type: type[Exception], message: str
+    ) -> None:
+        """Malformed legacy step results raise explicit errors."""
+
+        class InvalidResultModel(nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.parameter = nn.Parameter(torch.tensor(1.0))
+
+            @charge(Event.TRAIN_STEP)
+            def training_step(self, _: EventContext) -> object:
+                return step_result
+
+        model = InvalidResultModel()
+        battery = Battery(model, optimizer=optim.SGD(model.parameters(), lr=0.01))
+
+        with pytest.raises(error_type, match=message):
+            battery.train(self.create_simple_data_loader(), verbose=0)
 
     def test_predict_without_handler_raises_error(self) -> None:
         """Test prediction without predict step handler raises ValueError."""

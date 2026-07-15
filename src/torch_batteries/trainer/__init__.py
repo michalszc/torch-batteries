@@ -8,9 +8,10 @@ Main Classes:
 - TrainResult: Return type for training results
 - TestResult: Return type for test results
 - PredictResult: Return type for prediction results
+- StepOutput: Explicit output from train, validation, and test steps
 """
 
 from .core import Battery
-from .types import PredictResult, TestResult, TrainResult
+from .types import PredictResult, StepOutput, TestResult, TrainResult
 
-__all__ = ["Battery", "PredictResult", "TestResult", "TrainResult"]
+__all__ = ["Battery", "PredictResult", "StepOutput", "TestResult", "TrainResult"]

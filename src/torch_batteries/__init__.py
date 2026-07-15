@@ -47,7 +47,7 @@ from .events import Event, EventContext, charge
 from .tracking import (
     Run,
 )
-from .trainer import Battery, PredictResult, TestResult, TrainResult
+from .trainer import Battery, PredictResult, StepOutput, TestResult, TrainResult
 
 __all__ = [
     "Battery",
@@ -55,6 +55,7 @@ __all__ = [
     "EventContext",
     "PredictResult",
     "Run",
+    "StepOutput",
     "TestResult",
     "TrainResult",
     "callbacks",
