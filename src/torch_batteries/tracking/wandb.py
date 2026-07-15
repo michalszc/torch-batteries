@@ -1,9 +1,10 @@
 """Weights & Biases (wandb) tracker implementation."""
 
+import importlib
 import tempfile
-from collections.abc import MutableMapping
+from collections.abc import Callable, MutableMapping
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Protocol, cast
 
 import torch
 from torch import nn
@@ -29,6 +30,20 @@ class _WandbRun(Protocol):
     def finish(self, exit_code: int = 0) -> None: ...
 
     def log_artifact(self, artifact: Any, aliases: list[str]) -> None: ...
+
+
+class _WandbArtifact(Protocol):
+    """Runtime shape of the W&B artifact methods used by this tracker."""
+
+    def add_file(self, local_path: str, name: str) -> None: ...
+
+
+class _WandbModule(Protocol):
+    """Runtime shape of the dynamically imported W&B module."""
+
+    Artifact: Callable[..., _WandbArtifact]
+
+    def init(self, **kwargs: Any) -> _WandbRun: ...
 
 
 class WandbTracker(ExperimentTracker):
@@ -67,7 +82,7 @@ class WandbTracker(ExperimentTracker):
             entity: Optional wandb entity (username or team name)
         """
         try:
-            import wandb  # noqa: PLC0415
+            wandb = importlib.import_module("wandb")
         except ImportError as e:
             msg = (
                 "wandb is not installed. "
@@ -75,7 +90,7 @@ class WandbTracker(ExperimentTracker):
             )
             raise ImportError(msg) from e
 
-        self._wandb = wandb
+        self._wandb = cast("_WandbModule", wandb)
         self._project = project
         self._entity = entity
         self._run: _WandbRun | None = None
@@ -128,9 +143,9 @@ class WandbTracker(ExperimentTracker):
             "config": run.config,
         }
 
-        wandb_run = self._wandb.init(**wandb_config)  # type: ignore[arg-type]
+        wandb_run = self._wandb.init(**wandb_config)
 
-        self._run = wandb_run  # type: ignore[assignment]
+        self._run = wandb_run
         self._is_initialized = True
 
         logger.info(

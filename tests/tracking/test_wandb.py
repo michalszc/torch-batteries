@@ -1,6 +1,5 @@
 """Unit tests for WandbTracker."""
 
-import builtins
 import sys
 from typing import Any
 from unittest.mock import MagicMock
@@ -100,16 +99,10 @@ class TestWandbTracker:
 
     def test_init_run_missing_wandb(self, mocker: Any) -> None:
         """Test that missing wandb raises ImportError."""
-        # Patch the import to raise ImportError
-        real_import = builtins.__import__
-
-        def mock_import(name: str, *args: Any, **kwargs: Any) -> Any:
-            if name == "wandb":
-                msg = "No module named 'wandb'"
-                raise ImportError(msg)
-            return real_import(name, *args, **kwargs)
-
-        mocker.patch("builtins.__import__", side_effect=mock_import)
+        mocker.patch(
+            "torch_batteries.tracking.wandb.importlib.import_module",
+            side_effect=ImportError("No module named 'wandb'"),
+        )
 
         with pytest.raises(ImportError, match="wandb is not installed"):
             WandbTracker(project="test-project")
