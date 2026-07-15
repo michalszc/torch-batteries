@@ -127,3 +127,10 @@ class SimpleProgress(Progress):
         """End the training phase and print total time."""
         total_time = time.time() - self._training_start_time
         print(f"Training completed in {total_time:.2f}s")
+
+    def abort(self) -> None:
+        """Clear incomplete progress state without reporting completion."""
+        self._current_phase = None
+        self._total_metrics = {}
+        self._total_samples = 0
+        self._phase_metrics.clear()

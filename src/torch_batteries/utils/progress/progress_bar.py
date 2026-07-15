@@ -114,3 +114,12 @@ class BarProgress(Progress):
     def end_training(self) -> None:
         """End the training phase (no output for verbose=1)."""
         pass  # noqa: PIE790
+
+    def abort(self) -> None:
+        """Close an active progress bar without reporting completion."""
+        if self._pbar:
+            self._pbar.close()
+            self._pbar = None
+        self._current_phase = None
+        self._total_metrics = {}
+        self._total_samples = 0

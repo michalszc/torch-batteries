@@ -9,6 +9,7 @@ from torch.utils.data import DataLoader, Dataset, TensorDataset
 
 from torch_batteries.events import Event, EventContext, charge
 from torch_batteries.trainer import Battery, StepOutput
+from torch_batteries.utils.progress import SilentProgress
 
 
 class SimpleModel(nn.Module):
@@ -175,6 +176,72 @@ class TestBattery:
 
         with pytest.raises(ValueError, match="Optimizer is required for training"):
             battery.train(train_loader)
+
+    def test_train_rejects_non_positive_epochs(self) -> None:
+        """Training requires at least one epoch."""
+        model = SimpleModel()
+        battery = Battery(model, optimizer=optim.SGD(model.parameters(), lr=0.01))
+
+        with pytest.raises(ValueError, match="epochs must be greater than zero"):
+            battery.train(self.create_simple_data_loader(), epochs=0)
+
+    def test_workflows_reject_empty_loaders(self) -> None:
+        """Train, validation, test, and prediction reject empty loaders."""
+        model = SimpleModel()
+        battery = Battery(model, optimizer=optim.SGD(model.parameters(), lr=0.01))
+        empty_loader = DataLoader(
+            TensorDataset(torch.empty(0, 10), torch.empty(0, 1)), batch_size=2
+        )
+        loader = self.create_simple_data_loader()
+
+        with pytest.raises(ValueError, match="Training loader must not be empty"):
+            battery.train(empty_loader)
+        with pytest.raises(ValueError, match="Validation loader must not be empty"):
+            battery.train(loader, empty_loader)
+        with pytest.raises(ValueError, match="Test loader must not be empty"):
+            battery.test(empty_loader)
+        with pytest.raises(ValueError, match="Prediction loader must not be empty"):
+            battery.predict(empty_loader)
+
+    def test_train_resets_stop_training_flag(self) -> None:
+        """A Battery remains reusable after a previous stop request."""
+        model = SimpleModel()
+        battery = Battery(model, optimizer=optim.SGD(model.parameters(), lr=0.01))
+        battery.stop_training = True
+
+        result = battery.train(self.create_simple_data_loader(), verbose=0)
+
+        assert len(result["train_loss"]) == 1
+        assert battery.stop_training is False
+
+    def test_training_error_aborts_progress_and_propagates(self) -> None:
+        """Training releases progress resources without hiding step errors."""
+
+        class FailingModel(nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.parameter = nn.Parameter(torch.tensor(1.0))
+
+            @charge(Event.TRAIN_STEP)
+            def training_step(self, _: EventContext) -> torch.Tensor:
+                msg = "step failed"
+                raise RuntimeError(msg)
+
+        progress = SilentProgress()
+        model = FailingModel()
+        battery = Battery(model, optimizer=optim.SGD(model.parameters(), lr=0.01))
+
+        with (
+            patch(
+                "torch_batteries.trainer.core.ProgressFactory.create",
+                return_value=progress,
+            ),
+            patch.object(progress, "abort", wraps=progress.abort) as abort,
+            pytest.raises(RuntimeError, match="step failed"),
+        ):
+            battery.train(self.create_simple_data_loader(), verbose=0)
+
+        abort.assert_called_once_with()
 
     def test_train_without_training_step_raises_error(self) -> None:
         """Test that training without training step handler raises ValueError."""
