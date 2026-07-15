@@ -266,3 +266,30 @@ class TestModelCheckpoint:
         checkpoint._delete_saved_model(str(missing_path))  # noqa: SLF001
 
         assert str(missing_path) not in checkpoint.best_k_models
+
+    def test_min_mode_retains_two_lowest_checkpoints(self, tmp_path: Path) -> None:
+        """Minimum-mode top-k retention evicts the highest loss checkpoint."""
+        checkpoint = ModelCheckpoint(
+            stage="val",
+            metric="loss",
+            mode="min",
+            save_dir=str(tmp_path),
+            save_top_k=2,
+        )
+        model = torch.nn.Linear(1, 1)
+
+        for epoch, loss in enumerate((0.5, 0.3, 0.4)):
+            checkpoint.run_on_validation_end(
+                {
+                    "model": model,
+                    "val_metrics": {"loss": loss},
+                    "epoch": epoch,
+                }
+            )
+
+        assert sorted(checkpoint.best_k_models.values()) == [0.3, 0.4]
+        retained_paths = {Path(path) for path in checkpoint.best_k_models}
+        assert all(path.exists() for path in retained_paths)
+        checkpoint_files = set(tmp_path.glob("*.pth"))
+        assert checkpoint_files == retained_paths
+        assert not any("epoch=0" in path.name for path in checkpoint_files)

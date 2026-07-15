@@ -264,6 +264,39 @@ class TestEarlyStopping:
         assert model.running_mean is not None
         assert torch.equal(model.running_mean, expected_mean)
 
+    def test_snapshot_restores_without_changing_model_device(self) -> None:
+        """CPU snapshots restore values while preserving the model device."""
+        model = torch.nn.Linear(2, 1)
+        battery = Battery(model=model)
+        original_device = next(model.parameters()).device
+        expected_weights = {
+            key: value.detach().cpu().clone()
+            for key, value in model.state_dict().items()
+        }
+        early_stopping = EarlyStopping(
+            stage="val", metric="loss", restore_best_weights=True
+        )
+        early_stopping.run_on_validation_end(
+            {
+                "model": model,
+                "battery": battery,
+                "val_metrics": {"loss": 1.0},
+            }
+        )
+        saved_weights = early_stopping.best_weights
+        assert saved_weights is not None
+        assert all(weight.device.type == "cpu" for weight in saved_weights.values())
+
+        for parameter in model.parameters():
+            parameter.data.add_(5.0)
+        early_stopping.run_on_train_end({"model": model})
+
+        assert all(
+            parameter.device == original_device for parameter in model.parameters()
+        )
+        for key, expected_weight in expected_weights.items():
+            assert torch.equal(model.state_dict()[key].cpu(), expected_weight)
+
     def test_train_start_resets_saved_state(self) -> None:
         """Reusing a callback does not retain state from a previous run."""
         model = torch.nn.Linear(1, 1)

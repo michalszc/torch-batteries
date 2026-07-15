@@ -243,6 +243,81 @@ class TestBattery:
 
         abort.assert_called_once_with()
 
+    @pytest.mark.parametrize("workflow", ["validation", "test", "predict"])
+    def test_phase_callback_errors_abort_progress_and_propagate(
+        self, workflow: str
+    ) -> None:
+        """Interrupted evaluation phases abort without success lifecycle events."""
+
+        class FailingPhaseCallback:
+            def __init__(self, failing_workflow: str) -> None:
+                self.failing_workflow = failing_workflow
+                self.completed: set[str] = set()
+
+            def _fail_for(self, phase: str) -> None:
+                if self.failing_workflow == phase:
+                    msg = f"{phase} callback failed"
+                    raise RuntimeError(msg)
+
+            @charge(Event.AFTER_VALIDATION_STEP)
+            def fail_validation(self, _: EventContext) -> None:
+                self._fail_for("validation")
+
+            @charge(Event.AFTER_TEST_STEP)
+            def fail_test(self, _: EventContext) -> None:
+                self._fail_for("test")
+
+            @charge(Event.AFTER_PREDICT_STEP)
+            def fail_predict(self, _: EventContext) -> None:
+                self._fail_for("predict")
+
+            @charge(Event.AFTER_VALIDATION)
+            def complete_validation(self, _: EventContext) -> None:
+                self.completed.add("validation")
+
+            @charge(Event.AFTER_TEST)
+            def complete_test(self, _: EventContext) -> None:
+                self.completed.add("test")
+
+            @charge(Event.AFTER_PREDICT)
+            def complete_predict(self, _: EventContext) -> None:
+                self.completed.add("predict")
+
+            @charge(Event.AFTER_TRAIN)
+            def complete_train(self, _: EventContext) -> None:
+                self.completed.add("train")
+
+        callback = FailingPhaseCallback(workflow)
+        model = SimpleModel()
+        battery = Battery(
+            model,
+            optimizer=optim.SGD(model.parameters(), lr=0.01),
+            callbacks=[callback],
+        )
+        loader = self.create_simple_data_loader(batch_size=2, num_samples=4)
+        progress = SilentProgress()
+
+        def run_workflow() -> None:
+            if workflow == "validation":
+                battery.train(loader, loader, verbose=0)
+            elif workflow == "test":
+                battery.test(loader, verbose=0)
+            else:
+                battery.predict(loader, verbose=0)
+
+        with (
+            patch(
+                "torch_batteries.trainer.core.ProgressFactory.create",
+                return_value=progress,
+            ),
+            patch.object(progress, "abort", wraps=progress.abort) as abort,
+            pytest.raises(RuntimeError, match=f"{workflow} callback failed"),
+        ):
+            run_workflow()
+
+        abort.assert_called_once_with()
+        assert callback.completed == set()
+
     def test_train_without_training_step_raises_error(self) -> None:
         """Test that training without training step handler raises ValueError."""
 
@@ -476,6 +551,41 @@ class TestBattery:
         battery.test(loader, verbose=0)
         assert model.forward_calls == 2
 
+    def test_automatic_metrics_update_batch_norm_once_per_batch(self) -> None:
+        """Automatic metrics do not perform extra stateful model forwards."""
+
+        class BatchNormModel(nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.batch_norm = nn.BatchNorm1d(10)
+                self.linear = nn.Linear(10, 1)
+
+            def forward(self, inputs: torch.Tensor) -> torch.Tensor:
+                return self.linear(self.batch_norm(inputs))  # type: ignore[no-any-return]
+
+            @charge(Event.TRAIN_STEP)
+            def training_step(self, context: EventContext) -> StepOutput:
+                inputs, targets = context["batch"]
+                predictions = self(inputs)
+                return StepOutput(
+                    loss=nn.functional.mse_loss(predictions, targets),
+                    predictions=predictions,
+                    targets=targets,
+                )
+
+        model = BatchNormModel()
+        battery = Battery(
+            model,
+            optimizer=optim.SGD(model.parameters(), lr=0.01),
+            metrics={"mae": mae},
+        )
+        loader = self.create_simple_data_loader(batch_size=2, num_samples=6)
+
+        battery.train(loader, verbose=0)
+
+        assert model.batch_norm.num_batches_tracked is not None
+        assert model.batch_norm.num_batches_tracked.item() == len(loader)
+
     def test_step_output_supports_dictionary_batches(self) -> None:
         """Automatic metrics do not depend on positional batch fields."""
 
@@ -570,6 +680,33 @@ class TestBattery:
         )
 
         with pytest.raises(ValueError, match="must return StepOutput"):
+            battery.train(self.create_simple_data_loader(), verbose=0)
+
+    def test_automatic_metrics_reject_incomplete_step_output(self) -> None:
+        """StepOutput must expose predictions and targets for automatic metrics."""
+
+        class IncompleteOutputModel(nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.linear = nn.Linear(10, 1)
+
+            @charge(Event.TRAIN_STEP)
+            def training_step(self, context: EventContext) -> StepOutput:
+                inputs, targets = context["batch"]
+                loss = nn.functional.mse_loss(self.linear(inputs), targets)
+                return StepOutput(loss=loss)
+
+        model = IncompleteOutputModel()
+        battery = Battery(
+            model,
+            optimizer=optim.SGD(model.parameters(), lr=0.01),
+            metrics={"mae": mae},
+        )
+
+        with pytest.raises(
+            ValueError,
+            match="StepOutput with predictions and targets",
+        ):
             battery.train(self.create_simple_data_loader(), verbose=0)
 
     def test_manual_step_metrics_override_automatic_metrics(self) -> None:
