@@ -2,7 +2,7 @@
 
 from typing import Any, Literal
 
-from torch import nn
+from torch import Tensor, nn
 
 from torch_batteries import Battery, Event, EventContext, charge
 from torch_batteries.utils.logging import get_logger
@@ -39,6 +39,12 @@ class EarlyStopping:
     ) -> None:
         if stage not in {"train", "val"}:
             msg = "stage must be one of 'train' or 'val'"
+            raise ValueError(msg)
+        if min_delta < 0:
+            msg = "min_delta must be greater than or equal to zero"
+            raise ValueError(msg)
+        if patience < 0:
+            msg = "patience must be greater than or equal to zero"
             raise ValueError(msg)
 
         self._stage = stage
@@ -81,6 +87,15 @@ class EarlyStopping:
         """
         self._best_score = None
         self._epochs_no_improve = 0
+        self._best_weights = None
+
+    @staticmethod
+    def _snapshot_weights(model: nn.Module) -> dict[str, Tensor]:
+        """Create an immutable CPU snapshot of parameters and buffers."""
+        return {
+            name: value.detach().cpu().clone()
+            for name, value in model.state_dict().items()
+        }
 
     @charge(Event.AFTER_TRAIN_EPOCH)
     def run_on_epoch_end(self, context: EventContext) -> None:
@@ -131,14 +146,14 @@ class EarlyStopping:
         if self._best_score is None:
             self._best_score = current_score
             if self._restore_best_weights:
-                self._best_weights = model.state_dict()
+                self._best_weights = self._snapshot_weights(model)
             return
 
         if self._monitor_op(current_score, self._best_score):
             self._best_score = current_score
             self._epochs_no_improve = 0
             if self._restore_best_weights:
-                self._best_weights = model.state_dict()
+                self._best_weights = self._snapshot_weights(model)
         else:
             self._epochs_no_improve += 1
             if self._epochs_no_improve >= self._patience:
