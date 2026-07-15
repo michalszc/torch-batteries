@@ -14,7 +14,7 @@ event-based decorators to define training, validation, testing, and prediction l
 ## Quick Start
 
 ```python
-from torch_batteries import Battery, Event, charge
+from torch_batteries import Battery, Event, StepOutput, charge
 import torch.nn as nn
 import torch.nn.functional as F
 
@@ -31,8 +31,11 @@ class MyModel(nn.Module):
         batch = context['batch']
         x, y = batch
         pred = self(x)
-        loss = F.mse_loss(pred, y)
-        return loss
+        return StepOutput(
+            loss=F.mse_loss(pred, y),
+            predictions=pred,
+            targets=y,
+        )
 
 battery = Battery(model, optimizer=optimizer) # Auto-detects device
 battery.train(train_loader, val_loader, epochs=10)

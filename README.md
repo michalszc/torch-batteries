@@ -27,6 +27,45 @@ Designed to reduce boilerplate and standardize experiment code.
 pip install torch-batteries
 ```
 
+## Quick Start
+
+Define workflow steps directly on a PyTorch model with `@charge`. Return
+`StepOutput` to expose the same predictions used for the loss to automatic metrics:
+
+```python
+import torch
+from torch import nn
+from torch.nn import functional as F
+
+from torch_batteries import Battery, Event, EventContext, StepOutput, charge
+
+
+class Model(nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
+        self.linear = nn.Linear(10, 1)
+
+    @charge(Event.TRAIN_STEP)
+    def training_step(self, context: EventContext) -> StepOutput:
+        inputs, targets = context["batch"]
+        predictions = self.linear(inputs)
+        return StepOutput(
+            loss=F.mse_loss(predictions, targets),
+            predictions=predictions,
+            targets=targets,
+        )
+
+
+model = Model()
+optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+battery = Battery(
+    model,
+    optimizer=optimizer,
+    metrics={"mae": lambda pred, target: F.l1_loss(pred, target)},
+)
+results = battery.train(train_loader, val_loader=None, epochs=10)
+```
+
 ### Optional Dependencies
 
 For experiment tracking with Weights & Biases:

@@ -28,6 +28,10 @@ class ModelCheckpoint:
         save_top_k: Saves specified number of best models (defaults to 1)
         verbose: If True, prints messages when saving checkpoints
 
+    Missing directories are created automatically. A `.pth` suffix is added only
+    when `save_path` has no explicit suffix. Static templates gain an epoch field
+    when `save_top_k` is greater than one to avoid overwriting retained weights.
+
     Examples:
         ```python
         checkpoint = ModelCheckpoint(

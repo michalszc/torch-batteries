@@ -106,7 +106,8 @@ class Event(Enum):
     - `BEFORE_TRAIN_STEP`: Called before each training batch.
         - **Context**: `optimizer`, `batch`, `batch_idx`, `epoch`
 
-    - `TRAIN_STEP`: Called for each training batch (must return loss).
+    - `TRAIN_STEP`: Called for each training batch. Returns `StepOutput`, or a
+      scalar loss when automatic Battery metrics are not configured.
         - **Context**: `optimizer`, `batch`, `batch_idx`, `epoch`
 
     - `AFTER_TRAIN_STEP`: Called after each training batch.
@@ -134,7 +135,8 @@ class Event(Enum):
     - `BEFORE_VALIDATION_STEP`: Called before each validation batch.
         - **Context**: `batch`, `batch_idx`, `epoch`
 
-    - `VALIDATION_STEP`: Called for each validation batch (must return loss).
+    - `VALIDATION_STEP`: Called for each validation batch. Returns `StepOutput`,
+      or a scalar loss when automatic Battery metrics are not configured.
         - **Context**: `batch`, `batch_idx`, `epoch`
 
     - `AFTER_VALIDATION_STEP`: Called after each validation batch.
@@ -158,7 +160,8 @@ class Event(Enum):
     - `BEFORE_TEST_STEP`: Called before each test batch.
         - **Context**: `optimizer`, `batch`, `batch_idx`, `epoch`
 
-    - `TEST_STEP`: Called for each test batch (must return loss).
+    - `TEST_STEP`: Called for each test batch. Returns `StepOutput`, or a scalar
+      loss when automatic Battery metrics are not configured.
         - **Context**: `optimizer`, `batch`, `batch_idx`, `epoch`
 
     - `AFTER_TEST_STEP`: Called after each test batch.
