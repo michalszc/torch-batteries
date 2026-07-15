@@ -54,6 +54,9 @@ class ModelCheckpoint:
         if stage not in {"train", "val"}:
             msg = "stage must be one of 'train' or 'val'"
             raise ValueError(msg)
+        if save_top_k < 1:
+            msg = "save_top_k must be greater than or equal to one"
+            raise ValueError(msg)
 
         self._stage = stage
         self._metric = metric
@@ -107,8 +110,7 @@ class ModelCheckpoint:
         if self._stage != "train":
             return
 
-        metrics = context["train_metrics"]
-        metrics["epoch"] = context["epoch"]
+        metrics = {**context["train_metrics"], "epoch": context["epoch"]}
 
         if not self._save_best_model(context["model"], metrics):
             self._save_top_k_model(context["model"], metrics)
@@ -123,8 +125,7 @@ class ModelCheckpoint:
         if self._stage != "val":
             return
 
-        metrics = context["val_metrics"]
-        metrics["epoch"] = context["epoch"]
+        metrics = {**context["val_metrics"], "epoch": context["epoch"]}
 
         if not self._save_best_model(context["model"], metrics):
             self._save_top_k_model(context["model"], metrics)
@@ -192,12 +193,17 @@ class ModelCheckpoint:
         Returns:
             Path to the saved model file.
         """
+        filename_template = self._ensure_unique_template(self._save_path)
         filename = self._format_checkpoint_name(
-            self._save_path,
+            filename_template,
             metrics,
             auto_insert_metric_name=True,
         )
-        filepath = f"{self._save_dir}/{filename}.pth"
+        if not self._has_explicit_suffix(filename_template):
+            filename = f"{filename}.pth"
+        path = Path(self._save_dir) / filename
+        path.parent.mkdir(parents=True, exist_ok=True)
+        filepath = str(path)
         torch.save(model.state_dict(), filepath)
         if self._verbose:
             logger.info(
@@ -209,6 +215,24 @@ class ModelCheckpoint:
 
         self._update_top_k_models(filepath, current_score)
         return filepath
+
+    def _ensure_unique_template(self, filename: str | None) -> str | None:
+        """Add an epoch field when top-k checkpoints would share one filename."""
+        if filename is None or self._save_top_k == 1 or "{epoch" in filename:
+            return filename
+
+        suffix_match = re.search(r"(\.[A-Za-z][A-Za-z0-9]*)$", filename)
+        if suffix_match is None:
+            return f"{filename}-{{epoch}}"
+        suffix_start = suffix_match.start()
+        return f"{filename[:suffix_start]}-{{epoch}}{filename[suffix_start:]}"
+
+    @staticmethod
+    def _has_explicit_suffix(filename: str | None) -> bool:
+        """Check whether a template ends in a user-provided file suffix."""
+        return filename is not None and bool(
+            re.search(r"\.[A-Za-z][A-Za-z0-9]*$", filename)
+        )
 
     def _update_top_k_models(self, filepath: str, current_score: float) -> None:
         """Update top-k models tracking and remove worst model if needed.
@@ -276,4 +300,4 @@ class ModelCheckpoint:
             filepath: Path to the model file to delete.
         """
         del self._best_k_models[filepath]
-        Path(filepath).unlink()
+        Path(filepath).unlink(missing_ok=True)
