@@ -22,7 +22,6 @@ class TestEarlyStopping:
             metric="loss",
             min_delta=0.01,
             patience=3,
-            verbose=True,
             mode="min",
             restore_best_weights=True,
         )
@@ -30,7 +29,6 @@ class TestEarlyStopping:
         assert early_stopping._metric == "loss"  # noqa: SLF001
         assert early_stopping._min_delta == 0.01  # noqa: SLF001
         assert early_stopping._patience == 3  # noqa: SLF001
-        assert early_stopping._verbose is True  # noqa: SLF001
         assert early_stopping._mode == "min"  # noqa: SLF001
         assert early_stopping._restore_best_weights is True  # noqa: SLF001
 

@@ -24,7 +24,6 @@ class TestModelCheckpoint:
             save_dir="./checkpoints",
             save_path="best_model.pth",
             save_top_k=3,
-            verbose=True,
         )
         assert checkpoint._stage == "val"  # noqa: SLF001
         assert checkpoint._metric == "accuracy"  # noqa: SLF001
@@ -32,7 +31,6 @@ class TestModelCheckpoint:
         assert checkpoint._save_dir == "./checkpoints"  # noqa: SLF001
         assert checkpoint._save_path == "best_model.pth"  # noqa: SLF001
         assert checkpoint._save_top_k == 3  # noqa: SLF001
-        assert checkpoint._verbose is True  # noqa: SLF001
 
     def test_invalid_stage(self) -> None:
         """Test ModelCheckpoint initialization with invalid stage."""
@@ -57,7 +55,6 @@ class TestModelCheckpoint:
             mode="max",
             save_dir=str(tmp_path),
             save_top_k=1,
-            verbose=True,
         )
         model = torch.nn.Linear(1, 1)
         context: EventContext = {
@@ -78,7 +75,6 @@ class TestModelCheckpoint:
             mode="max",
             save_dir=str(tmp_path),
             save_top_k=1,
-            verbose=True,
         )
         model = torch.nn.Linear(1, 1)
         context: EventContext = {
@@ -99,7 +95,6 @@ class TestModelCheckpoint:
             mode="max",
             save_dir=str(tmp_path),
             save_top_k=1,
-            verbose=True,
         )
         model = torch.nn.Linear(1, 1)
 
@@ -129,7 +124,6 @@ class TestModelCheckpoint:
             mode="max",
             save_dir=str(tmp_path),
             save_top_k=2,
-            verbose=True,
         )
         model = torch.nn.Linear(1, 1)
 

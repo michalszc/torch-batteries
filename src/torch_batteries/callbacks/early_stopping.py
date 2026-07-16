@@ -18,7 +18,6 @@ class EarlyStopping:
         metric: The name of the metric to monitor
         min_delta: Minimum change in the monitored metric to qualify as an improvement
         patience: Number of epochs with no improvement after which training will be stopped
-        verbose: If True, prints a message when early stopping is triggered
         mode: One of 'min' or 'max'. In 'min' mode, training will stop when the
               monitored metric stops decreasing. In 'max' mode, it will stop
               when the metric stops increasing
@@ -33,7 +32,6 @@ class EarlyStopping:
         *,
         min_delta: float = 0.0,
         patience: int = 5,
-        verbose: bool = False,
         mode: Literal["min", "max"] = "min",
         restore_best_weights: bool = False,
     ) -> None:
@@ -51,7 +49,6 @@ class EarlyStopping:
         self._metric = metric
         self._min_delta = min_delta
         self._patience = patience
-        self._verbose = verbose
         self._restore_best_weights = restore_best_weights
         self._best_weights: dict[str, Any] | None = None
 
@@ -158,12 +155,11 @@ class EarlyStopping:
             self._epochs_no_improve += 1
             if self._epochs_no_improve >= self._patience:
                 battery.stop_training = True
-                if self._verbose:
-                    logger.info(
-                        "Early stopping applied. No improvement in '%s' for %d epochs.",
-                        self._metric,
-                        self._patience,
-                    )
+                logger.info(
+                    "Early stopping applied. No improvement in '%s' for %d epochs.",
+                    self._metric,
+                    self._patience,
+                )
 
     @charge(Event.AFTER_TRAIN)
     def run_on_train_end(self, context: EventContext) -> None:
@@ -174,5 +170,4 @@ class EarlyStopping:
         """
         if self._restore_best_weights and self._best_weights is not None:
             context["model"].load_state_dict(self._best_weights)
-            if self._verbose:
-                logger.info("Restored best model weights from early stopping.")
+            logger.info("Restored best model weights from early stopping.")

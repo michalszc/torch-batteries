@@ -26,7 +26,6 @@ class ModelCheckpoint:
         save_path: Filename for the saved model. If None, defaults to
                    'epochs-metric=value.pth'
         save_top_k: Saves specified number of best models (defaults to 1)
-        verbose: If True, prints messages when saving checkpoints
 
     Missing directories are created automatically. A `.pth` suffix is added only
     when `save_path` has no explicit suffix. Static templates gain an epoch field
@@ -52,8 +51,6 @@ class ModelCheckpoint:
         save_dir: str = ".",
         save_path: str | None = None,
         save_top_k: int = 1,
-        *,
-        verbose: bool = False,
     ) -> None:
         if stage not in {"train", "val"}:
             msg = "stage must be one of 'train' or 'val'"
@@ -68,7 +65,6 @@ class ModelCheckpoint:
         self._save_path = save_path
         self._save_top_k = save_top_k
         self._best_k_models: dict[str, float] = {}
-        self._verbose = verbose
 
         self._best_model_path: str | None = None
         self._kth_best_model_path: str | None = None
@@ -209,13 +205,12 @@ class ModelCheckpoint:
         path.parent.mkdir(parents=True, exist_ok=True)
         filepath = str(path)
         torch.save(model.state_dict(), filepath)
-        if self._verbose:
-            logger.info(
-                "Saved model checkpoint at: %s with %s: %.2f",
-                filepath,
-                self._metric,
-                current_score,
-            )
+        logger.info(
+            "Saved model checkpoint at: %s with %s: %.2f",
+            filepath,
+            self._metric,
+            current_score,
+        )
 
         self._update_top_k_models(filepath, current_score)
         return filepath
