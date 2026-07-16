@@ -77,3 +77,7 @@ class Progress(ABC):
         Returns:
             None
         """
+
+    @abstractmethod
+    def abort(self) -> None:
+        """Release progress resources after an interrupted workflow."""

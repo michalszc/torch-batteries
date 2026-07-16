@@ -1,6 +1,8 @@
 """Test for torch_batteries.callbacks.model_checkpoint.ModelCheckpoint module."""
 
+from pathlib import Path
 from typing import TYPE_CHECKING
+from unittest.mock import patch
 
 import pytest
 import torch
@@ -23,7 +25,6 @@ class TestModelCheckpoint:
             save_dir="./checkpoints",
             save_path="best_model.pth",
             save_top_k=3,
-            verbose=True,
         )
         assert checkpoint._stage == "val"  # noqa: SLF001
         assert checkpoint._metric == "accuracy"  # noqa: SLF001
@@ -31,7 +32,6 @@ class TestModelCheckpoint:
         assert checkpoint._save_dir == "./checkpoints"  # noqa: SLF001
         assert checkpoint._save_path == "best_model.pth"  # noqa: SLF001
         assert checkpoint._save_top_k == 3  # noqa: SLF001
-        assert checkpoint._verbose is True  # noqa: SLF001
 
     def test_invalid_stage(self) -> None:
         """Test ModelCheckpoint initialization with invalid stage."""
@@ -43,6 +43,11 @@ class TestModelCheckpoint:
         with pytest.raises(ValueError, match="mode must be one of 'min' or 'max'"):
             ModelCheckpoint(stage="val", metric="accuracy", mode="invalid")  # type: ignore[arg-type]
 
+    def test_invalid_save_top_k(self) -> None:
+        """At least one checkpoint must be retained."""
+        with pytest.raises(ValueError, match="save_top_k"):
+            ModelCheckpoint(stage="val", metric="loss", save_top_k=0)
+
     def test_run_on_validation_end(self, tmp_path: object) -> None:
         """Test run_on_validation_end method."""
         checkpoint = ModelCheckpoint(
@@ -51,7 +56,6 @@ class TestModelCheckpoint:
             mode="max",
             save_dir=str(tmp_path),
             save_top_k=1,
-            verbose=True,
         )
         model = torch.nn.Linear(1, 1)
         context: EventContext = {
@@ -72,7 +76,6 @@ class TestModelCheckpoint:
             mode="max",
             save_dir=str(tmp_path),
             save_top_k=1,
-            verbose=True,
         )
         model = torch.nn.Linear(1, 1)
         context: EventContext = {
@@ -93,7 +96,6 @@ class TestModelCheckpoint:
             mode="max",
             save_dir=str(tmp_path),
             save_top_k=1,
-            verbose=True,
         )
         model = torch.nn.Linear(1, 1)
 
@@ -123,7 +125,6 @@ class TestModelCheckpoint:
             mode="max",
             save_dir=str(tmp_path),
             save_top_k=2,
-            verbose=True,
         )
         model = torch.nn.Linear(1, 1)
 
@@ -162,3 +163,182 @@ class TestModelCheckpoint:
         assert len(checkpoint.best_k_models) == 2
 
         assert all(score >= 0.85 for score in checkpoint.best_k_models.values())
+
+    def test_callback_does_not_mutate_context_metrics(self, tmp_path: Path) -> None:
+        """Adding filename fields does not leak into shared event metrics."""
+        checkpoint = ModelCheckpoint(
+            stage="val", metric="accuracy", save_dir=str(tmp_path)
+        )
+        metrics = {"accuracy": 0.8}
+        context: EventContext = {
+            "model": torch.nn.Linear(1, 1),
+            "val_metrics": metrics,
+            "epoch": 2,
+        }
+
+        checkpoint.run_on_validation_end(context)
+
+        assert metrics == {"accuracy": 0.8}
+
+    def test_creates_nested_directories_and_preserves_suffix(
+        self, tmp_path: Path
+    ) -> None:
+        """Nested checkpoint templates and explicit suffixes are respected."""
+        checkpoint = ModelCheckpoint(
+            stage="val",
+            metric="accuracy",
+            save_dir=str(tmp_path / "missing"),
+            save_path="nested/best.pt",
+        )
+        checkpoint.run_on_validation_end(
+            {
+                "model": torch.nn.Linear(1, 1),
+                "val_metrics": {"accuracy": 0.8},
+                "epoch": 1,
+            }
+        )
+
+        assert checkpoint.best_model_path is not None
+        path = Path(checkpoint.best_model_path)
+        assert path.exists()
+        assert path.suffix == ".pt"
+        assert not path.name.endswith(".pt.pth")
+
+    def test_adds_suffix_after_decimal_metric_value(self, tmp_path: Path) -> None:
+        """Decimal metric formatting is not mistaken for a file suffix."""
+        checkpoint = ModelCheckpoint(
+            stage="val",
+            metric="accuracy",
+            save_dir=str(tmp_path),
+            save_path="accuracy-{accuracy:.2f}",
+        )
+        checkpoint.run_on_validation_end(
+            {
+                "model": torch.nn.Linear(1, 1),
+                "val_metrics": {"accuracy": 0.85},
+                "epoch": 1,
+            }
+        )
+
+        assert checkpoint.best_model_path is not None
+        assert checkpoint.best_model_path.endswith(".pth")
+
+    def test_static_top_k_template_gets_unique_epoch_paths(
+        self, tmp_path: Path
+    ) -> None:
+        """Static top-k names cannot overwrite checkpoints from prior epochs."""
+        checkpoint = ModelCheckpoint(
+            stage="val",
+            metric="accuracy",
+            save_dir=str(tmp_path),
+            save_path="best.pth",
+            save_top_k=2,
+        )
+        model = torch.nn.Linear(1, 1)
+
+        for epoch, accuracy in enumerate((0.8, 0.9)):
+            checkpoint.run_on_validation_end(
+                {
+                    "model": model,
+                    "val_metrics": {"accuracy": accuracy},
+                    "epoch": epoch,
+                }
+            )
+
+        paths = [Path(path) for path in checkpoint.best_k_models]
+        assert len(paths) == 2
+        assert len(set(paths)) == 2
+        assert all(path.exists() and path.suffix == ".pth" for path in paths)
+
+    def test_cleanup_tolerates_already_missing_file(self, tmp_path: Path) -> None:
+        """Top-k cleanup remains safe when a checkpoint was removed externally."""
+        checkpoint = ModelCheckpoint(
+            stage="val", metric="accuracy", save_dir=str(tmp_path)
+        )
+        missing_path = tmp_path / "missing.pth"
+        checkpoint._best_k_models[str(missing_path)] = 0.5  # noqa: SLF001
+
+        with patch(
+            "torch_batteries.callbacks.model_checkpoint.logger.warning"
+        ) as mock_warning:
+            checkpoint._delete_saved_model(str(missing_path))  # noqa: SLF001
+
+        assert str(missing_path) not in checkpoint.best_k_models
+        mock_warning.assert_called_once_with(
+            "Checkpoint file was already missing during cleanup: %s",
+            str(missing_path),
+        )
+
+    def test_missing_monitor_metric_logs_warning(self, tmp_path: Path) -> None:
+        """Missing checkpoint monitor data is visible at WARNING level."""
+        checkpoint = ModelCheckpoint(
+            stage="val", metric="accuracy", save_dir=str(tmp_path)
+        )
+
+        with patch(
+            "torch_batteries.callbacks.model_checkpoint.logger.warning"
+        ) as mock_warning:
+            checkpoint.run_on_validation_end(
+                {
+                    "model": torch.nn.Linear(1, 1),
+                    "val_metrics": {"loss": 0.5},
+                    "epoch": 1,
+                }
+            )
+
+        mock_warning.assert_called_once_with(
+            "Checkpoint monitor metric '%s' is missing; checkpoint was skipped.",
+            "accuracy",
+        )
+
+    def test_min_mode_retains_two_lowest_checkpoints(self, tmp_path: Path) -> None:
+        """Minimum-mode top-k retention evicts the highest loss checkpoint."""
+        checkpoint = ModelCheckpoint(
+            stage="val",
+            metric="loss",
+            mode="min",
+            save_dir=str(tmp_path),
+            save_top_k=2,
+        )
+        model = torch.nn.Linear(1, 1)
+
+        for epoch, loss in enumerate((0.5, 0.3, 0.4)):
+            checkpoint.run_on_validation_end(
+                {
+                    "model": model,
+                    "val_metrics": {"loss": loss},
+                    "epoch": epoch,
+                }
+            )
+
+        assert sorted(checkpoint.best_k_models.values()) == [0.3, 0.4]
+        retained_paths = {Path(path) for path in checkpoint.best_k_models}
+        assert all(path.exists() for path in retained_paths)
+        checkpoint_files = set(tmp_path.glob("*.pth"))
+        assert checkpoint_files == retained_paths
+        assert not any("epoch=0" in path.name for path in checkpoint_files)
+
+    def test_checkpoint_save_log_is_unconditional(self, tmp_path: Path) -> None:
+        """A successful checkpoint always emits its INFO outcome log."""
+        checkpoint = ModelCheckpoint(
+            stage="val", metric="accuracy", save_dir=str(tmp_path)
+        )
+
+        with patch(
+            "torch_batteries.callbacks.model_checkpoint.logger.info"
+        ) as mock_info:
+            checkpoint.run_on_validation_end(
+                {
+                    "model": torch.nn.Linear(1, 1),
+                    "val_metrics": {"accuracy": 0.8},
+                    "epoch": 1,
+                }
+            )
+
+        assert checkpoint.best_model_path is not None
+        mock_info.assert_called_once_with(
+            "Saved model checkpoint at: %s with %s: %.2f",
+            checkpoint.best_model_path,
+            "accuracy",
+            0.8,
+        )

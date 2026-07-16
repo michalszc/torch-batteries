@@ -60,3 +60,14 @@ class TestSilentProgress:
         progress = SilentProgress()
         progress.end_training()
         mock_print.assert_not_called()
+
+    def test_abort_clears_state(self) -> None:
+        """Abort clears incomplete silent progress state."""
+        progress = SilentProgress()
+        progress.start_phase(Phase.TRAIN)
+        progress.update({"loss": 1.0}, 1)
+
+        progress.abort()
+
+        assert progress._current_phase is None  # noqa: SLF001
+        assert progress._total_metrics == {}  # noqa: SLF001

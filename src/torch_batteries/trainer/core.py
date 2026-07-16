@@ -1,7 +1,7 @@
 """Battery trainer class for torch-batteries."""
 
 from collections.abc import Callable
-from typing import cast
+from typing import Any, cast
 
 import torch
 from torch import nn
@@ -9,7 +9,12 @@ from torch.utils.data import DataLoader
 
 from torch_batteries.events import Event, EventContext, EventHandler
 from torch_batteries.trainer.context import copy_history_context
-from torch_batteries.trainer.types import PredictResult, TestResult, TrainResult
+from torch_batteries.trainer.types import (
+    PredictResult,
+    StepOutput,
+    TestResult,
+    TrainResult,
+)
 from torch_batteries.utils.batch import get_batch_size
 from torch_batteries.utils.device import get_device, move_to_device
 from torch_batteries.utils.logging import get_logger
@@ -62,7 +67,7 @@ class Battery:
         self._event_handler = EventHandler(self._model, callbacks=callbacks)
         self._stop_training = False
 
-        logger.info("Battery initialized on device: %s", self._device)
+        logger.debug("Battery initialized on device: %s", self._device)
 
     @property
     def model(self) -> nn.Module:
@@ -110,7 +115,118 @@ class Battery:
         """Set the stop_training flag."""
         self._stop_training = value
 
-    def train(
+    @staticmethod
+    def _validate_loss(loss: Any, phase: str) -> torch.Tensor:
+        """Validate and return a scalar loss tensor from a step."""
+        if not isinstance(loss, torch.Tensor):
+            msg = f"{phase} step loss must be a torch.Tensor."
+            raise TypeError(msg)
+        if loss.ndim != 0:
+            msg = f"{phase} step loss must be a scalar tensor."
+            raise ValueError(msg)
+        return loss
+
+    @staticmethod
+    def _normalize_step_metrics(
+        metrics: dict[str, float | torch.Tensor], phase: str
+    ) -> dict[str, float]:
+        """Convert supported scalar step metrics to Python floats."""
+        normalized: dict[str, float] = {}
+        for name, value in metrics.items():
+            if isinstance(value, torch.Tensor):
+                if value.ndim != 0:
+                    msg = f"Metric '{name}' returned by {phase} step must be scalar."
+                    raise ValueError(msg)
+                normalized[name] = value.item()
+                continue
+            try:
+                normalized[name] = float(value)
+            except (TypeError, ValueError) as error:
+                msg = f"Metric '{name}' returned by {phase} step must be numeric."
+                raise TypeError(msg) from error
+        return normalized
+
+    def _parse_step_result(
+        self, result: Any, phase: str
+    ) -> tuple[torch.Tensor, dict[str, float]]:
+        """Validate a step result and calculate configured automatic metrics."""
+        if isinstance(result, StepOutput):
+            loss = self._validate_loss(result.loss, phase)
+            automatic_metrics: dict[str, float] = {}
+            if self._metrics:
+                if result.predictions is None or result.targets is None:
+                    msg = (
+                        f"{phase} step must return StepOutput with predictions and "
+                        "targets when Battery metrics are configured."
+                    )
+                    raise ValueError(msg)
+                automatic_metrics = calculate_metrics(
+                    self._metrics, result.predictions, result.targets
+                )
+            manual_metrics = self._normalize_step_metrics(result.metrics, phase)
+            return loss, {**automatic_metrics, **manual_metrics}
+
+        if self._metrics:
+            msg = (
+                f"{phase} step must return StepOutput with predictions and targets "
+                "when Battery metrics are configured."
+            )
+            raise ValueError(msg)
+
+        if isinstance(result, tuple):
+            if len(result) != 2 or not isinstance(result[1], dict):
+                msg = f"{phase} step tuple must be (loss, metrics_dict)."
+                raise TypeError(msg)
+            loss = self._validate_loss(result[0], phase)
+            metrics = self._normalize_step_metrics(result[1], phase)
+            return loss, metrics
+
+        return self._validate_loss(result, phase), {}
+
+    @staticmethod
+    def _validate_loader(dataloader: DataLoader, name: str) -> None:
+        """Require a sized, non-empty data loader."""
+        try:
+            number_of_batches = len(dataloader)
+        except TypeError as error:
+            msg = f"{name} loader must define its number of batches."
+            raise ValueError(msg) from error
+        if number_of_batches == 0:
+            msg = f"{name} loader must not be empty."
+            raise ValueError(msg)
+
+    def _validate_train_inputs(
+        self,
+        train_loader: DataLoader,
+        val_loader: DataLoader | None,
+        epochs: int,
+    ) -> None:
+        """Validate the complete training configuration before events run."""
+        if epochs <= 0:
+            msg = "epochs must be greater than zero."
+            raise ValueError(msg)
+        if not self._event_handler.has_handler(Event.TRAIN_STEP):
+            msg = (
+                "No method decorated with @charge(Event.TRAIN_STEP) found. "
+                "Please add a training step method to your model."
+            )
+            raise ValueError(msg)
+        if self._optimizer is None:
+            msg = "Optimizer is required for training."
+            raise ValueError(msg)
+
+        self._validate_loader(train_loader, "Training")
+        if val_loader is None:
+            return
+        self._validate_loader(val_loader, "Validation")
+        if not self._event_handler.has_handler(Event.VALIDATION_STEP):
+            msg = (
+                "No method decorated with @charge(Event.VALIDATION_STEP) found. "
+                "Please add a validation step method to your model."
+            )
+            raise ValueError(msg)
+
+    def train(  # noqa: PLR0915
         self,
         train_loader: DataLoader,
         val_loader: DataLoader | None = None,
@@ -132,16 +248,14 @@ class Battery:
         Raises:
             ValueError: If no training step handler is found
         """
-        if not self._event_handler.has_handler(Event.TRAIN_STEP):
-            msg = (
-                "No method decorated with @charge(Event.TRAIN_STEP) found. "
-                "Please add a training step method to your model."
-            )
-            raise ValueError(msg)
-
-        if self._optimizer is None:
-            msg = "Optimizer is required for training."
-            raise ValueError(msg)
+        self._validate_train_inputs(train_loader, val_loader, epochs)
+        self._stop_training = False
+        logger.info(
+            "Training started: epochs=%d, train_batches=%d, validation=%s",
+            epochs,
+            len(train_loader),
+            val_loader is not None,
+        )
 
         context: EventContext = {
             "battery": self,
@@ -167,9 +281,14 @@ class Battery:
                 logger.info("Training stopped early at epoch %d.", epoch)
                 break
 
+            logger.debug("Training epoch started: epoch=%d", epoch)
             progress.start_epoch(epoch)
 
-            train_metrics = self._train_epoch(train_loader, progress, epoch)
+            try:
+                train_metrics = self._train_epoch(train_loader, progress, epoch)
+            except BaseException:
+                progress.abort()
+                raise
             results["train_loss"].append(train_metrics["loss"])
 
             for key, value in train_metrics.items():
@@ -189,6 +308,7 @@ class Battery:
             self._event_handler.call(Event.AFTER_TRAIN_EPOCH, after_epoch_context)
 
             if val_loader:
+                logger.debug("Validation phase started: epoch=%d", epoch)
                 before_val_context: EventContext = {
                     "battery": self,
                     "model": self._model,
@@ -199,7 +319,11 @@ class Battery:
                 }
                 self._event_handler.call(Event.BEFORE_VALIDATION, before_val_context)
 
-                val_metrics = self._validate_epoch(val_loader, progress, epoch)
+                try:
+                    val_metrics = self._validate_epoch(val_loader, progress, epoch)
+                except BaseException:
+                    progress.abort()
+                    raise
                 results["val_loss"].append(val_metrics["loss"])
 
                 for key, value in val_metrics.items():
@@ -218,8 +342,18 @@ class Battery:
                     **copy_history_context(results),
                 }
                 self._event_handler.call(Event.AFTER_VALIDATION, after_val_context)
+                logger.debug(
+                    "Validation phase completed: epoch=%d, metrics=%s",
+                    epoch,
+                    val_metrics,
+                )
 
             progress.end_epoch()
+            logger.debug(
+                "Training epoch completed: epoch=%d, train_metrics=%s",
+                epoch,
+                train_metrics,
+            )
             last_epoch = epoch
 
         progress.end_training()
@@ -235,6 +369,11 @@ class Battery:
         if val_loader and val_metrics:
             after_train_context["val_metrics"] = val_metrics
         self._event_handler.call(Event.AFTER_TRAIN, after_train_context)
+        logger.info(
+            "Training completed: completed_epochs=%d, stopped_early=%s",
+            len(results["train_loss"]),
+            self._stop_training,
+        )
 
         return results
 
@@ -263,6 +402,7 @@ class Battery:
         self._model.train()
 
         progress.start_phase(Phase.TRAIN, total_batches=len(dataloader))
+        logger.debug("Training phase started: epoch=%d", epoch)
 
         for batch_idx, batch_data in enumerate(dataloader):
             batch = move_to_device(batch_data, self._device)
@@ -290,26 +430,18 @@ class Battery:
             }
             result = self._event_handler.call(Event.TRAIN_STEP, step_context)
 
-            # Handle flexible return: either loss or (loss, metrics_dict)
-            step_metrics = {}
-            if isinstance(result, tuple):
-                loss, step_metrics = result
-                assert loss is not None, "Training step must return a loss value."
-            else:
-                loss = result
-                assert loss is not None, "Training step must return a loss value."
+            loss, step_metrics = self._parse_step_result(result, "Training")
 
             loss.backward()
             self._optimizer.step()  # type: ignore[union-attr]
 
-            init_metrics = {}
-            if self._metrics and len(batch) >= 2:
-                with torch.no_grad():
-                    pred = self._model(batch[0])
-                    target = batch[1]
-                    init_metrics = calculate_metrics(self._metrics, pred, target)
-
-            batch_metrics = {"loss": loss.item(), **init_metrics, **step_metrics}
+            batch_metrics = {"loss": loss.item(), **step_metrics}
+            logger.debug(
+                "Training step completed: epoch=%d, batch=%d, metrics=%s",
+                epoch,
+                batch_idx,
+                batch_metrics,
+            )
 
             after_step_context: EventContext = {
                 "battery": self,
@@ -328,7 +460,13 @@ class Battery:
             progress.update(cast("ProgressMetrics", batch_metrics), num_samples)
 
         avg_metrics = progress.end_phase()
-        return avg_metrics if isinstance(avg_metrics, dict) else {"loss": avg_metrics}
+        train_metrics = (
+            avg_metrics if isinstance(avg_metrics, dict) else {"loss": avg_metrics}
+        )
+        logger.debug(
+            "Training phase completed: epoch=%d, metrics=%s", epoch, train_metrics
+        )
+        return train_metrics
 
     def _validate_epoch(
         self, dataloader: DataLoader, progress: Progress, epoch: int
@@ -388,22 +526,14 @@ class Battery:
                 }
                 result = self._event_handler.call(Event.VALIDATION_STEP, step_context)
 
-                # Handle flexible return: either loss or (loss, metrics_dict)
-                step_metrics = {}
-                if isinstance(result, tuple):
-                    loss, step_metrics = result
-                    assert loss is not None, "Validation step must return a loss value."
-                else:
-                    loss = result
-                    assert loss is not None, "Validation step must return a loss value."
-
-                init_metrics = {}
-                if self._metrics and len(batch) >= 2:
-                    pred = self._model(batch[0])
-                    target = batch[1]
-                    init_metrics = calculate_metrics(self._metrics, pred, target)
-
-                batch_metrics = {"loss": loss.item(), **init_metrics, **step_metrics}
+                loss, step_metrics = self._parse_step_result(result, "Validation")
+                batch_metrics = {"loss": loss.item(), **step_metrics}
+                logger.debug(
+                    "Validation step completed: epoch=%d, batch=%d, metrics=%s",
+                    epoch,
+                    batch_idx,
+                    batch_metrics,
+                )
 
                 after_step_context: EventContext = {
                     "battery": self,
@@ -459,6 +589,9 @@ class Battery:
             )
             raise ValueError(msg)
 
+        self._validate_loader(test_loader, "Test")
+        logger.info("Testing started: batches=%d", len(test_loader))
+
         before_test_context: EventContext = {
             "battery": self,
             "model": self._model,
@@ -479,63 +612,15 @@ class Battery:
         progress = ProgressFactory.create(verbose=verbose, total_epochs=1)
         progress.start_epoch(0)
         progress.start_phase(Phase.TEST, total_batches=len(test_loader))
+        logger.debug("Test phase started: epoch=0")
 
-        with torch.no_grad():
-            for batch_idx, batch_data in enumerate(test_loader):
-                batch = move_to_device(batch_data, self._device)
-
-                before_step_context: EventContext = {
-                    "battery": self,
-                    "model": self._model,
-                    "optimizer": self._optimizer,
-                    "batch": batch,
-                    "batch_idx": batch_idx,
-                    "epoch": 0,
-                }
-                self._event_handler.call(Event.BEFORE_TEST_STEP, before_step_context)
-
-                step_context: EventContext = {
-                    "battery": self,
-                    "model": self._model,
-                    "optimizer": self._optimizer,
-                    "batch": batch,
-                    "batch_idx": batch_idx,
-                    "epoch": 0,
-                }
-                result = self._event_handler.call(Event.TEST_STEP, step_context)
-
-                # Handle flexible return: either loss or (loss, metrics_dict)
-                step_metrics = {}
-                if isinstance(result, tuple):
-                    loss, step_metrics = result
-                    assert loss is not None, "Test step must return a loss value."
-                else:
-                    loss = result
-                    assert loss is not None, "Test step must return a loss value."
-
-                init_metrics = {}
-                if self._metrics and len(batch) >= 2:
-                    pred = self._model(batch[0])
-                    target = batch[1]
-                    init_metrics = calculate_metrics(self._metrics, pred, target)
-
-                batch_metrics = {"loss": loss.item(), **init_metrics, **step_metrics}
-
-                after_step_context: EventContext = {
-                    "battery": self,
-                    "model": self._model,
-                    "optimizer": self._optimizer,
-                    "batch": batch,
-                    "batch_idx": batch_idx,
-                    "epoch": 0,
-                    "loss": loss.item(),
-                    "test_loss": loss.item(),
-                    "test_metrics": batch_metrics,
-                }
-                self._event_handler.call(Event.AFTER_TEST_STEP, after_step_context)
-
-                num_samples = get_batch_size(batch)
-                progress.update(cast("ProgressMetrics", batch_metrics), num_samples)
+        try:
+            with torch.no_grad():
+                for batch_idx, batch_data in enumerate(test_loader):
+                    self._test_batch(batch_data, batch_idx, progress)
+        except BaseException:
+            progress.abort()
+            raise
 
         test_metrics = progress.end_phase()
         progress.end_epoch()
@@ -568,6 +653,7 @@ class Battery:
             "test_metrics": test_metrics_context,
         }
         self._event_handler.call(Event.AFTER_TEST, after_test_context)
+        logger.debug("Test phase completed: epoch=0, metrics=%s", test_metrics_context)
 
         # Format results with test_loss and test_metrics
         if isinstance(test_metrics, dict):
@@ -580,7 +666,56 @@ class Battery:
         else:
             results = {"test_loss": test_metrics}
 
+        logger.info("Testing completed")
         return results
+
+    def _test_batch(self, batch_data: Any, batch_idx: int, progress: Progress) -> None:
+        """Process one test batch."""
+        batch = move_to_device(batch_data, self._device)
+
+        before_step_context: EventContext = {
+            "battery": self,
+            "model": self._model,
+            "optimizer": self._optimizer,
+            "batch": batch,
+            "batch_idx": batch_idx,
+            "epoch": 0,
+        }
+        self._event_handler.call(Event.BEFORE_TEST_STEP, before_step_context)
+
+        step_context: EventContext = {
+            "battery": self,
+            "model": self._model,
+            "optimizer": self._optimizer,
+            "batch": batch,
+            "batch_idx": batch_idx,
+            "epoch": 0,
+        }
+        result = self._event_handler.call(Event.TEST_STEP, step_context)
+
+        loss, step_metrics = self._parse_step_result(result, "Test")
+        batch_metrics = {"loss": loss.item(), **step_metrics}
+        logger.debug(
+            "Test step completed: epoch=0, batch=%d, metrics=%s",
+            batch_idx,
+            batch_metrics,
+        )
+
+        after_step_context: EventContext = {
+            "battery": self,
+            "model": self._model,
+            "optimizer": self._optimizer,
+            "batch": batch,
+            "batch_idx": batch_idx,
+            "epoch": 0,
+            "loss": loss.item(),
+            "test_loss": loss.item(),
+            "test_metrics": batch_metrics,
+        }
+        self._event_handler.call(Event.AFTER_TEST_STEP, after_step_context)
+
+        num_samples = get_batch_size(batch)
+        progress.update(cast("ProgressMetrics", batch_metrics), num_samples)
 
     def predict(self, data_loader: DataLoader, verbose: int = 1) -> PredictResult:
         """
@@ -603,6 +738,9 @@ class Battery:
             )
             raise ValueError(msg)
 
+        self._validate_loader(data_loader, "Prediction")
+        logger.info("Prediction started: batches=%d", len(data_loader))
+
         before_predict_context: EventContext = {
             "battery": self,
             "model": self._model,
@@ -621,51 +759,20 @@ class Battery:
         )
 
         self._model.eval()
-        predictions = []
+        predictions: list[Any] = []
 
         progress = ProgressFactory.create(verbose=verbose, total_epochs=1)
         progress.start_epoch(0)
         progress.start_phase(Phase.PREDICT, total_batches=len(data_loader))
+        logger.debug("Prediction phase started: epoch=0")
 
-        with torch.no_grad():
-            for batch_idx, batch_data in enumerate(data_loader):
-                batch = move_to_device(batch_data, self._device)
-
-                before_step_context: EventContext = {
-                    "battery": self,
-                    "model": self._model,
-                    "optimizer": self._optimizer,
-                    "batch": batch,
-                    "batch_idx": batch_idx,
-                    "epoch": 0,
-                }
-                self._event_handler.call(Event.BEFORE_PREDICT_STEP, before_step_context)
-
-                step_context: EventContext = {
-                    "battery": self,
-                    "model": self._model,
-                    "optimizer": self._optimizer,
-                    "batch": batch,
-                    "batch_idx": batch_idx,
-                    "epoch": 0,
-                }
-                prediction = self._event_handler.call(Event.PREDICT_STEP, step_context)
-                if prediction is not None:
-                    predictions.append(prediction)
-
-                after_step_context: EventContext = {
-                    "battery": self,
-                    "model": self._model,
-                    "optimizer": self._optimizer,
-                    "batch": batch,
-                    "batch_idx": batch_idx,
-                    "epoch": 0,
-                    "predictions": prediction,
-                }
-                self._event_handler.call(Event.AFTER_PREDICT_STEP, after_step_context)
-
-                # Update progress (no loss for predictions)
-                progress.update()
+        try:
+            with torch.no_grad():
+                for batch_idx, batch_data in enumerate(data_loader):
+                    self._predict_batch(batch_data, batch_idx, predictions, progress)
+        except BaseException:
+            progress.abort()
+            raise
 
         progress.end_phase()
         progress.end_epoch()
@@ -686,5 +793,59 @@ class Battery:
             "predictions": predictions,
         }
         self._event_handler.call(Event.AFTER_PREDICT, after_predict_context)
+        logger.debug(
+            "Prediction phase completed: epoch=0, outputs=%d", len(predictions)
+        )
+        logger.info("Prediction completed: outputs=%d", len(predictions))
 
         return {"predictions": predictions}
+
+    def _predict_batch(
+        self,
+        batch_data: Any,
+        batch_idx: int,
+        predictions: list[Any],
+        progress: Progress,
+    ) -> None:
+        """Process one prediction batch."""
+        batch = move_to_device(batch_data, self._device)
+
+        before_step_context: EventContext = {
+            "battery": self,
+            "model": self._model,
+            "optimizer": self._optimizer,
+            "batch": batch,
+            "batch_idx": batch_idx,
+            "epoch": 0,
+        }
+        self._event_handler.call(Event.BEFORE_PREDICT_STEP, before_step_context)
+
+        step_context: EventContext = {
+            "battery": self,
+            "model": self._model,
+            "optimizer": self._optimizer,
+            "batch": batch,
+            "batch_idx": batch_idx,
+            "epoch": 0,
+        }
+        prediction = self._event_handler.call(Event.PREDICT_STEP, step_context)
+        logger.debug(
+            "Prediction step completed: epoch=0, batch=%d, output_type=%s",
+            batch_idx,
+            type(prediction).__name__,
+        )
+        if prediction is not None:
+            predictions.append(prediction)
+
+        after_step_context: EventContext = {
+            "battery": self,
+            "model": self._model,
+            "optimizer": self._optimizer,
+            "batch": batch,
+            "batch_idx": batch_idx,
+            "epoch": 0,
+            "predictions": prediction,
+        }
+        self._event_handler.call(Event.AFTER_PREDICT_STEP, after_step_context)
+
+        progress.update()

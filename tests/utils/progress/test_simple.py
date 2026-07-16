@@ -93,3 +93,16 @@ class TestSimpleProgress:
         progress.end_training()
 
         mock_print.assert_called_with("Training completed in 25.00s")
+
+    @patch("builtins.print")
+    def test_abort_clears_state_without_output(self, mock_print: MagicMock) -> None:
+        """Abort clears incomplete state without a completion message."""
+        progress = SimpleProgress()
+        progress.start_phase(Phase.TRAIN)
+        progress.update({"loss": 1.0}, 1)
+
+        progress.abort()
+
+        mock_print.assert_not_called()
+        assert progress._current_phase is None  # noqa: SLF001
+        assert progress._total_metrics == {}  # noqa: SLF001

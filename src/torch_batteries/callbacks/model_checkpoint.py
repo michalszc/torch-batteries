@@ -26,7 +26,10 @@ class ModelCheckpoint:
         save_path: Filename for the saved model. If None, defaults to
                    'epochs-metric=value.pth'
         save_top_k: Saves specified number of best models (defaults to 1)
-        verbose: If True, prints messages when saving checkpoints
+
+    Missing directories are created automatically. A `.pth` suffix is added only
+    when `save_path` has no explicit suffix. Static templates gain an epoch field
+    when `save_top_k` is greater than one to avoid overwriting retained weights.
 
     Examples:
         ```python
@@ -48,11 +51,12 @@ class ModelCheckpoint:
         save_dir: str = ".",
         save_path: str | None = None,
         save_top_k: int = 1,
-        *,
-        verbose: bool = False,
     ) -> None:
         if stage not in {"train", "val"}:
             msg = "stage must be one of 'train' or 'val'"
+            raise ValueError(msg)
+        if save_top_k < 1:
+            msg = "save_top_k must be greater than or equal to one"
             raise ValueError(msg)
 
         self._stage = stage
@@ -61,7 +65,6 @@ class ModelCheckpoint:
         self._save_path = save_path
         self._save_top_k = save_top_k
         self._best_k_models: dict[str, float] = {}
-        self._verbose = verbose
 
         self._best_model_path: str | None = None
         self._kth_best_model_path: str | None = None
@@ -107,8 +110,7 @@ class ModelCheckpoint:
         if self._stage != "train":
             return
 
-        metrics = context["train_metrics"]
-        metrics["epoch"] = context["epoch"]
+        metrics = {**context["train_metrics"], "epoch": context["epoch"]}
 
         if not self._save_best_model(context["model"], metrics):
             self._save_top_k_model(context["model"], metrics)
@@ -123,8 +125,7 @@ class ModelCheckpoint:
         if self._stage != "val":
             return
 
-        metrics = context["val_metrics"]
-        metrics["epoch"] = context["epoch"]
+        metrics = {**context["val_metrics"], "epoch": context["epoch"]}
 
         if not self._save_best_model(context["model"], metrics):
             self._save_top_k_model(context["model"], metrics)
@@ -141,7 +142,19 @@ class ModelCheckpoint:
         """
         current_score = metrics.get(self._metric)
         if current_score is None:
+            logger.warning(
+                "Checkpoint monitor metric '%s' is missing; checkpoint was skipped.",
+                self._metric,
+            )
             return False
+
+        logger.debug(
+            "Checkpoint candidate: metric=%s, score=%s, best=%s, mode=%s",
+            self._metric,
+            current_score,
+            self._best_score,
+            self._mode,
+        )
 
         if self._monitor_op(current_score, self._best_score):
             self._best_score = current_score
@@ -178,6 +191,12 @@ class ModelCheckpoint:
                     key=self._best_k_models.get,  # type: ignore[arg-type]
                 )
                 self._kth_best_score = self._best_k_models[self._kth_best_model_path]
+        logger.debug(
+            "Checkpoint ranking updated: retained=%d, save_top_k=%d, kth_score=%s",
+            len(self._best_k_models),
+            self._save_top_k,
+            self._kth_best_score,
+        )
 
     def _save_model(
         self, model: nn.Module, metrics: dict[str, float], current_score: float
@@ -192,23 +211,45 @@ class ModelCheckpoint:
         Returns:
             Path to the saved model file.
         """
+        filename_template = self._ensure_unique_template(self._save_path)
         filename = self._format_checkpoint_name(
-            self._save_path,
+            filename_template,
             metrics,
             auto_insert_metric_name=True,
         )
-        filepath = f"{self._save_dir}/{filename}.pth"
+        if not self._has_explicit_suffix(filename_template):
+            filename = f"{filename}.pth"
+        path = Path(self._save_dir) / filename
+        path.parent.mkdir(parents=True, exist_ok=True)
+        filepath = str(path)
         torch.save(model.state_dict(), filepath)
-        if self._verbose:
-            logger.info(
-                "Saved model checkpoint at: %s with %s: %.2f",
-                filepath,
-                self._metric,
-                current_score,
-            )
+        logger.info(
+            "Saved model checkpoint at: %s with %s: %.2f",
+            filepath,
+            self._metric,
+            current_score,
+        )
 
         self._update_top_k_models(filepath, current_score)
         return filepath
+
+    def _ensure_unique_template(self, filename: str | None) -> str | None:
+        """Add an epoch field when top-k checkpoints would share one filename."""
+        if filename is None or self._save_top_k == 1 or "{epoch" in filename:
+            return filename
+
+        suffix_match = re.search(r"(\.[A-Za-z][A-Za-z0-9]*)$", filename)
+        if suffix_match is None:
+            return f"{filename}-{{epoch}}"
+        suffix_start = suffix_match.start()
+        return f"{filename[:suffix_start]}-{{epoch}}{filename[suffix_start:]}"
+
+    @staticmethod
+    def _has_explicit_suffix(filename: str | None) -> bool:
+        """Check whether a template ends in a user-provided file suffix."""
+        return filename is not None and bool(
+            re.search(r"\.[A-Za-z][A-Za-z0-9]*$", filename)
+        )
 
     def _update_top_k_models(self, filepath: str, current_score: float) -> None:
         """Update top-k models tracking and remove worst model if needed.
@@ -276,4 +317,11 @@ class ModelCheckpoint:
             filepath: Path to the model file to delete.
         """
         del self._best_k_models[filepath]
-        Path(filepath).unlink()
+        path = Path(filepath)
+        if path.exists():
+            path.unlink()
+            logger.info("Deleted model checkpoint at: %s", filepath)
+        else:
+            logger.warning(
+                "Checkpoint file was already missing during cleanup: %s", filepath
+            )

@@ -4,6 +4,10 @@ from typing import Any
 
 import torch
 
+from torch_batteries.utils.logging import get_logger
+
+logger = get_logger("device")
+
 
 def get_device(device: str | torch.device = "auto") -> torch.device:
     """Get PyTorch device for model and data placement.
@@ -56,10 +60,15 @@ def get_device(device: str | torch.device = "auto") -> torch.device:
 
     match device:
         case "auto":
-            return _get_auto_device()
+            selected_device = _get_auto_device()
+            logger.debug("Automatically selected device: %s", selected_device)
+            return selected_device
         case str():
-            return torch.device(device)
+            selected_device = torch.device(device)
+            logger.debug("Using explicitly selected device: %s", selected_device)
+            return selected_device
         case torch.device():
+            logger.debug("Using explicitly selected device: %s", device)
             return device
 
 

@@ -1,6 +1,7 @@
 """Test for torch_batteries.callbacks.early_stopping module."""
 
 from typing import TYPE_CHECKING
+from unittest.mock import patch
 
 import pytest
 import torch
@@ -10,6 +11,15 @@ from torch_batteries.callbacks.early_stopping import EarlyStopping
 
 if TYPE_CHECKING:
     from torch_batteries.events import EventContext
+
+
+class ModelWithBuffer(torch.nn.Module):
+    """Small model containing both parameters and a registered buffer."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.linear = torch.nn.Linear(2, 1)
+        self.register_buffer("running_total", torch.zeros(1))
 
 
 class TestEarlyStopping:
@@ -22,7 +32,6 @@ class TestEarlyStopping:
             metric="loss",
             min_delta=0.01,
             patience=3,
-            verbose=True,
             mode="min",
             restore_best_weights=True,
         )
@@ -30,7 +39,6 @@ class TestEarlyStopping:
         assert early_stopping._metric == "loss"  # noqa: SLF001
         assert early_stopping._min_delta == 0.01  # noqa: SLF001
         assert early_stopping._patience == 3  # noqa: SLF001
-        assert early_stopping._verbose is True  # noqa: SLF001
         assert early_stopping._mode == "min"  # noqa: SLF001
         assert early_stopping._restore_best_weights is True  # noqa: SLF001
 
@@ -44,6 +52,20 @@ class TestEarlyStopping:
         with pytest.raises(ValueError, match="mode must be one of 'min' or 'max'"):
             EarlyStopping(stage="val", metric="loss", mode="invalid")  # type: ignore[arg-type]
 
+    @pytest.mark.parametrize(
+        "kwargs",
+        [
+            {"min_delta": -0.1},
+            {"patience": -1},
+        ],
+    )
+    def test_invalid_non_negative_configuration(
+        self, kwargs: dict[str, float | int]
+    ) -> None:
+        """Patience and minimum delta cannot be negative."""
+        with pytest.raises(ValueError, match="greater than or equal to zero"):
+            EarlyStopping(stage="val", metric="loss", **kwargs)  # type: ignore[arg-type]
+
     def test_run_on_train_start(self) -> None:
         """Test run_on_train_start method initializes parameters correctly."""
         early_stopping = EarlyStopping(stage="val", metric="loss")
@@ -51,6 +73,7 @@ class TestEarlyStopping:
         early_stopping.run_on_train_start(context)
         assert early_stopping.best_score is None
         assert early_stopping._epochs_no_improve == 0  # noqa: SLF001
+        assert early_stopping.best_weights is None
 
     def test_check_for_early_stop_min_mode(self) -> None:
         """Test _check_for_early_stop method in 'min' mode."""
@@ -184,7 +207,9 @@ class TestEarlyStopping:
         model = torch.nn.Linear(1, 1)
         battery = Battery(model=model)
 
-        initial_weights = model.state_dict().copy()
+        initial_weights = {
+            key: value.detach().clone() for key, value in model.state_dict().items()
+        }
 
         context: EventContext = {
             "model": model,
@@ -193,8 +218,14 @@ class TestEarlyStopping:
         }
         early_stopping.run_on_validation_end(context)
 
+        saved_weights = early_stopping.best_weights
+        assert saved_weights is not None
+
         for param in model.parameters():
             param.data += 1.0
+
+        for key, initial_weight in initial_weights.items():
+            assert torch.equal(saved_weights[key], initial_weight.cpu())
 
         context = {
             "model": model,
@@ -214,8 +245,139 @@ class TestEarlyStopping:
         early_stopping.run_on_validation_end(context)
 
         assert early_stopping.best_weights is not None
+        early_stopping.run_on_train_end({"model": model})
 
-        for key in initial_weights:
-            assert torch.equal(
-                model.state_dict()[key], early_stopping.best_weights[key]
+        for key, initial_weight in initial_weights.items():
+            assert torch.equal(model.state_dict()[key], initial_weight)
+
+    def test_snapshot_and_restore_include_buffers(self) -> None:
+        """Best-state restoration includes model buffers as well as parameters."""
+        model = torch.nn.BatchNorm1d(2)
+        battery = Battery(model=model)
+        early_stopping = EarlyStopping(
+            stage="val", metric="loss", restore_best_weights=True
+        )
+        context: EventContext = {
+            "model": model,
+            "battery": battery,
+            "val_metrics": {"loss": 1.0},
+        }
+        early_stopping.run_on_validation_end(context)
+        assert model.running_mean is not None
+        expected_mean = model.running_mean.detach().clone()
+        model.running_mean.add_(5.0)
+
+        early_stopping.run_on_train_end({"model": model})
+
+        assert model.running_mean is not None
+        assert torch.equal(model.running_mean, expected_mean)
+
+    @pytest.mark.parametrize(
+        "device",
+        [
+            "auto",
+            pytest.param(
+                "mps",
+                marks=pytest.mark.skipif(
+                    not torch.backends.mps.is_available(), reason="MPS is unavailable"
+                ),
+            ),
+            pytest.param(
+                "cuda",
+                marks=pytest.mark.skipif(
+                    not torch.cuda.is_available(), reason="CUDA is unavailable"
+                ),
+            ),
+        ],
+    )
+    def test_snapshot_restores_state_without_changing_model_device(
+        self, device: str
+    ) -> None:
+        """CPU snapshots restore parameters and buffers on their original device."""
+        model = ModelWithBuffer()
+        battery = Battery(model=model, device=device)
+        original_parameter_devices = {
+            name: parameter.device for name, parameter in model.named_parameters()
+        }
+        original_buffer_devices = {
+            name: buffer.device for name, buffer in model.named_buffers()
+        }
+        expected_state = {
+            key: value.detach().cpu().clone()
+            for key, value in model.state_dict().items()
+        }
+        early_stopping = EarlyStopping(
+            stage="val", metric="loss", restore_best_weights=True
+        )
+        early_stopping.run_on_validation_end(
+            {
+                "model": model,
+                "battery": battery,
+                "val_metrics": {"loss": 1.0},
+            }
+        )
+        saved_weights = early_stopping.best_weights
+        assert saved_weights is not None
+        assert all(weight.device.type == "cpu" for weight in saved_weights.values())
+
+        with torch.no_grad():
+            for parameter in model.parameters():
+                parameter.add_(5.0)
+            for buffer in model.buffers():
+                buffer.add_(5.0)
+        early_stopping.run_on_train_end({"model": model})
+
+        assert {
+            name: parameter.device for name, parameter in model.named_parameters()
+        } == original_parameter_devices
+        assert {
+            name: buffer.device for name, buffer in model.named_buffers()
+        } == original_buffer_devices
+        for key, expected_value in expected_state.items():
+            assert torch.equal(model.state_dict()[key].cpu(), expected_value)
+
+    def test_train_start_resets_saved_state(self) -> None:
+        """Reusing a callback does not retain state from a previous run."""
+        model = torch.nn.Linear(1, 1)
+        battery = Battery(model=model)
+        early_stopping = EarlyStopping(
+            stage="val", metric="loss", restore_best_weights=True
+        )
+        early_stopping.run_on_validation_end(
+            {"model": model, "battery": battery, "val_metrics": {"loss": 1.0}}
+        )
+        assert early_stopping.best_weights is not None
+
+        early_stopping.run_on_train_start({})
+
+        assert early_stopping.best_score is None
+        assert early_stopping.best_weights is None
+
+    def test_outcome_logs_are_unconditional(self) -> None:
+        """Stop and restoration outcomes are logged without callback flags."""
+        model = torch.nn.Linear(1, 1)
+        battery = Battery(model=model)
+        early_stopping = EarlyStopping(
+            stage="val",
+            metric="loss",
+            patience=1,
+            restore_best_weights=True,
+        )
+
+        with patch("torch_batteries.callbacks.early_stopping.logger.info") as mock_info:
+            early_stopping.run_on_validation_end(
+                {"model": model, "battery": battery, "val_metrics": {"loss": 1.0}}
             )
+            early_stopping.run_on_validation_end(
+                {"model": model, "battery": battery, "val_metrics": {"loss": 2.0}}
+            )
+            early_stopping.run_on_train_end({"model": model})
+
+        assert mock_info.call_args_list[0].args == (
+            "Early stopping applied. No improvement in '%s' for %d epochs.",
+            "loss",
+            1,
+        )
+        assert mock_info.call_args_list[1].args == (
+            "Restored best model weights from early stopping.",
+        )

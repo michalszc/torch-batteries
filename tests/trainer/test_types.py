@@ -2,7 +2,8 @@
 
 import torch
 
-from torch_batteries.trainer.types import PredictResult, TestResult, TrainResult
+from torch_batteries.trainer import types as trainer_types
+from torch_batteries.trainer.types import PredictResult, TrainResult
 
 
 class TestTrainerTypes:
@@ -32,7 +33,7 @@ class TestTrainerTypes:
 
     def test_test_result_structure(self) -> None:
         """Test TestResult type structure."""
-        test_result: TestResult = {
+        test_result: trainer_types.TestResult = {
             "test_loss": 0.25,
         }
 
@@ -95,11 +96,11 @@ class TestTrainerTypes:
     def test_test_result_type_compatibility(self) -> None:
         """Test that TestResult is compatible with expected usage patterns."""
 
-        def process_test_result(result: TestResult) -> str:
+        def process_test_result(result: trainer_types.TestResult) -> str:
             """Example function that processes test results."""
             return f"Test loss: {result['test_loss']:.4f}"
 
-        test_result: TestResult = {
+        test_result: trainer_types.TestResult = {
             "test_loss": 0.1234,
         }
 
@@ -143,7 +144,7 @@ class TestTrainerTypes:
         # Type annotations should still work
         # (TypedDict with total=False allows extra keys)
         train_result: TrainResult = extended_train_result  # type: ignore[assignment]
-        test_result: TestResult = extended_test_result  # type: ignore[assignment]
+        test_result: trainer_types.TestResult = extended_test_result  # type: ignore[assignment]
         predict_result: PredictResult = extended_predict_result  # type: ignore[assignment]
 
         assert "train_loss" in train_result

@@ -2,7 +2,7 @@
 
 from typing import Any, Literal
 
-from torch import nn
+from torch import Tensor, nn
 
 from torch_batteries import Battery, Event, EventContext, charge
 from torch_batteries.utils.logging import get_logger
@@ -18,7 +18,6 @@ class EarlyStopping:
         metric: The name of the metric to monitor
         min_delta: Minimum change in the monitored metric to qualify as an improvement
         patience: Number of epochs with no improvement after which training will be stopped
-        verbose: If True, prints a message when early stopping is triggered
         mode: One of 'min' or 'max'. In 'min' mode, training will stop when the
               monitored metric stops decreasing. In 'max' mode, it will stop
               when the metric stops increasing
@@ -33,19 +32,23 @@ class EarlyStopping:
         *,
         min_delta: float = 0.0,
         patience: int = 5,
-        verbose: bool = False,
         mode: Literal["min", "max"] = "min",
         restore_best_weights: bool = False,
     ) -> None:
         if stage not in {"train", "val"}:
             msg = "stage must be one of 'train' or 'val'"
             raise ValueError(msg)
+        if min_delta < 0:
+            msg = "min_delta must be greater than or equal to zero"
+            raise ValueError(msg)
+        if patience < 0:
+            msg = "patience must be greater than or equal to zero"
+            raise ValueError(msg)
 
         self._stage = stage
         self._metric = metric
         self._min_delta = min_delta
         self._patience = patience
-        self._verbose = verbose
         self._restore_best_weights = restore_best_weights
         self._best_weights: dict[str, Any] | None = None
 
@@ -81,6 +84,16 @@ class EarlyStopping:
         """
         self._best_score = None
         self._epochs_no_improve = 0
+        self._best_weights = None
+        logger.debug("Early stopping state reset for a new training run.")
+
+    @staticmethod
+    def _snapshot_weights(model: nn.Module) -> dict[str, Tensor]:
+        """Create an immutable CPU snapshot of parameters and buffers."""
+        return {
+            name: value.detach().cpu().clone()
+            for name, value in model.state_dict().items()
+        }
 
     @charge(Event.AFTER_TRAIN_EPOCH)
     def run_on_epoch_end(self, context: EventContext) -> None:
@@ -128,27 +141,49 @@ class EarlyStopping:
             raise ValueError(msg)
 
         current_score = metrics[self._metric]
+        logger.debug(
+            "Early stopping comparison: metric=%s, current=%s, best=%s, mode=%s",
+            self._metric,
+            current_score,
+            self._best_score,
+            self._mode,
+        )
         if self._best_score is None:
             self._best_score = current_score
             if self._restore_best_weights:
-                self._best_weights = model.state_dict()
+                self._best_weights = self._snapshot_weights(model)
+            logger.debug(
+                "Early stopping baseline recorded: metric=%s, score=%s",
+                self._metric,
+                current_score,
+            )
             return
 
         if self._monitor_op(current_score, self._best_score):
             self._best_score = current_score
             self._epochs_no_improve = 0
             if self._restore_best_weights:
-                self._best_weights = model.state_dict()
+                self._best_weights = self._snapshot_weights(model)
+            logger.debug(
+                "Early stopping improvement recorded: metric=%s, score=%s",
+                self._metric,
+                current_score,
+            )
         else:
             self._epochs_no_improve += 1
+            logger.debug(
+                "Early stopping found no improvement: metric=%s, count=%d, patience=%d",
+                self._metric,
+                self._epochs_no_improve,
+                self._patience,
+            )
             if self._epochs_no_improve >= self._patience:
                 battery.stop_training = True
-                if self._verbose:
-                    logger.info(
-                        "Early stopping applied. No improvement in '%s' for %d epochs.",
-                        self._metric,
-                        self._patience,
-                    )
+                logger.info(
+                    "Early stopping applied. No improvement in '%s' for %d epochs.",
+                    self._metric,
+                    self._patience,
+                )
 
     @charge(Event.AFTER_TRAIN)
     def run_on_train_end(self, context: EventContext) -> None:
@@ -159,5 +194,4 @@ class EarlyStopping:
         """
         if self._restore_best_weights and self._best_weights is not None:
             context["model"].load_state_dict(self._best_weights)
-            if self._verbose:
-                logger.info("Restored best model weights from early stopping.")
+            logger.info("Restored best model weights from early stopping.")

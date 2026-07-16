@@ -84,3 +84,9 @@ class SilentProgress(Progress):
     def end_training(self) -> None:
         """End the training phase (silent)."""
         pass  # noqa: PIE790
+
+    def abort(self) -> None:
+        """Clear incomplete progress state silently."""
+        self._current_phase = None
+        self._total_metrics = {}
+        self._total_samples = 0

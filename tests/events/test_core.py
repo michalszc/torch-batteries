@@ -1,5 +1,7 @@
 """Tests for torch_batteries.events module."""
 
+from unittest.mock import patch
+
 import torch
 from torch import nn
 
@@ -224,3 +226,20 @@ class TestEventHandler:
 
         assert torch.equal(train_result, torch.tensor(1.0))
         assert torch.equal(val_result, torch.tensor(2.0))
+
+    def test_rejected_callback_warning_includes_callback_and_event(self) -> None:
+        """Rejected model-specific callback registrations identify both inputs."""
+
+        class InvalidCallback:
+            @charge(Event.TRAIN_STEP)
+            def training_step(self, context: EventContext) -> torch.Tensor:
+                return torch.tensor(0.0)
+
+        with patch("torch_batteries.events.handler.logger.warning") as mock_warning:
+            EventHandler(DummyModel(), callbacks=[InvalidCallback()])
+
+        mock_warning.assert_called_once_with(
+            "Callback '%s' should not handle model-specific event '%s'",
+            "InvalidCallback",
+            "train_step",
+        )

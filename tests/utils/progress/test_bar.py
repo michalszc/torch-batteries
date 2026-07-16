@@ -95,3 +95,17 @@ class TestBarProgress:
         progress = BarProgress(total_epochs=1)
         progress.end_training()
         mock_print.assert_not_called()
+
+    @patch("torch_batteries.utils.progress.progress_bar.tqdm")
+    def test_abort_closes_active_bar(self, mock_tqdm: MagicMock) -> None:
+        """Abort closes and clears an incomplete progress bar."""
+        mock_pbar = MagicMock()
+        mock_tqdm.return_value = mock_pbar
+        progress = BarProgress()
+        progress.start_phase(Phase.TRAIN, total_batches=2)
+
+        progress.abort()
+
+        mock_pbar.close.assert_called_once_with()
+        assert progress._pbar is None  # noqa: SLF001
+        assert progress._current_phase is None  # noqa: SLF001

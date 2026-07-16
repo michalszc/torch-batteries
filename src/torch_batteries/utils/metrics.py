@@ -70,6 +70,11 @@ def calculate_metrics(
                 calculated_metrics[metric_name] = metric_value.item()
             else:
                 calculated_metrics[metric_name] = float(metric_value)
+            logger.debug(
+                "Calculated metric '%s': %s",
+                metric_name,
+                calculated_metrics[metric_name],
+            )
 
         except Exception as e:  # noqa: BLE001
             logger.warning(

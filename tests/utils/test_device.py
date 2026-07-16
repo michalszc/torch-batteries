@@ -47,8 +47,12 @@ class TestGetDevice:
 
     def test_explicit_device_string(self) -> None:
         """Test explicit device string."""
-        device = get_device("cpu")
+        with patch("torch_batteries.utils.device.logger.debug") as mock_debug:
+            device = get_device("cpu")
         assert device.type == "cpu"
+        mock_debug.assert_called_once_with(
+            "Using explicitly selected device: %s", device
+        )
 
     def test_explicit_device_object(self) -> None:
         """Test explicit device object."""
