@@ -1,9 +1,13 @@
 """Factory for creating progress trackers."""
 
+from torch_batteries.utils.logging import get_logger
+
 from .base import Progress
 from .progress_bar import BarProgress
 from .silent import SilentProgress
 from .simple import SimpleProgress
+
+logger = get_logger("progress.factory")
 
 
 class ProgressFactory:
@@ -25,11 +29,15 @@ class ProgressFactory:
         """
         match verbose:
             case 0:
-                return SilentProgress(total_epochs)
+                progress: Progress = SilentProgress(total_epochs)
             case 1:
-                return BarProgress(total_epochs)
+                progress = BarProgress(total_epochs)
             case 2:
-                return SimpleProgress(total_epochs)
+                progress = SimpleProgress(total_epochs)
             case _:
                 msg = f"Invalid verbose level: {verbose}. Must be 0, 1, or 2."
                 raise ValueError(msg)
+        logger.debug(
+            "Created %s for verbose level %d", type(progress).__name__, verbose
+        )
+        return progress

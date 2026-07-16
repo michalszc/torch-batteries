@@ -85,6 +85,7 @@ class EarlyStopping:
         self._best_score = None
         self._epochs_no_improve = 0
         self._best_weights = None
+        logger.debug("Early stopping state reset for a new training run.")
 
     @staticmethod
     def _snapshot_weights(model: nn.Module) -> dict[str, Tensor]:
@@ -140,10 +141,22 @@ class EarlyStopping:
             raise ValueError(msg)
 
         current_score = metrics[self._metric]
+        logger.debug(
+            "Early stopping comparison: metric=%s, current=%s, best=%s, mode=%s",
+            self._metric,
+            current_score,
+            self._best_score,
+            self._mode,
+        )
         if self._best_score is None:
             self._best_score = current_score
             if self._restore_best_weights:
                 self._best_weights = self._snapshot_weights(model)
+            logger.debug(
+                "Early stopping baseline recorded: metric=%s, score=%s",
+                self._metric,
+                current_score,
+            )
             return
 
         if self._monitor_op(current_score, self._best_score):
@@ -151,8 +164,19 @@ class EarlyStopping:
             self._epochs_no_improve = 0
             if self._restore_best_weights:
                 self._best_weights = self._snapshot_weights(model)
+            logger.debug(
+                "Early stopping improvement recorded: metric=%s, score=%s",
+                self._metric,
+                current_score,
+            )
         else:
             self._epochs_no_improve += 1
+            logger.debug(
+                "Early stopping found no improvement: metric=%s, count=%d, patience=%d",
+                self._metric,
+                self._epochs_no_improve,
+                self._patience,
+            )
             if self._epochs_no_improve >= self._patience:
                 battery.stop_training = True
                 logger.info(

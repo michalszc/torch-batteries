@@ -148,12 +148,7 @@ class WandbTracker(ExperimentTracker):
         self._run = wandb_run
         self._is_initialized = True
 
-        logger.info(
-            "Initialized wandb: project=%s, entity=%s, run_id=%s",
-            wandb_config["project"],
-            wandb_config["entity"],
-            self.run_id,
-        )
+        logger.info("Initialized wandb run: run_id=%s", self.run_id)
 
     @property
     def is_initialized(self) -> bool:
@@ -187,6 +182,12 @@ class WandbTracker(ExperimentTracker):
         if prefix:
             metrics = {f"{prefix}{k}": v for k, v in metrics.items()}
 
+        logger.debug(
+            "Logging wandb metrics: keys=%s, step=%s",
+            sorted(metrics),
+            step,
+        )
+
         if step is not None:
             wandb_run.log(metrics, step=step)
         else:
@@ -219,6 +220,7 @@ class WandbTracker(ExperimentTracker):
             RuntimeError: If the tracker is not initialized
         """
         wandb_run = self._require_run()
+        logger.debug("Logging wandb summary: keys=%s", sorted(summary))
         for key, value in summary.items():
             wandb_run.summary[key] = value
 
@@ -260,7 +262,7 @@ class WandbTracker(ExperimentTracker):
 
             wandb_run.log_artifact(artifact, aliases=aliases or ["latest"])
 
-        logger.info("Logged wandb model artifact: %s", artifact_name)
+        logger.info("Logged wandb model artifact: name=%s", artifact_name)
 
     @property
     def run_id(self) -> str | None:

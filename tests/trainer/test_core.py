@@ -376,6 +376,34 @@ class TestBattery:
         assert len(result["train_loss"]) == 1
         assert len(result["val_loss"]) == 1
 
+    def test_workflow_lifecycle_logs_use_info_with_arguments(self) -> None:
+        """Public workflows log starts and successful completions at INFO."""
+        model = SimpleModel()
+        loader = self.create_simple_data_loader(batch_size=2, num_samples=4)
+        battery = Battery(model, optimizer=optim.SGD(model.parameters(), lr=0.01))
+
+        with patch("torch_batteries.trainer.core.logger.info") as mock_info:
+            battery.train(loader, epochs=1, verbose=0)
+            battery.test(loader, verbose=0)
+            battery.predict(loader, verbose=0)
+
+        calls = [call.args for call in mock_info.call_args_list]
+        assert (
+            "Training started: epochs=%d, train_batches=%d, validation=%s",
+            1,
+            2,
+            False,
+        ) in calls
+        assert (
+            "Training completed: completed_epochs=%d, stopped_early=%s",
+            1,
+            False,
+        ) in calls
+        assert ("Testing started: batches=%d", 2) in calls
+        assert ("Testing completed",) in calls
+        assert ("Prediction started: batches=%d", 2) in calls
+        assert ("Prediction completed: outputs=%d", 2) in calls
+
     def test_train_event_context_includes_metric_history(self) -> None:
         """Test training lifecycle contexts include copied metric history."""
         recorder = ContextRecorder()

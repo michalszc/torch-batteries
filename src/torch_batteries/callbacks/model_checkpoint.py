@@ -142,7 +142,19 @@ class ModelCheckpoint:
         """
         current_score = metrics.get(self._metric)
         if current_score is None:
+            logger.warning(
+                "Checkpoint monitor metric '%s' is missing; checkpoint was skipped.",
+                self._metric,
+            )
             return False
+
+        logger.debug(
+            "Checkpoint candidate: metric=%s, score=%s, best=%s, mode=%s",
+            self._metric,
+            current_score,
+            self._best_score,
+            self._mode,
+        )
 
         if self._monitor_op(current_score, self._best_score):
             self._best_score = current_score
@@ -179,6 +191,12 @@ class ModelCheckpoint:
                     key=self._best_k_models.get,  # type: ignore[arg-type]
                 )
                 self._kth_best_score = self._best_k_models[self._kth_best_model_path]
+        logger.debug(
+            "Checkpoint ranking updated: retained=%d, save_top_k=%d, kth_score=%s",
+            len(self._best_k_models),
+            self._save_top_k,
+            self._kth_best_score,
+        )
 
     def _save_model(
         self, model: nn.Module, metrics: dict[str, float], current_score: float
@@ -299,4 +317,11 @@ class ModelCheckpoint:
             filepath: Path to the model file to delete.
         """
         del self._best_k_models[filepath]
-        Path(filepath).unlink(missing_ok=True)
+        path = Path(filepath)
+        if path.exists():
+            path.unlink()
+            logger.info("Deleted model checkpoint at: %s", filepath)
+        else:
+            logger.warning(
+                "Checkpoint file was already missing during cleanup: %s", filepath
+            )

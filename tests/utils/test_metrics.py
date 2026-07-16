@@ -41,11 +41,13 @@ class TestCalculateMetrics:
         pred = torch.tensor([1.0, 2.0, 3.0])
         target = torch.tensor([1.5, 2.5, 3.5])
 
-        results = calculate_metrics(metrics, pred, target)
+        with patch("torch_batteries.utils.metrics.logger.debug") as mock_debug:
+            results = calculate_metrics(metrics, pred, target)
 
         assert "custom" in results
         assert isinstance(results["custom"], float)
         assert results["custom"] == 0.5
+        mock_debug.assert_called_once_with("Calculated metric '%s': %s", "custom", 0.5)
 
     def test_multiple_metrics(self) -> None:
         """Test calculation with multiple metrics."""

@@ -67,7 +67,7 @@ class Battery:
         self._event_handler = EventHandler(self._model, callbacks=callbacks)
         self._stop_training = False
 
-        logger.info("Battery initialized on device: %s", self._device)
+        logger.debug("Battery initialized on device: %s", self._device)
 
     @property
     def model(self) -> nn.Module:
@@ -226,7 +226,7 @@ class Battery:
             )
             raise ValueError(msg)
 
-    def train(
+    def train(  # noqa: PLR0915
         self,
         train_loader: DataLoader,
         val_loader: DataLoader | None = None,
@@ -250,6 +250,12 @@ class Battery:
         """
         self._validate_train_inputs(train_loader, val_loader, epochs)
         self._stop_training = False
+        logger.info(
+            "Training started: epochs=%d, train_batches=%d, validation=%s",
+            epochs,
+            len(train_loader),
+            val_loader is not None,
+        )
 
         context: EventContext = {
             "battery": self,
@@ -275,6 +281,7 @@ class Battery:
                 logger.info("Training stopped early at epoch %d.", epoch)
                 break
 
+            logger.debug("Training epoch started: epoch=%d", epoch)
             progress.start_epoch(epoch)
 
             try:
@@ -301,6 +308,7 @@ class Battery:
             self._event_handler.call(Event.AFTER_TRAIN_EPOCH, after_epoch_context)
 
             if val_loader:
+                logger.debug("Validation phase started: epoch=%d", epoch)
                 before_val_context: EventContext = {
                     "battery": self,
                     "model": self._model,
@@ -334,8 +342,18 @@ class Battery:
                     **copy_history_context(results),
                 }
                 self._event_handler.call(Event.AFTER_VALIDATION, after_val_context)
+                logger.debug(
+                    "Validation phase completed: epoch=%d, metrics=%s",
+                    epoch,
+                    val_metrics,
+                )
 
             progress.end_epoch()
+            logger.debug(
+                "Training epoch completed: epoch=%d, train_metrics=%s",
+                epoch,
+                train_metrics,
+            )
             last_epoch = epoch
 
         progress.end_training()
@@ -351,6 +369,11 @@ class Battery:
         if val_loader and val_metrics:
             after_train_context["val_metrics"] = val_metrics
         self._event_handler.call(Event.AFTER_TRAIN, after_train_context)
+        logger.info(
+            "Training completed: completed_epochs=%d, stopped_early=%s",
+            len(results["train_loss"]),
+            self._stop_training,
+        )
 
         return results
 
@@ -379,6 +402,7 @@ class Battery:
         self._model.train()
 
         progress.start_phase(Phase.TRAIN, total_batches=len(dataloader))
+        logger.debug("Training phase started: epoch=%d", epoch)
 
         for batch_idx, batch_data in enumerate(dataloader):
             batch = move_to_device(batch_data, self._device)
@@ -412,6 +436,12 @@ class Battery:
             self._optimizer.step()  # type: ignore[union-attr]
 
             batch_metrics = {"loss": loss.item(), **step_metrics}
+            logger.debug(
+                "Training step completed: epoch=%d, batch=%d, metrics=%s",
+                epoch,
+                batch_idx,
+                batch_metrics,
+            )
 
             after_step_context: EventContext = {
                 "battery": self,
@@ -430,7 +460,13 @@ class Battery:
             progress.update(cast("ProgressMetrics", batch_metrics), num_samples)
 
         avg_metrics = progress.end_phase()
-        return avg_metrics if isinstance(avg_metrics, dict) else {"loss": avg_metrics}
+        train_metrics = (
+            avg_metrics if isinstance(avg_metrics, dict) else {"loss": avg_metrics}
+        )
+        logger.debug(
+            "Training phase completed: epoch=%d, metrics=%s", epoch, train_metrics
+        )
+        return train_metrics
 
     def _validate_epoch(
         self, dataloader: DataLoader, progress: Progress, epoch: int
@@ -492,6 +528,12 @@ class Battery:
 
                 loss, step_metrics = self._parse_step_result(result, "Validation")
                 batch_metrics = {"loss": loss.item(), **step_metrics}
+                logger.debug(
+                    "Validation step completed: epoch=%d, batch=%d, metrics=%s",
+                    epoch,
+                    batch_idx,
+                    batch_metrics,
+                )
 
                 after_step_context: EventContext = {
                     "battery": self,
@@ -548,6 +590,7 @@ class Battery:
             raise ValueError(msg)
 
         self._validate_loader(test_loader, "Test")
+        logger.info("Testing started: batches=%d", len(test_loader))
 
         before_test_context: EventContext = {
             "battery": self,
@@ -569,6 +612,7 @@ class Battery:
         progress = ProgressFactory.create(verbose=verbose, total_epochs=1)
         progress.start_epoch(0)
         progress.start_phase(Phase.TEST, total_batches=len(test_loader))
+        logger.debug("Test phase started: epoch=0")
 
         try:
             with torch.no_grad():
@@ -609,6 +653,7 @@ class Battery:
             "test_metrics": test_metrics_context,
         }
         self._event_handler.call(Event.AFTER_TEST, after_test_context)
+        logger.debug("Test phase completed: epoch=0, metrics=%s", test_metrics_context)
 
         # Format results with test_loss and test_metrics
         if isinstance(test_metrics, dict):
@@ -621,6 +666,7 @@ class Battery:
         else:
             results = {"test_loss": test_metrics}
 
+        logger.info("Testing completed")
         return results
 
     def _test_batch(self, batch_data: Any, batch_idx: int, progress: Progress) -> None:
@@ -649,6 +695,11 @@ class Battery:
 
         loss, step_metrics = self._parse_step_result(result, "Test")
         batch_metrics = {"loss": loss.item(), **step_metrics}
+        logger.debug(
+            "Test step completed: epoch=0, batch=%d, metrics=%s",
+            batch_idx,
+            batch_metrics,
+        )
 
         after_step_context: EventContext = {
             "battery": self,
@@ -688,6 +739,7 @@ class Battery:
             raise ValueError(msg)
 
         self._validate_loader(data_loader, "Prediction")
+        logger.info("Prediction started: batches=%d", len(data_loader))
 
         before_predict_context: EventContext = {
             "battery": self,
@@ -712,6 +764,7 @@ class Battery:
         progress = ProgressFactory.create(verbose=verbose, total_epochs=1)
         progress.start_epoch(0)
         progress.start_phase(Phase.PREDICT, total_batches=len(data_loader))
+        logger.debug("Prediction phase started: epoch=0")
 
         try:
             with torch.no_grad():
@@ -740,6 +793,10 @@ class Battery:
             "predictions": predictions,
         }
         self._event_handler.call(Event.AFTER_PREDICT, after_predict_context)
+        logger.debug(
+            "Prediction phase completed: epoch=0, outputs=%d", len(predictions)
+        )
+        logger.info("Prediction completed: outputs=%d", len(predictions))
 
         return {"predictions": predictions}
 
@@ -772,6 +829,11 @@ class Battery:
             "epoch": 0,
         }
         prediction = self._event_handler.call(Event.PREDICT_STEP, step_context)
+        logger.debug(
+            "Prediction step completed: epoch=0, batch=%d, output_type=%s",
+            batch_idx,
+            type(prediction).__name__,
+        )
         if prediction is not None:
             predictions.append(prediction)
 

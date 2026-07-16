@@ -152,6 +152,11 @@ class ExperimentTrackingCallback:
             step=self._global_step,
             prefix="train/",
         )
+        logger.debug(
+            "Logged training tracker metrics: keys=%s, step=%d",
+            sorted(metrics),
+            self._global_step,
+        )
 
     @charge(Event.AFTER_VALIDATION_EPOCH)
     def on_validation_epoch_end(self, ctx: EventContext) -> None:
@@ -172,6 +177,11 @@ class ExperimentTrackingCallback:
             metrics,
             step=self._global_step,
             prefix="val/",
+        )
+        logger.debug(
+            "Logged validation tracker metrics: keys=%s, step=%d",
+            sorted(metrics),
+            self._global_step,
         )
 
     @charge(Event.AFTER_TRAIN)
@@ -205,6 +215,7 @@ class ExperimentTrackingCallback:
             summary["val_loss"] = ctx["history_val_loss"]
 
         self.tracker.log_summary(summary)
+        logger.debug("Logged tracker summary: keys=%s", sorted(summary))
 
         model = ctx.get("model")
         if model is not None:
@@ -216,6 +227,7 @@ class ExperimentTrackingCallback:
                     "global_step": self._global_step,
                 },
             )
+            logger.info("Experiment tracking model artifact completed")
 
         self.tracker.finish()
         logger.info("Experiment tracking finished")

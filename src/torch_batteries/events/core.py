@@ -265,7 +265,7 @@ def charge(event: Event) -> Callable[[Callable[P, R]], Callable[P, R]]:
 
     def decorator(fn: Callable[P, R]) -> Callable[P, R]:
         fn._torch_batteries_event = event  # type: ignore[attr-defined] # noqa: SLF001
-        logger.info("Method '%s' charged with event '%s'", fn.__name__, event.value)
+        logger.debug("Method '%s' charged with event '%s'", fn.__name__, event.value)
         return fn
 
     return decorator

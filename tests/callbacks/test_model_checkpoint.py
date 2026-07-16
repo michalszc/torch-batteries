@@ -2,6 +2,7 @@
 
 from pathlib import Path
 from typing import TYPE_CHECKING
+from unittest.mock import patch
 
 import pytest
 import torch
@@ -257,9 +258,38 @@ class TestModelCheckpoint:
         missing_path = tmp_path / "missing.pth"
         checkpoint._best_k_models[str(missing_path)] = 0.5  # noqa: SLF001
 
-        checkpoint._delete_saved_model(str(missing_path))  # noqa: SLF001
+        with patch(
+            "torch_batteries.callbacks.model_checkpoint.logger.warning"
+        ) as mock_warning:
+            checkpoint._delete_saved_model(str(missing_path))  # noqa: SLF001
 
         assert str(missing_path) not in checkpoint.best_k_models
+        mock_warning.assert_called_once_with(
+            "Checkpoint file was already missing during cleanup: %s",
+            str(missing_path),
+        )
+
+    def test_missing_monitor_metric_logs_warning(self, tmp_path: Path) -> None:
+        """Missing checkpoint monitor data is visible at WARNING level."""
+        checkpoint = ModelCheckpoint(
+            stage="val", metric="accuracy", save_dir=str(tmp_path)
+        )
+
+        with patch(
+            "torch_batteries.callbacks.model_checkpoint.logger.warning"
+        ) as mock_warning:
+            checkpoint.run_on_validation_end(
+                {
+                    "model": torch.nn.Linear(1, 1),
+                    "val_metrics": {"loss": 0.5},
+                    "epoch": 1,
+                }
+            )
+
+        mock_warning.assert_called_once_with(
+            "Checkpoint monitor metric '%s' is missing; checkpoint was skipped.",
+            "accuracy",
+        )
 
     def test_min_mode_retains_two_lowest_checkpoints(self, tmp_path: Path) -> None:
         """Minimum-mode top-k retention evicts the highest loss checkpoint."""
@@ -287,3 +317,28 @@ class TestModelCheckpoint:
         checkpoint_files = set(tmp_path.glob("*.pth"))
         assert checkpoint_files == retained_paths
         assert not any("epoch=0" in path.name for path in checkpoint_files)
+
+    def test_checkpoint_save_log_is_unconditional(self, tmp_path: Path) -> None:
+        """A successful checkpoint always emits its INFO outcome log."""
+        checkpoint = ModelCheckpoint(
+            stage="val", metric="accuracy", save_dir=str(tmp_path)
+        )
+
+        with patch(
+            "torch_batteries.callbacks.model_checkpoint.logger.info"
+        ) as mock_info:
+            checkpoint.run_on_validation_end(
+                {
+                    "model": torch.nn.Linear(1, 1),
+                    "val_metrics": {"accuracy": 0.8},
+                    "epoch": 1,
+                }
+            )
+
+        assert checkpoint.best_model_path is not None
+        mock_info.assert_called_once_with(
+            "Saved model checkpoint at: %s with %s: %.2f",
+            checkpoint.best_model_path,
+            "accuracy",
+            0.8,
+        )

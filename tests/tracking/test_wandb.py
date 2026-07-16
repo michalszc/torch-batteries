@@ -2,7 +2,7 @@
 
 import sys
 from typing import Any
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -61,6 +61,19 @@ class TestWandbTracker:
             job_type=None,
             name=None,
             config={"lr": 0.001, "batch_size": 32},
+        )
+
+    def test_init_log_does_not_include_configuration_values(
+        self, mock_wandb: MagicMock
+    ) -> None:
+        """Tracker lifecycle logging exposes the run ID but no configuration."""
+        tracker = WandbTracker(project="private-project", entity="private-entity")
+
+        with patch("torch_batteries.tracking.wandb.logger.info") as mock_info:
+            tracker.init(run=Run(config={"secret": "hidden"}))
+
+        mock_info.assert_called_once_with(
+            "Initialized wandb run: run_id=%s", "test-run-123"
         )
 
     def test_init_run_with_all_options(self, mock_wandb: MagicMock) -> None:

@@ -67,7 +67,7 @@ class EventHandler:
                     "Discovered handler '%s' for event '%s'", name, event.value
                 )
 
-        logger.info(
+        logger.debug(
             "Discovered %d event handlers on model %s",
             discovered_count,
             type(self.model).__name__,
@@ -89,6 +89,8 @@ class EventHandler:
                     if event in self.MODEL_SPECIFIC_CALLBACKS:
                         logger.warning(
                             "Callback '%s' should not handle model-specific event '%s'",
+                            type(callback).__name__,
+                            event.value,
                         )
                         continue
                     if event not in self._event_handlers:
@@ -102,7 +104,7 @@ class EventHandler:
                         event.value,
                         type(callback).__name__,
                     )
-        logger.info(
+        logger.debug(
             "Discovered %d event handlers on %d callbacks",
             discovered_count,
             len(self._callbacks),

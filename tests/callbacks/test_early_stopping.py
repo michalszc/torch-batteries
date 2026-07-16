@@ -1,6 +1,7 @@
 """Test for torch_batteries.callbacks.early_stopping module."""
 
 from typing import TYPE_CHECKING
+from unittest.mock import patch
 
 import pytest
 import torch
@@ -311,3 +312,32 @@ class TestEarlyStopping:
 
         assert early_stopping.best_score is None
         assert early_stopping.best_weights is None
+
+    def test_outcome_logs_are_unconditional(self) -> None:
+        """Stop and restoration outcomes are logged without callback flags."""
+        model = torch.nn.Linear(1, 1)
+        battery = Battery(model=model)
+        early_stopping = EarlyStopping(
+            stage="val",
+            metric="loss",
+            patience=1,
+            restore_best_weights=True,
+        )
+
+        with patch("torch_batteries.callbacks.early_stopping.logger.info") as mock_info:
+            early_stopping.run_on_validation_end(
+                {"model": model, "battery": battery, "val_metrics": {"loss": 1.0}}
+            )
+            early_stopping.run_on_validation_end(
+                {"model": model, "battery": battery, "val_metrics": {"loss": 2.0}}
+            )
+            early_stopping.run_on_train_end({"model": model})
+
+        assert mock_info.call_args_list[0].args == (
+            "Early stopping applied. No improvement in '%s' for %d epochs.",
+            "loss",
+            1,
+        )
+        assert mock_info.call_args_list[1].args == (
+            "Restored best model weights from early stopping.",
+        )
