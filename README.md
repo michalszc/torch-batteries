@@ -66,6 +66,10 @@ battery = Battery(
 results = battery.train(train_loader, val_loader=None, epochs=10)
 ```
 
+Automatic metrics are the functions passed to `Battery(metrics=...)`. They use the
+predictions and targets returned in `StepOutput` and are averaged across each phase
+without an additional model forward pass.
+
 ### Optional Dependencies
 
 For experiment tracking with Weights & Biases:
