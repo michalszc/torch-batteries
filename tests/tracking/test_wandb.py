@@ -63,7 +63,7 @@ class TestWandbTracker:
             config={"lr": 0.001, "batch_size": 32},
         )
 
-    def test_init_log_does_not_include_configuration_values(
+    def test_init_log_does_not_expose_run_configuration(
         self, mock_wandb: MagicMock
     ) -> None:
         """Tracker lifecycle logging exposes the run ID but no configuration."""
