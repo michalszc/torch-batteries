@@ -13,6 +13,15 @@ if TYPE_CHECKING:
     from torch_batteries.events import EventContext
 
 
+class ModelWithBuffer(torch.nn.Module):
+    """Small model containing both parameters and a registered buffer."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.linear = torch.nn.Linear(2, 1)
+        self.register_buffer("running_total", torch.zeros(1))
+
+
 class TestEarlyStopping:
     """Test cases for EarlyStopping callback."""
 
@@ -263,12 +272,37 @@ class TestEarlyStopping:
         assert model.running_mean is not None
         assert torch.equal(model.running_mean, expected_mean)
 
-    def test_snapshot_restores_without_changing_model_device(self) -> None:
-        """CPU snapshots restore values while preserving the model device."""
-        model = torch.nn.Linear(2, 1)
-        battery = Battery(model=model)
-        original_device = next(model.parameters()).device
-        expected_weights = {
+    @pytest.mark.parametrize(
+        "device",
+        [
+            "auto",
+            pytest.param(
+                "mps",
+                marks=pytest.mark.skipif(
+                    not torch.backends.mps.is_available(), reason="MPS is unavailable"
+                ),
+            ),
+            pytest.param(
+                "cuda",
+                marks=pytest.mark.skipif(
+                    not torch.cuda.is_available(), reason="CUDA is unavailable"
+                ),
+            ),
+        ],
+    )
+    def test_snapshot_restores_state_without_changing_model_device(
+        self, device: str
+    ) -> None:
+        """CPU snapshots restore parameters and buffers on their original device."""
+        model = ModelWithBuffer()
+        battery = Battery(model=model, device=device)
+        original_parameter_devices = {
+            name: parameter.device for name, parameter in model.named_parameters()
+        }
+        original_buffer_devices = {
+            name: buffer.device for name, buffer in model.named_buffers()
+        }
+        expected_state = {
             key: value.detach().cpu().clone()
             for key, value in model.state_dict().items()
         }
@@ -286,15 +320,21 @@ class TestEarlyStopping:
         assert saved_weights is not None
         assert all(weight.device.type == "cpu" for weight in saved_weights.values())
 
-        for parameter in model.parameters():
-            parameter.data.add_(5.0)
+        with torch.no_grad():
+            for parameter in model.parameters():
+                parameter.add_(5.0)
+            for buffer in model.buffers():
+                buffer.add_(5.0)
         early_stopping.run_on_train_end({"model": model})
 
-        assert all(
-            parameter.device == original_device for parameter in model.parameters()
-        )
-        for key, expected_weight in expected_weights.items():
-            assert torch.equal(model.state_dict()[key].cpu(), expected_weight)
+        assert {
+            name: parameter.device for name, parameter in model.named_parameters()
+        } == original_parameter_devices
+        assert {
+            name: buffer.device for name, buffer in model.named_buffers()
+        } == original_buffer_devices
+        for key, expected_value in expected_state.items():
+            assert torch.equal(model.state_dict()[key].cpu(), expected_value)
 
     def test_train_start_resets_saved_state(self) -> None:
         """Reusing a callback does not retain state from a previous run."""
