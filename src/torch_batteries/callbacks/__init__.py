@@ -10,6 +10,7 @@ from .base import Callback
 from .early_stopping import EarlyStopping
 from .experiment_tracking import ExperimentTrackingCallback
 from .gradient_accumulation import GradientAccumulation
+from .gradient_clip import GradientClip
 from .mixed_precision import MixedPrecision
 from .model_checkpoint import ModelCheckpoint
 
@@ -18,6 +19,7 @@ __all__ = [
     "EarlyStopping",
     "ExperimentTrackingCallback",
     "GradientAccumulation",
+    "GradientClip",
     "MixedPrecision",
     "ModelCheckpoint",
 ]

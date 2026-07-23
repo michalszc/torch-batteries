@@ -8,6 +8,7 @@ from torch import nn
 from torch.utils.data import DataLoader
 
 from torch_batteries.callbacks.gradient_accumulation import GradientAccumulation
+from torch_batteries.callbacks.gradient_clip import GradientClip
 from torch_batteries.callbacks.mixed_precision import MixedPrecision
 from torch_batteries.events import Event, EventContext, EventHandler
 from torch_batteries.trainer.context import copy_history_context
@@ -48,6 +49,7 @@ class Battery:
         "_device",
         "_event_handler",
         "_gradient_accumulation",
+        "_gradient_clip",
         "_metrics",
         "_mixed_precision",
         "_model",
@@ -83,6 +85,14 @@ class Battery:
             if accumulation_controls
             else GradientAccumulation(steps=1)
         )
+        clipping_controls = [
+            callback for callback in callback_list if isinstance(callback, GradientClip)
+        ]
+        if len(clipping_controls) > 1:
+            logger.error("Multiple GradientClip callbacks were configured.")
+            msg = "Only one GradientClip callback may be configured."
+            raise ValueError(msg)
+        self._gradient_clip = clipping_controls[0] if clipping_controls else None
         precision_controls = [
             callback
             for callback in callback_list
@@ -481,6 +491,9 @@ class Battery:
                 batch_idx, total_batches
             )
             if optimizer_step:
+                if self._gradient_clip is not None:
+                    self._mixed_precision.unscale_(self._optimizer)  # type: ignore[arg-type]
+                    self._gradient_clip.apply(self._model.parameters())
                 self._mixed_precision.optimizer_step(self._optimizer)  # type: ignore[arg-type]
                 optimizer_step_idx = self._gradient_accumulation.record_optimizer_step()
             else:
