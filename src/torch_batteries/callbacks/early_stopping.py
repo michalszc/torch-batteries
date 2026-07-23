@@ -1,12 +1,17 @@
 """Early Stopping Callback for torch-batteries."""
 
-from typing import Any, Literal
+from __future__ import annotations
 
-from torch import Tensor, nn
+from typing import TYPE_CHECKING, Any, Literal
 
-from torch_batteries import Battery, Event, EventContext, charge
 from torch_batteries.callbacks.base import Callback
+from torch_batteries.events import Event, EventContext, charge
 from torch_batteries.utils.logging import get_logger
+
+if TYPE_CHECKING:
+    from torch import Tensor, nn
+
+    from torch_batteries.trainer import Battery
 
 logger = get_logger("EarlyStopping")
 

@@ -2,8 +2,8 @@
 
 from typing import Any
 
-from torch_batteries import Event, EventContext, charge
 from torch_batteries.callbacks.base import Callback
+from torch_batteries.events import Event, EventContext, charge
 from torch_batteries.tracking.base import ExperimentTracker
 from torch_batteries.tracking.types import Run
 from torch_batteries.utils.logging import get_logger

@@ -9,11 +9,13 @@ Provides callback classes for training workflow control:
 from .base import Callback
 from .early_stopping import EarlyStopping
 from .experiment_tracking import ExperimentTrackingCallback
+from .gradient_accumulation import GradientAccumulation
 from .model_checkpoint import ModelCheckpoint
 
 __all__ = [
     "Callback",
     "EarlyStopping",
     "ExperimentTrackingCallback",
+    "GradientAccumulation",
     "ModelCheckpoint",
 ]

@@ -70,6 +70,8 @@ class EventContext(TypedDict, total=False):
     val_loss: float
     test_loss: float
     predictions: torch.Tensor | list[Any]
+    optimizer_step: bool
+    optimizer_step_idx: int
     train_metrics: dict[str, float]
     val_metrics: dict[str, float]
     test_metrics: dict[str, float]

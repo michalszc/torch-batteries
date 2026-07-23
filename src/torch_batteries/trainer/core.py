@@ -7,6 +7,7 @@ import torch
 from torch import nn
 from torch.utils.data import DataLoader
 
+from torch_batteries.callbacks.gradient_accumulation import GradientAccumulation
 from torch_batteries.events import Event, EventContext, EventHandler
 from torch_batteries.trainer.context import copy_history_context
 from torch_batteries.trainer.types import (
@@ -45,6 +46,7 @@ class Battery:
     __slots__ = (
         "_device",
         "_event_handler",
+        "_gradient_accumulation",
         "_metrics",
         "_model",
         "_optimizer",
@@ -64,7 +66,22 @@ class Battery:
         self._model = model.to(self._device)
         self._optimizer = optimizer
         self._metrics = metrics or {}
-        self._event_handler = EventHandler(self._model, callbacks=callbacks)
+        callback_list = list(callbacks or [])
+        accumulation_controls = [
+            callback
+            for callback in callback_list
+            if isinstance(callback, GradientAccumulation)
+        ]
+        if len(accumulation_controls) > 1:
+            logger.error("Multiple GradientAccumulation callbacks were configured.")
+            msg = "Only one GradientAccumulation callback may be configured."
+            raise ValueError(msg)
+        self._gradient_accumulation = (
+            accumulation_controls[0]
+            if accumulation_controls
+            else GradientAccumulation(steps=1)
+        )
+        self._event_handler = EventHandler(self._model, callbacks=callback_list)
         self._stop_training = False
 
         logger.debug("Battery initialized on device: %s", self._device)
@@ -250,6 +267,7 @@ class Battery:
         """
         self._validate_train_inputs(train_loader, val_loader, epochs)
         self._stop_training = False
+        self._gradient_accumulation.reset()
         logger.info(
             "Training started: epochs=%d, train_batches=%d, validation=%s",
             epochs,
@@ -404,6 +422,7 @@ class Battery:
         progress.start_phase(Phase.TRAIN, total_batches=len(dataloader))
         logger.debug("Training phase started: epoch=%d", epoch)
 
+        total_batches = len(dataloader)
         for batch_idx, batch_data in enumerate(dataloader):
             batch = move_to_device(batch_data, self._device)
 
@@ -417,8 +436,14 @@ class Battery:
             }
             self._event_handler.call(Event.BEFORE_TRAIN_STEP, before_step_context)
 
-            # Optimizer is guaranteed to be non-None by train() method
-            self._optimizer.zero_grad()  # type: ignore[union-attr]
+            if self._gradient_accumulation.is_group_start(batch_idx):
+                # Optimizer is guaranteed to be non-None by train() method
+                self._optimizer.zero_grad()  # type: ignore[union-attr]
+                logger.debug(
+                    "Gradient accumulation group started: epoch=%d, batch=%d",
+                    epoch,
+                    batch_idx,
+                )
 
             step_context: EventContext = {
                 "battery": self,
@@ -432,8 +457,18 @@ class Battery:
 
             loss, step_metrics = self._parse_step_result(result, "Training")
 
-            loss.backward()
-            self._optimizer.step()  # type: ignore[union-attr]
+            group_size = self._gradient_accumulation.group_size(
+                batch_idx, total_batches
+            )
+            (loss / group_size).backward()
+            optimizer_step = self._gradient_accumulation.is_group_end(
+                batch_idx, total_batches
+            )
+            if optimizer_step:
+                self._optimizer.step()  # type: ignore[union-attr]
+                optimizer_step_idx = self._gradient_accumulation.record_optimizer_step()
+            else:
+                optimizer_step_idx = self._gradient_accumulation.optimizer_step_idx
 
             batch_metrics = {"loss": loss.item(), **step_metrics}
             logger.debug(
@@ -453,6 +488,8 @@ class Battery:
                 "loss": loss.item(),
                 "train_loss": loss.item(),
                 "train_metrics": batch_metrics,
+                "optimizer_step": optimizer_step,
+                "optimizer_step_idx": optimizer_step_idx,
             }
             self._event_handler.call(Event.AFTER_TRAIN_STEP, after_step_context)
 
