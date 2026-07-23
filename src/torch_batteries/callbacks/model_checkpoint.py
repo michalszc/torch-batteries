@@ -1,8 +1,10 @@
 """Model Checkpoint Callback for torch-batteries."""
 
+from __future__ import annotations
+
 import re
 from pathlib import Path
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 import torch
 from torch import nn
@@ -10,6 +12,9 @@ from torch import nn
 from torch_batteries.callbacks.base import Callback
 from torch_batteries.events import Event, EventContext, charge
 from torch_batteries.utils.logging import get_logger
+
+if TYPE_CHECKING:
+    from torch_batteries.trainer import Battery
 
 logger = get_logger("ModelCheckpoint")
 
@@ -36,6 +41,13 @@ def _serialized_float(value: object) -> float:
         msg = "checkpoint score must be numeric"
         raise TypeError(msg)
     return float(value)
+
+
+def _validate_save_weights_only(value: object, *, expected: bool) -> None:
+    """Validate the serialized checkpoint format configuration."""
+    if value != expected:
+        msg = "save_weights_only configuration does not match"
+        raise ValueError(msg)
 
 
 class ModelCheckpoint(Callback):
@@ -76,6 +88,8 @@ class ModelCheckpoint(Callback):
         save_dir: str = ".",
         save_path: str | None = None,
         save_top_k: int = 1,
+        *,
+        save_weights_only: bool = False,
     ) -> None:
         if stage not in {"train", "val"}:
             msg = "stage must be one of 'train' or 'val'"
@@ -89,6 +103,7 @@ class ModelCheckpoint(Callback):
         self._save_dir = save_dir
         self._save_path = save_path
         self._save_top_k = save_top_k
+        self._save_weights_only = save_weights_only
         self._best_k_models: dict[str, float] = {}
 
         self._best_model_path: str | None = None
@@ -133,6 +148,7 @@ class ModelCheckpoint(Callback):
             "kth_best_model_path": self._kth_best_model_path,
             "best_score": self._best_score,
             "kth_best_score": self._kth_best_score,
+            "save_weights_only": self._save_weights_only,
         }
         logger.debug(
             "Serialized model checkpoint state with %d retained models.",
@@ -150,6 +166,10 @@ class ModelCheckpoint(Callback):
             )
             self._best_score = _serialized_float(state_dict["best_score"])
             self._kth_best_score = _serialized_float(state_dict["kth_best_score"])
+            _validate_save_weights_only(
+                state_dict["save_weights_only"],
+                expected=self._save_weights_only,
+            )
         except (KeyError, TypeError, ValueError) as error:
             logger.exception("Invalid model checkpoint state.")
             msg = "Invalid ModelCheckpoint checkpoint state."
@@ -171,8 +191,9 @@ class ModelCheckpoint(Callback):
 
         metrics = {**context["train_metrics"], "epoch": context["epoch"]}
 
-        if not self._save_best_model(context["model"], metrics):
-            self._save_top_k_model(context["model"], metrics)
+        battery = context.get("battery")
+        if not self._save_best_model(battery, context["model"], metrics):
+            self._save_top_k_model(battery, context["model"], metrics)
 
     @charge(Event.AFTER_VALIDATION)
     def run_on_validation_end(self, context: EventContext) -> None:
@@ -186,10 +207,16 @@ class ModelCheckpoint(Callback):
 
         metrics = {**context["val_metrics"], "epoch": context["epoch"]}
 
-        if not self._save_best_model(context["model"], metrics):
-            self._save_top_k_model(context["model"], metrics)
+        battery = context.get("battery")
+        if not self._save_best_model(battery, context["model"], metrics):
+            self._save_top_k_model(battery, context["model"], metrics)
 
-    def _save_best_model(self, model: nn.Module, metrics: dict[str, float]) -> bool:
+    def _save_best_model(
+        self,
+        battery: Battery | None,
+        model: nn.Module,
+        metrics: dict[str, float],
+    ) -> bool:
         """Save model if it achieves new best score.
 
         Args:
@@ -217,11 +244,18 @@ class ModelCheckpoint(Callback):
 
         if self._monitor_op(current_score, self._best_score):
             self._best_score = current_score
-            self._best_model_path = self._save_model(model, metrics, current_score)
+            self._best_model_path = self._save_model(
+                battery, model, metrics, current_score
+            )
             return True
         return False
 
-    def _save_top_k_model(self, model: nn.Module, metrics: dict[str, float]) -> None:
+    def _save_top_k_model(
+        self,
+        battery: Battery | None,
+        model: nn.Module,
+        metrics: dict[str, float],
+    ) -> None:
         """Save model if it's in top-k best models.
 
         Args:
@@ -235,7 +269,7 @@ class ModelCheckpoint(Callback):
         if len(self._best_k_models) < self._save_top_k or self._monitor_op(
             current_score, self._kth_best_score
         ):
-            self._save_model(model, metrics, current_score)
+            self._save_model(battery, model, metrics, current_score)
 
         if len(self._best_k_models) == self._save_top_k:
             if self._mode == "min":
@@ -258,7 +292,11 @@ class ModelCheckpoint(Callback):
         )
 
     def _save_model(
-        self, model: nn.Module, metrics: dict[str, float], current_score: float
+        self,
+        battery: Battery | None,
+        model: nn.Module,
+        metrics: dict[str, float],
+        current_score: float,
     ) -> str:
         """Save model to disk and update top-k tracking.
 
@@ -281,7 +319,18 @@ class ModelCheckpoint(Callback):
         path = Path(self._save_dir) / filename
         path.parent.mkdir(parents=True, exist_ok=True)
         filepath = str(path)
-        torch.save(model.state_dict(), filepath)
+        self._update_top_k_models(filepath, current_score)
+        if current_score == self._best_score:
+            self._best_model_path = filepath
+        if self._save_weights_only or battery is None:
+            if battery is None and not self._save_weights_only:
+                logger.warning(
+                    "ModelCheckpoint context has no Battery; "
+                    "falling back to raw weights."
+                )
+            torch.save(model.state_dict(), filepath)
+        else:
+            battery.save_checkpoint(filepath)
         logger.info(
             "Saved model checkpoint at: %s with %s: %.2f",
             filepath,
@@ -289,7 +338,6 @@ class ModelCheckpoint(Callback):
             current_score,
         )
 
-        self._update_top_k_models(filepath, current_score)
         return filepath
 
     def _ensure_unique_template(self, filename: str | None) -> str | None:

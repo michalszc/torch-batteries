@@ -13,6 +13,7 @@ from torch_batteries import Battery, Event, EventContext, charge
 from torch_batteries.callbacks import (
     GradientAccumulation,
     LearningRateScheduler,
+    ModelCheckpoint,
 )
 
 
@@ -142,3 +143,50 @@ def test_rejects_callback_order_mismatch(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="callbacks do not match"):
         reordered.load_checkpoint(path)
+
+
+def test_model_checkpoint_saves_full_training_state_by_default(
+    tmp_path: Path,
+) -> None:
+    model = _Model()
+    callback = ModelCheckpoint(
+        stage="train",
+        metric="loss",
+        mode="min",
+        save_dir=str(tmp_path),
+        save_path="full.pth",
+    )
+    battery = Battery(
+        model,
+        device="cpu",
+        optimizer=torch.optim.SGD(model.parameters(), lr=0.1),
+        callbacks=[callback],
+    )
+
+    battery.train(_loader(), verbose=0)
+
+    payload = torch.load(tmp_path / "full.pth", weights_only=True)
+    assert payload["__torch_batteries_checkpoint__"] == 1
+
+
+def test_model_checkpoint_can_save_raw_weights(tmp_path: Path) -> None:
+    model = _Model()
+    callback = ModelCheckpoint(
+        stage="train",
+        metric="loss",
+        mode="min",
+        save_dir=str(tmp_path),
+        save_path="weights.pth",
+        save_weights_only=True,
+    )
+    battery = Battery(
+        model,
+        device="cpu",
+        optimizer=torch.optim.SGD(model.parameters(), lr=0.1),
+        callbacks=[callback],
+    )
+
+    battery.train(_loader(), verbose=0)
+
+    payload = torch.load(tmp_path / "weights.pth", weights_only=True)
+    assert set(payload) == set(model.state_dict())
