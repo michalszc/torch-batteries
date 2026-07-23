@@ -111,13 +111,16 @@ class EarlyStopping(Callback):
         )
 
     @charge(Event.BEFORE_TRAIN)
-    def run_on_train_start(self, _: EventContext) -> None:
+    def run_on_train_start(self, context: EventContext) -> None:
         """
         Initialize early stopping parameters at the start of training.
 
         Args:
             _: The event context (not used here).
         """
+        if context.get("resumed", False):
+            logger.debug("Preserved restored early stopping state on resume.")
+            return
         self._best_score = None
         self._epochs_no_improve = 0
         self._best_weights = None

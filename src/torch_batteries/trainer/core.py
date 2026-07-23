@@ -1,11 +1,15 @@
 """Battery trainer class for torch-batteries."""
 
+import copy
+import tempfile
+from pathlib import Path
 from typing import Any, cast
 
 import torch
 from torch import nn
 from torch.utils.data import DataLoader
 
+from torch_batteries.callbacks.base import Callback
 from torch_batteries.callbacks.gradient_accumulation import GradientAccumulation
 from torch_batteries.callbacks.gradient_clip import GradientClip
 from torch_batteries.callbacks.mixed_precision import MixedPrecision
@@ -45,16 +49,20 @@ class Battery:
     """  # noqa: E501
 
     __slots__ = (
+        "_callbacks",
         "_device",
         "_event_handler",
         "_gradient_accumulation",
         "_gradient_clip",
+        "_last_completed_epoch",
         "_metric_manager",
         "_metrics",
         "_mixed_precision",
         "_model",
         "_optimizer",
+        "_resume_loaded",
         "_stop_training",
+        "_train_results",
     )
 
     def __init__(
@@ -71,6 +79,7 @@ class Battery:
         self._metrics = metrics or {}
         self._metric_manager = PhaseMetricManager(self._metrics)
         callback_list = list(callbacks or [])
+        self._callbacks = callback_list
         accumulation_controls = [
             callback
             for callback in callback_list
@@ -108,6 +117,14 @@ class Battery:
         self._mixed_precision.configure(self._device)
         self._event_handler = EventHandler(self._model, callbacks=callback_list)
         self._stop_training = False
+        self._last_completed_epoch = -1
+        self._resume_loaded = False
+        self._train_results: TrainResult = {
+            "train_loss": [],
+            "val_loss": [],
+            "train_metrics": {},
+            "val_metrics": {},
+        }
 
         logger.debug("Battery initialized on device: %s", self._device)
 
@@ -268,12 +285,204 @@ class Battery:
             )
             raise ValueError(msg)
 
-    def train(  # noqa: PLR0915
+    def _checkpoint_callbacks(self) -> list[Callback]:
+        """Return stateful callbacks, including implicit training controls."""
+        callbacks = [
+            callback for callback in self._callbacks if isinstance(callback, Callback)
+        ]
+        for control in (self._gradient_accumulation, self._mixed_precision):
+            if control not in callbacks:
+                callbacks.append(control)
+        return callbacks
+
+    @staticmethod
+    def _callback_identifier(callback: Callback) -> str:
+        callback_type = type(callback)
+        return f"{callback_type.__module__}.{callback_type.__qualname__}"
+
+    def save_checkpoint(self, path: str | Path) -> None:
+        """Atomically save complete resumable training state."""
+        checkpoint_path = Path(path)
+        checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
+        callbacks = self._checkpoint_callbacks()
+        payload: dict[str, Any] = {
+            "__torch_batteries_checkpoint__": 1,
+            "model": self._model.state_dict(),
+            "optimizer": (
+                self._optimizer.state_dict() if self._optimizer is not None else None
+            ),
+            "callbacks": [
+                {
+                    "type": self._callback_identifier(callback),
+                    "state": callback.state_dict(),
+                }
+                for callback in callbacks
+            ],
+            "metrics": self._metric_manager.state_dict(),
+            "epoch": self._last_completed_epoch,
+            "optimizer_step_idx": self._gradient_accumulation.optimizer_step_idx,
+            "results": copy.deepcopy(self._train_results),
+        }
+        temporary_name: str | None = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                dir=checkpoint_path.parent,
+                prefix=f".{checkpoint_path.name}.",
+                suffix=".tmp",
+                delete=False,
+            ) as temporary:
+                temporary_name = temporary.name
+            torch.save(payload, temporary_name)
+            Path(temporary_name).replace(checkpoint_path)
+        except Exception:
+            logger.exception("Failed to save checkpoint at %s.", checkpoint_path)
+            if temporary_name is not None:
+                Path(temporary_name).unlink(missing_ok=True)
+            raise
+        logger.info(
+            "Training checkpoint saved: path=%s, epoch=%d, optimizer_step=%d",
+            checkpoint_path,
+            self._last_completed_epoch,
+            self._gradient_accumulation.optimizer_step_idx,
+        )
+
+    @staticmethod
+    def _is_raw_model_state(payload: object) -> bool:
+        return (
+            isinstance(payload, dict)
+            and bool(payload)
+            and all(isinstance(key, str) for key in payload)
+            and all(isinstance(value, torch.Tensor) for value in payload.values())
+        )
+
+    @staticmethod
+    def _move_optimizer_state(value: Any, device: torch.device) -> Any:
+        if isinstance(value, torch.Tensor):
+            return value.to(device)
+        if isinstance(value, dict):
+            return {
+                key: Battery._move_optimizer_state(item, device)
+                for key, item in value.items()
+            }
+        if isinstance(value, list):
+            return [Battery._move_optimizer_state(item, device) for item in value]
+        if isinstance(value, tuple):
+            return tuple(Battery._move_optimizer_state(item, device) for item in value)
+        return value
+
+    def load_checkpoint(  # noqa: PLR0915
+        self, path: str | Path
+    ) -> None:
+        """Strictly load full training state or auto-detected raw model weights."""
+        checkpoint_path = Path(path)
+        try:
+            payload = torch.load(
+                checkpoint_path,
+                map_location=self._device,
+                weights_only=True,
+            )
+        except Exception:
+            logger.exception("Failed to read checkpoint at %s.", checkpoint_path)
+            raise
+
+        if self._is_raw_model_state(payload):
+            logger.warning(
+                "Raw model state detected at %s; training state was not restored.",
+                checkpoint_path,
+            )
+            self._model.load_state_dict(payload, strict=True)
+            self._resume_loaded = False
+            return
+
+        if (
+            not isinstance(payload, dict)
+            or payload.get("__torch_batteries_checkpoint__") != 1
+        ):
+            logger.error("Unrecognized checkpoint structure at %s.", checkpoint_path)
+            msg = "Unrecognized torch-batteries checkpoint structure."
+            raise ValueError(msg)
+
+        required = {
+            "model",
+            "optimizer",
+            "callbacks",
+            "metrics",
+            "epoch",
+            "optimizer_step_idx",
+            "results",
+        }
+        if not required.issubset(payload):
+            missing = sorted(required - set(payload))
+            logger.error("Checkpoint is missing required fields: %s", missing)
+            msg = f"Training checkpoint is missing fields: {missing}."
+            raise ValueError(msg)
+
+        self._model.load_state_dict(payload["model"], strict=True)
+        saved_optimizer = payload["optimizer"]
+        if saved_optimizer is not None:
+            if self._optimizer is None:
+                logger.error(
+                    "Checkpoint contains optimizer state but Battery does not."
+                )
+                msg = "An optimizer is required to resume this checkpoint."
+                raise ValueError(msg)
+            self._optimizer.load_state_dict(saved_optimizer)
+            self._optimizer.state = self._move_optimizer_state(
+                self._optimizer.state, self._device
+            )
+
+        saved_callbacks = payload["callbacks"]
+        callbacks = self._checkpoint_callbacks()
+        expected_ids = [self._callback_identifier(item) for item in callbacks]
+        if not isinstance(saved_callbacks, list):
+            logger.error("Checkpoint callback state is not a list.")
+            msg = "Invalid callback state in training checkpoint."
+            raise TypeError(msg)
+        actual_ids = [
+            item.get("type") if isinstance(item, dict) else None
+            for item in saved_callbacks
+        ]
+        if actual_ids != expected_ids:
+            logger.error(
+                "Callback state mismatch: expected=%s, actual=%s",
+                expected_ids,
+                actual_ids,
+            )
+            msg = "Configured callbacks do not match checkpoint state."
+            raise ValueError(msg)
+        for callback, saved in zip(callbacks, saved_callbacks, strict=True):
+            callback.load_state_dict(saved["state"])
+
+        metrics_state = payload["metrics"]
+        if not isinstance(metrics_state, dict):
+            logger.error("Checkpoint metric state is not a dictionary.")
+            msg = "Invalid metric state in training checkpoint."
+            raise TypeError(msg)
+        self._metric_manager.load_state_dict(metrics_state)
+        self._last_completed_epoch = int(payload["epoch"])
+        results = payload["results"]
+        if not isinstance(results, dict):
+            logger.error("Checkpoint training results are not a dictionary.")
+            msg = "Invalid training history in checkpoint."
+            raise TypeError(msg)
+        self._train_results = cast("TrainResult", copy.deepcopy(results))
+        self._resume_loaded = True
+        logger.info(
+            "Training checkpoint restored: path=%s, epoch=%d, optimizer_step=%d",
+            checkpoint_path,
+            self._last_completed_epoch,
+            int(payload["optimizer_step_idx"]),
+        )
+
+    def train(  # noqa: PLR0912, PLR0913, PLR0915
         self,
         train_loader: DataLoader,
         val_loader: DataLoader | None = None,
         epochs: int = 1,
         verbose: int = 1,
+        *,
+        resume_from: str | Path | None = None,
+        resume_epochs_mode: str = "total",
     ) -> TrainResult:
         """
         Train the model for the specified number of epochs.
@@ -290,9 +499,24 @@ class Battery:
         Raises:
             ValueError: If no training step handler is found
         """
+        if resume_epochs_mode not in {"total", "additional"}:
+            logger.error("Unsupported resume epochs mode: %s", resume_epochs_mode)
+            msg = "resume_epochs_mode must be 'total' or 'additional'."
+            raise ValueError(msg)
         self._validate_train_inputs(train_loader, val_loader, epochs)
+        if resume_from is not None:
+            self.load_checkpoint(resume_from)
+        resumed = self._resume_loaded
         self._stop_training = False
-        self._gradient_accumulation.reset()
+        if not resumed:
+            self._gradient_accumulation.reset()
+            self._last_completed_epoch = -1
+            self._train_results = {
+                "train_loss": [],
+                "val_loss": [],
+                "train_metrics": {},
+                "val_metrics": {},
+            }
         logger.info(
             "Training started: epochs=%d, train_batches=%d, validation=%s",
             epochs,
@@ -304,22 +528,28 @@ class Battery:
             "battery": self,
             "model": self._model,
             "optimizer": self._optimizer,
+            "resumed": resumed,
         }
         self._event_handler.call(Event.BEFORE_TRAIN, context)
 
-        results: TrainResult = {
-            "train_loss": [],
-            "val_loss": [],
-            "train_metrics": {},
-            "val_metrics": {},
-        }
+        results = copy.deepcopy(self._train_results)
 
         progress = ProgressFactory.create(verbose=verbose, total_epochs=epochs)
         train_metrics: dict[str, float] = {}
         val_metrics: dict[str, float] = {}
-        last_epoch = -1
+        last_epoch = self._last_completed_epoch
+        start_epoch = self._last_completed_epoch + 1
+        stop_epoch = epochs if resume_epochs_mode == "total" else start_epoch + epochs
+        if resumed and stop_epoch <= start_epoch:
+            logger.error(
+                "Resume target does not include new epochs: start=%d, stop=%d",
+                start_epoch,
+                stop_epoch,
+            )
+            msg = "Requested resume target does not contain any new epochs."
+            raise ValueError(msg)
 
-        for epoch in range(epochs):
+        for epoch in range(start_epoch, stop_epoch):
             if self._stop_training:
                 logger.info("Training stopped early at epoch %d.", epoch)
                 break
@@ -339,6 +569,8 @@ class Battery:
                     if key not in results["train_metrics"]:
                         results["train_metrics"][key] = []
                     results["train_metrics"][key].append(value)
+            self._last_completed_epoch = epoch
+            self._train_results = copy.deepcopy(results)
 
             after_epoch_context: EventContext = {
                 "battery": self,
@@ -374,6 +606,7 @@ class Battery:
                         if key not in results["val_metrics"]:
                             results["val_metrics"][key] = []
                         results["val_metrics"][key].append(value)
+                self._train_results = copy.deepcopy(results)
 
                 after_val_context: EventContext = {
                     "battery": self,
@@ -412,6 +645,9 @@ class Battery:
         if val_loader and val_metrics:
             after_train_context["val_metrics"] = val_metrics
         self._event_handler.call(Event.AFTER_TRAIN, after_train_context)
+        self._train_results = copy.deepcopy(results)
+        self._last_completed_epoch = last_epoch
+        self._resume_loaded = False
         logger.info(
             "Training completed: completed_epochs=%d, stopped_early=%s",
             len(results["train_loss"]),

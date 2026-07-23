@@ -1,0 +1,144 @@
+"""Tests for resumable Battery checkpoints."""
+
+from pathlib import Path
+from typing import cast
+
+import pytest
+import torch
+from torch import nn
+from torch.optim.lr_scheduler import StepLR
+from torch.utils.data import DataLoader, TensorDataset
+
+from torch_batteries import Battery, Event, EventContext, charge
+from torch_batteries.callbacks import (
+    GradientAccumulation,
+    LearningRateScheduler,
+)
+
+
+class _Model(nn.Module):
+    def __init__(self, outputs: int = 1) -> None:
+        super().__init__()
+        self.layer = nn.Linear(1, outputs)
+
+    @charge(Event.TRAIN_STEP)
+    def training_step(self, context: EventContext) -> torch.Tensor:
+        inputs, targets = cast("tuple[torch.Tensor, torch.Tensor]", context["batch"])
+        return cast("torch.Tensor", ((self.layer(inputs) - targets) ** 2).mean())
+
+
+def _loader() -> DataLoader:
+    return DataLoader(
+        TensorDataset(torch.ones(4, 1), torch.zeros(4, 1)),
+        batch_size=1,
+    )
+
+
+def _battery() -> tuple[Battery, LearningRateScheduler]:
+    model = _Model()
+    optimizer = torch.optim.SGD(model.parameters(), lr=0.1, momentum=0.9)
+    scheduler = LearningRateScheduler(StepLR(optimizer, 1, gamma=0.5))
+    return (
+        Battery(
+            model,
+            device="cpu",
+            optimizer=optimizer,
+            callbacks=[GradientAccumulation(2), scheduler],
+        ),
+        scheduler,
+    )
+
+
+def test_full_checkpoint_resumes_total_epochs(tmp_path: Path) -> None:
+    battery, _ = _battery()
+    initial = battery.train(_loader(), epochs=2, verbose=0)
+    checkpoint = tmp_path / "training.pth"
+    battery.save_checkpoint(checkpoint)
+    restored, restored_scheduler = _battery()
+
+    result = restored.train(
+        _loader(),
+        epochs=4,
+        verbose=0,
+        resume_from=checkpoint,
+        resume_epochs_mode="total",
+    )
+
+    assert len(initial["train_loss"]) == 2
+    assert len(result["train_loss"]) == 4
+    assert restored_scheduler.scheduler.last_epoch == 4
+
+
+def test_full_checkpoint_resumes_additional_epochs(tmp_path: Path) -> None:
+    battery, _ = _battery()
+    battery.train(_loader(), epochs=2, verbose=0)
+    checkpoint = tmp_path / "training.pth"
+    battery.save_checkpoint(checkpoint)
+    restored, _ = _battery()
+
+    result = restored.train(
+        _loader(),
+        epochs=2,
+        verbose=0,
+        resume_from=checkpoint,
+        resume_epochs_mode="additional",
+    )
+
+    assert len(result["train_loss"]) == 4
+
+
+def test_raw_model_state_is_detected_and_warned(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    source = _Model()
+    path = tmp_path / "weights.pth"
+    torch.save(source.state_dict(), path)
+    target = _Model()
+    battery = Battery(target, device="cpu")
+
+    battery.load_checkpoint(path)
+
+    assert "Raw model state detected" in caplog.text
+    for source_value, target_value in zip(
+        source.state_dict().values(), target.state_dict().values(), strict=True
+    ):
+        assert torch.equal(source_value, target_value)
+
+
+def test_raw_model_state_load_is_always_strict(tmp_path: Path) -> None:
+    path = tmp_path / "weights.pth"
+    torch.save(_Model(outputs=2).state_dict(), path)
+    battery = Battery(_Model(outputs=1), device="cpu")
+
+    with pytest.raises(RuntimeError):
+        battery.load_checkpoint(path)
+
+
+def test_rejects_malformed_checkpoint(tmp_path: Path) -> None:
+    path = tmp_path / "invalid.pth"
+    torch.save({"unexpected": "value"}, path)
+    battery = Battery(_Model(), device="cpu")
+
+    with pytest.raises(ValueError, match="Unrecognized"):
+        battery.load_checkpoint(path)
+
+
+def test_rejects_callback_order_mismatch(tmp_path: Path) -> None:
+    battery, _ = _battery()
+    battery.train(_loader(), verbose=0)
+    path = tmp_path / "training.pth"
+    battery.save_checkpoint(path)
+    model = _Model()
+    optimizer = torch.optim.SGD(model.parameters(), lr=0.1, momentum=0.9)
+    reordered = Battery(
+        model,
+        device="cpu",
+        optimizer=optimizer,
+        callbacks=[
+            LearningRateScheduler(StepLR(optimizer, 1, gamma=0.5)),
+            GradientAccumulation(2),
+        ],
+    )
+
+    with pytest.raises(ValueError, match="callbacks do not match"):
+        reordered.load_checkpoint(path)
