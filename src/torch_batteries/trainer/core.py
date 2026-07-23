@@ -8,6 +8,7 @@ from torch import nn
 from torch.utils.data import DataLoader
 
 from torch_batteries.callbacks.gradient_accumulation import GradientAccumulation
+from torch_batteries.callbacks.mixed_precision import MixedPrecision
 from torch_batteries.events import Event, EventContext, EventHandler
 from torch_batteries.trainer.context import copy_history_context
 from torch_batteries.trainer.types import (
@@ -48,6 +49,7 @@ class Battery:
         "_event_handler",
         "_gradient_accumulation",
         "_metrics",
+        "_mixed_precision",
         "_model",
         "_optimizer",
         "_stop_training",
@@ -81,6 +83,19 @@ class Battery:
             if accumulation_controls
             else GradientAccumulation(steps=1)
         )
+        precision_controls = [
+            callback
+            for callback in callback_list
+            if isinstance(callback, MixedPrecision)
+        ]
+        if len(precision_controls) > 1:
+            logger.error("Multiple MixedPrecision callbacks were configured.")
+            msg = "Only one MixedPrecision callback may be configured."
+            raise ValueError(msg)
+        self._mixed_precision = (
+            precision_controls[0] if precision_controls else MixedPrecision("32-true")
+        )
+        self._mixed_precision.configure(self._device)
         self._event_handler = EventHandler(self._model, callbacks=callback_list)
         self._stop_training = False
 
@@ -453,19 +468,20 @@ class Battery:
                 "batch_idx": batch_idx,
                 "epoch": epoch,
             }
-            result = self._event_handler.call(Event.TRAIN_STEP, step_context)
+            with self._mixed_precision.autocast():
+                result = self._event_handler.call(Event.TRAIN_STEP, step_context)
 
             loss, step_metrics = self._parse_step_result(result, "Training")
 
             group_size = self._gradient_accumulation.group_size(
                 batch_idx, total_batches
             )
-            (loss / group_size).backward()
+            self._mixed_precision.backward(loss / group_size)
             optimizer_step = self._gradient_accumulation.is_group_end(
                 batch_idx, total_batches
             )
             if optimizer_step:
-                self._optimizer.step()  # type: ignore[union-attr]
+                self._mixed_precision.optimizer_step(self._optimizer)  # type: ignore[arg-type]
                 optimizer_step_idx = self._gradient_accumulation.record_optimizer_step()
             else:
                 optimizer_step_idx = self._gradient_accumulation.optimizer_step_idx
@@ -561,7 +577,10 @@ class Battery:
                     "batch_idx": batch_idx,
                     "epoch": epoch,
                 }
-                result = self._event_handler.call(Event.VALIDATION_STEP, step_context)
+                with self._mixed_precision.autocast():
+                    result = self._event_handler.call(
+                        Event.VALIDATION_STEP, step_context
+                    )
 
                 loss, step_metrics = self._parse_step_result(result, "Validation")
                 batch_metrics = {"loss": loss.item(), **step_metrics}
@@ -728,7 +747,8 @@ class Battery:
             "batch_idx": batch_idx,
             "epoch": 0,
         }
-        result = self._event_handler.call(Event.TEST_STEP, step_context)
+        with self._mixed_precision.autocast():
+            result = self._event_handler.call(Event.TEST_STEP, step_context)
 
         loss, step_metrics = self._parse_step_result(result, "Test")
         batch_metrics = {"loss": loss.item(), **step_metrics}
@@ -865,7 +885,8 @@ class Battery:
             "batch_idx": batch_idx,
             "epoch": 0,
         }
-        prediction = self._event_handler.call(Event.PREDICT_STEP, step_context)
+        with self._mixed_precision.autocast():
+            prediction = self._event_handler.call(Event.PREDICT_STEP, step_context)
         logger.debug(
             "Prediction step completed: epoch=0, batch=%d, output_type=%s",
             batch_idx,
