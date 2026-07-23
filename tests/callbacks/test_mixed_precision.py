@@ -58,6 +58,7 @@ def test_amp_selects_cpu_bfloat16_for_all_phases() -> None:
     precision = MixedPrecision("amp")
     battery = Battery(
         model,
+        device="cpu",
         optimizer=torch.optim.SGD(model.parameters(), lr=0.1),
         callbacks=[precision],
     )
@@ -74,6 +75,7 @@ def test_full_precision_disables_autocast() -> None:
     model = _AutocastModel()
     battery = Battery(
         model,
+        device="cpu",
         optimizer=torch.optim.SGD(model.parameters(), lr=0.1),
         callbacks=[MixedPrecision("32-true")],
     )
