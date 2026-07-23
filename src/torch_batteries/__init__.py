@@ -51,13 +51,16 @@ from .tracking import (
     Run,
 )
 from .trainer import Battery, PredictResult, StepOutput, TestResult, TrainResult
+from .utils.metrics import CollectedMetric, StatefulMetric
 
 __all__ = [
     "Battery",
+    "CollectedMetric",
     "Event",
     "EventContext",
     "PredictResult",
     "Run",
+    "StatefulMetric",
     "StepOutput",
     "TestResult",
     "TrainResult",

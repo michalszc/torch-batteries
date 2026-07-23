@@ -1,6 +1,5 @@
 """Battery trainer class for torch-batteries."""
 
-from collections.abc import Callable
 from typing import Any, cast
 
 import torch
@@ -21,7 +20,7 @@ from torch_batteries.trainer.types import (
 from torch_batteries.utils.batch import get_batch_size
 from torch_batteries.utils.device import get_device, move_to_device
 from torch_batteries.utils.logging import get_logger
-from torch_batteries.utils.metrics import calculate_metrics
+from torch_batteries.utils.metrics import Metric, PhaseMetricManager
 from torch_batteries.utils.progress import Phase, Progress, ProgressFactory
 from torch_batteries.utils.progress.types import (  # noqa: TC001
     ProgressMetrics,
@@ -50,6 +49,7 @@ class Battery:
         "_event_handler",
         "_gradient_accumulation",
         "_gradient_clip",
+        "_metric_manager",
         "_metrics",
         "_mixed_precision",
         "_model",
@@ -62,14 +62,14 @@ class Battery:
         model: nn.Module,
         device: str | torch.device = "auto",
         optimizer: torch.optim.Optimizer | None = None,
-        metrics: dict[str, Callable[[torch.Tensor, torch.Tensor], float | torch.Tensor]]
-        | None = None,
+        metrics: dict[str, Metric] | None = None,
         callbacks: list | None = None,
     ):
         self._device = get_device(device)
         self._model = model.to(self._device)
         self._optimizer = optimizer
         self._metrics = metrics or {}
+        self._metric_manager = PhaseMetricManager(self._metrics)
         callback_list = list(callbacks or [])
         accumulation_controls = [
             callback
@@ -134,18 +134,18 @@ class Battery:
     @property
     def metrics(
         self,
-    ) -> dict[str, Callable[[torch.Tensor, torch.Tensor], float | torch.Tensor]]:
+    ) -> dict[str, Metric]:
         """Get the metrics dictionary."""
         return self._metrics
 
     @metrics.setter
     def metrics(
         self,
-        value: dict[str, Callable[[torch.Tensor, torch.Tensor], float | torch.Tensor]]
-        | None,
+        value: dict[str, Metric] | None,
     ) -> None:
         """Set the metrics dictionary."""
         self._metrics = value or {}
+        self._metric_manager = PhaseMetricManager(self._metrics)
 
     @property
     def stop_training(self) -> bool:
@@ -190,23 +190,23 @@ class Battery:
 
     def _parse_step_result(
         self, result: Any, phase: str
-    ) -> tuple[torch.Tensor, dict[str, float]]:
-        """Validate a step result and calculate configured automatic metrics."""
+    ) -> tuple[
+        torch.Tensor,
+        dict[str, float],
+        torch.Tensor | None,
+        torch.Tensor | None,
+    ]:
+        """Validate a step result and expose data for configured metrics."""
         if isinstance(result, StepOutput):
             loss = self._validate_loss(result.loss, phase)
-            automatic_metrics: dict[str, float] = {}
-            if self._metrics:
-                if result.predictions is None or result.targets is None:
-                    msg = (
-                        f"{phase} step must return StepOutput with predictions and "
-                        "targets when Battery metrics are configured."
-                    )
-                    raise ValueError(msg)
-                automatic_metrics = calculate_metrics(
-                    self._metrics, result.predictions, result.targets
+            if self._metrics and (result.predictions is None or result.targets is None):
+                msg = (
+                    f"{phase} step must return StepOutput with predictions and "
+                    "targets when Battery metrics are configured."
                 )
+                raise ValueError(msg)
             manual_metrics = self._normalize_step_metrics(result.metrics, phase)
-            return loss, {**automatic_metrics, **manual_metrics}
+            return loss, manual_metrics, result.predictions, result.targets
 
         if self._metrics:
             msg = (
@@ -221,9 +221,9 @@ class Battery:
                 raise TypeError(msg)
             loss = self._validate_loss(result[0], phase)
             metrics = self._normalize_step_metrics(result[1], phase)
-            return loss, metrics
+            return loss, metrics, None, None
 
-        return self._validate_loss(result, phase), {}
+        return self._validate_loss(result, phase), {}, None, None
 
     @staticmethod
     def _validate_loader(dataloader: DataLoader, name: str) -> None:
@@ -445,6 +445,8 @@ class Battery:
         self._model.train()
 
         progress.start_phase(Phase.TRAIN, total_batches=len(dataloader))
+        self._metric_manager.reset()
+        manual_metric_names: set[str] = set()
         logger.debug("Training phase started: epoch=%d", epoch)
 
         total_batches = len(dataloader)
@@ -481,7 +483,15 @@ class Battery:
             with self._mixed_precision.autocast():
                 result = self._event_handler.call(Event.TRAIN_STEP, step_context)
 
-            loss, step_metrics = self._parse_step_result(result, "Training")
+            loss, step_metrics, predictions, targets = self._parse_step_result(
+                result, "Training"
+            )
+            automatic_metrics = (
+                self._metric_manager.update(predictions, targets)
+                if predictions is not None and targets is not None
+                else {}
+            )
+            manual_metric_names.update(step_metrics)
 
             group_size = self._gradient_accumulation.group_size(
                 batch_idx, total_batches
@@ -499,7 +509,11 @@ class Battery:
             else:
                 optimizer_step_idx = self._gradient_accumulation.optimizer_step_idx
 
-            batch_metrics = {"loss": loss.item(), **step_metrics}
+            batch_metrics = {
+                "loss": loss.item(),
+                **automatic_metrics,
+                **step_metrics,
+            }
             logger.debug(
                 "Training step completed: epoch=%d, batch=%d, metrics=%s",
                 epoch,
@@ -528,6 +542,13 @@ class Battery:
         avg_metrics = progress.end_phase()
         train_metrics = (
             avg_metrics if isinstance(avg_metrics, dict) else {"loss": avg_metrics}
+        )
+        train_metrics.update(
+            {
+                name: value
+                for name, value in self._metric_manager.compute().items()
+                if name not in manual_metric_names
+            }
         )
         logger.debug(
             "Training phase completed: epoch=%d, metrics=%s", epoch, train_metrics
@@ -567,6 +588,8 @@ class Battery:
         self._model.eval()
 
         progress.start_phase(Phase.VALIDATION, total_batches=len(dataloader))
+        self._metric_manager.reset()
+        manual_metric_names: set[str] = set()
 
         with torch.no_grad():
             for batch_idx, batch_data in enumerate(dataloader):
@@ -595,8 +618,20 @@ class Battery:
                         Event.VALIDATION_STEP, step_context
                     )
 
-                loss, step_metrics = self._parse_step_result(result, "Validation")
-                batch_metrics = {"loss": loss.item(), **step_metrics}
+                loss, step_metrics, predictions, targets = self._parse_step_result(
+                    result, "Validation"
+                )
+                automatic_metrics = (
+                    self._metric_manager.update(predictions, targets)
+                    if predictions is not None and targets is not None
+                    else {}
+                )
+                manual_metric_names.update(step_metrics)
+                batch_metrics = {
+                    "loss": loss.item(),
+                    **automatic_metrics,
+                    **step_metrics,
+                }
                 logger.debug(
                     "Validation step completed: epoch=%d, batch=%d, metrics=%s",
                     epoch,
@@ -624,6 +659,13 @@ class Battery:
         avg_metrics = progress.end_phase()
         val_metrics = (
             avg_metrics if isinstance(avg_metrics, dict) else {"loss": avg_metrics}
+        )
+        val_metrics.update(
+            {
+                name: value
+                for name, value in self._metric_manager.compute().items()
+                if name not in manual_metric_names
+            }
         )
 
         # Trigger AFTER_VALIDATION_EPOCH event
@@ -681,12 +723,19 @@ class Battery:
         progress = ProgressFactory.create(verbose=verbose, total_epochs=1)
         progress.start_epoch(0)
         progress.start_phase(Phase.TEST, total_batches=len(test_loader))
+        self._metric_manager.reset()
+        manual_metric_names: set[str] = set()
         logger.debug("Test phase started: epoch=0")
 
         try:
             with torch.no_grad():
                 for batch_idx, batch_data in enumerate(test_loader):
-                    self._test_batch(batch_data, batch_idx, progress)
+                    self._test_batch(
+                        batch_data,
+                        batch_idx,
+                        progress,
+                        manual_metric_names,
+                    )
         except BaseException:
             progress.abort()
             raise
@@ -700,6 +749,13 @@ class Battery:
         )
         test_metrics_context = (
             test_metrics if isinstance(test_metrics, dict) else {"loss": test_metrics}
+        )
+        test_metrics_context.update(
+            {
+                name: value
+                for name, value in self._metric_manager.compute().items()
+                if name not in manual_metric_names
+            }
         )
 
         after_test_epoch_context: EventContext = {
@@ -724,21 +780,24 @@ class Battery:
         self._event_handler.call(Event.AFTER_TEST, after_test_context)
         logger.debug("Test phase completed: epoch=0, metrics=%s", test_metrics_context)
 
-        # Format results with test_loss and test_metrics
-        if isinstance(test_metrics, dict):
-            results: TestResult = {"test_loss": test_metrics["loss"]}
-
-            if len(test_metrics) > 1:  # Has metrics beyond just loss
-                results["test_metrics"] = {
-                    k: v for k, v in test_metrics.items() if k != "loss"
-                }
-        else:
-            results = {"test_loss": test_metrics}
+        results: TestResult = {"test_loss": test_metrics_context["loss"]}
+        if len(test_metrics_context) > 1:
+            results["test_metrics"] = {
+                key: value
+                for key, value in test_metrics_context.items()
+                if key != "loss"
+            }
 
         logger.info("Testing completed")
         return results
 
-    def _test_batch(self, batch_data: Any, batch_idx: int, progress: Progress) -> None:
+    def _test_batch(
+        self,
+        batch_data: Any,
+        batch_idx: int,
+        progress: Progress,
+        manual_metric_names: set[str],
+    ) -> None:
         """Process one test batch."""
         batch = move_to_device(batch_data, self._device)
 
@@ -763,8 +822,20 @@ class Battery:
         with self._mixed_precision.autocast():
             result = self._event_handler.call(Event.TEST_STEP, step_context)
 
-        loss, step_metrics = self._parse_step_result(result, "Test")
-        batch_metrics = {"loss": loss.item(), **step_metrics}
+        loss, step_metrics, predictions, targets = self._parse_step_result(
+            result, "Test"
+        )
+        automatic_metrics = (
+            self._metric_manager.update(predictions, targets)
+            if predictions is not None and targets is not None
+            else {}
+        )
+        manual_metric_names.update(step_metrics)
+        batch_metrics = {
+            "loss": loss.item(),
+            **automatic_metrics,
+            **step_metrics,
+        }
         logger.debug(
             "Test step completed: epoch=0, batch=%d, metrics=%s",
             batch_idx,
