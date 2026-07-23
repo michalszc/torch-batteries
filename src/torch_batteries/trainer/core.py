@@ -2,6 +2,7 @@
 
 import copy
 import tempfile
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any, cast
 
@@ -25,6 +26,7 @@ from torch_batteries.utils.batch import get_batch_size
 from torch_batteries.utils.device import get_device, move_to_device
 from torch_batteries.utils.logging import get_logger
 from torch_batteries.utils.metrics import Metric, PhaseMetricManager
+from torch_batteries.utils.prediction import concatenate_predictions
 from torch_batteries.utils.progress import Phase, Progress, ProgressFactory
 from torch_batteries.utils.progress.types import (  # noqa: TC001
     ProgressMetrics,
@@ -1094,13 +1096,25 @@ class Battery:
         num_samples = get_batch_size(batch)
         progress.update(cast("ProgressMetrics", batch_metrics), num_samples)
 
-    def predict(self, data_loader: DataLoader, verbose: int = 1) -> PredictResult:
+    def predict(
+        self,
+        data_loader: DataLoader,
+        verbose: int = 1,
+        *,
+        move_to_cpu: bool = False,
+        concatenate: bool = False,
+    ) -> PredictResult:
         """
         Generate predictions using the model.
 
         Args:
             data_loader: Data loader for prediction
             verbose: Verbosity level (0=silent, 1=progress bar, 2=simple log)
+            move_to_cpu: Recursively detach tensor outputs and move them to CPU.
+                This is useful when predictions should not retain accelerator memory.
+            concatenate: Recursively concatenate matching tensor outputs along their
+                first dimension. Nested dictionaries, tuples, named tuples, and lists
+                retain their structure.
 
         Returns:
             PredictResult containing predictions
@@ -1109,6 +1123,7 @@ class Battery:
             ValueError: If no predict step handler is found
         """
         if not self._event_handler.has_handler(Event.PREDICT_STEP):
+            logger.error("Prediction requires a predict step handler.")
             msg = (
                 "No method decorated with @charge(Event.PREDICT_STEP) found. "
                 "Please add a predict step method to your model."
@@ -1117,6 +1132,11 @@ class Battery:
 
         self._validate_loader(data_loader, "Prediction")
         logger.info("Prediction started: batches=%d", len(data_loader))
+        logger.debug(
+            "Prediction output options selected: move_to_cpu=%s, concatenate=%s",
+            move_to_cpu,
+            concatenate,
+        )
 
         before_predict_context: EventContext = {
             "battery": self,
@@ -1146,7 +1166,14 @@ class Battery:
         try:
             with torch.no_grad():
                 for batch_idx, batch_data in enumerate(data_loader):
-                    self._predict_batch(batch_data, batch_idx, predictions, progress)
+                    prediction = self._predict_batch(
+                        batch_data,
+                        batch_idx,
+                        progress,
+                        move_to_cpu=move_to_cpu,
+                    )
+                    if prediction is not None:
+                        predictions.append(prediction)
         except BaseException:
             progress.abort()
             raise
@@ -1154,12 +1181,16 @@ class Battery:
         progress.end_phase()
         progress.end_epoch()
 
+        prediction_output = (
+            concatenate_predictions(predictions) if concatenate else predictions
+        )
         after_predict_epoch_context: EventContext = {
             "battery": self,
             "model": self._model,
             "optimizer": self._optimizer,
             "epoch": 0,
-            "predictions": predictions,
+            "predictions": prediction_output,
+            "prediction_batches": len(predictions),
         }
         self._event_handler.call(Event.AFTER_PREDICT_EPOCH, after_predict_epoch_context)
 
@@ -1167,7 +1198,8 @@ class Battery:
             "battery": self,
             "model": self._model,
             "optimizer": self._optimizer,
-            "predictions": predictions,
+            "predictions": prediction_output,
+            "prediction_batches": len(predictions),
         }
         self._event_handler.call(Event.AFTER_PREDICT, after_predict_context)
         logger.debug(
@@ -1175,15 +1207,117 @@ class Battery:
         )
         logger.info("Prediction completed: outputs=%d", len(predictions))
 
-        return {"predictions": predictions}
+        logger.debug(
+            "Prediction output options applied: move_to_cpu=%s, concatenate=%s",
+            move_to_cpu,
+            concatenate,
+        )
+        return {"predictions": prediction_output}
+
+    def predict_iter(
+        self,
+        data_loader: DataLoader,
+        verbose: int = 1,
+        *,
+        move_to_cpu: bool = False,
+    ) -> Iterator[Any]:
+        """Yield prediction batches without retaining the complete result.
+
+        Args:
+            data_loader: Data loader for prediction.
+            verbose: Verbosity level (0=silent, 1=progress bar, 2=simple log).
+            move_to_cpu: Recursively detach tensor outputs and move them to CPU
+                before yielding them.
+
+        Yields:
+            One prediction-step output at a time. Iteration must finish for the
+            ``AFTER_PREDICT_EPOCH`` and ``AFTER_PREDICT`` events to run.
+        """
+        if not self._event_handler.has_handler(Event.PREDICT_STEP):
+            logger.error("Streaming prediction requires a predict step handler.")
+            msg = (
+                "No method decorated with @charge(Event.PREDICT_STEP) found. "
+                "Please add a predict step method to your model."
+            )
+            raise ValueError(msg)
+        self._validate_loader(data_loader, "Prediction")
+        logger.info(
+            "Streaming prediction started: batches=%d, move_to_cpu=%s",
+            len(data_loader),
+            move_to_cpu,
+        )
+        yield from self._prediction_iterator(
+            data_loader,
+            verbose,
+            move_to_cpu=move_to_cpu,
+        )
+
+    def _prediction_iterator(
+        self,
+        data_loader: DataLoader,
+        verbose: int,
+        *,
+        move_to_cpu: bool,
+    ) -> Iterator[Any]:
+        """Run lazy prediction lifecycle and yield each non-None output."""
+        before_context: EventContext = {
+            "battery": self,
+            "model": self._model,
+            "optimizer": self._optimizer,
+        }
+        self._event_handler.call(Event.BEFORE_PREDICT, before_context)
+        self._event_handler.call(
+            Event.BEFORE_PREDICT_EPOCH,
+            {**before_context, "epoch": 0},
+        )
+        self._model.eval()
+        progress = ProgressFactory.create(verbose=verbose, total_epochs=1)
+        progress.start_epoch(0)
+        progress.start_phase(Phase.PREDICT, total_batches=len(data_loader))
+        processed_batches = 0
+        completed = False
+        try:
+            with torch.no_grad():
+                for batch_idx, batch_data in enumerate(data_loader):
+                    prediction = self._predict_batch(
+                        batch_data,
+                        batch_idx,
+                        progress,
+                        move_to_cpu=move_to_cpu,
+                    )
+                    processed_batches += 1
+                    if prediction is not None:
+                        yield prediction
+            progress.end_phase()
+            progress.end_epoch()
+            completion_context: EventContext = {
+                "battery": self,
+                "model": self._model,
+                "optimizer": self._optimizer,
+                "epoch": 0,
+                "prediction_batches": processed_batches,
+            }
+            self._event_handler.call(Event.AFTER_PREDICT_EPOCH, completion_context)
+            completion_context.pop("epoch")
+            self._event_handler.call(Event.AFTER_PREDICT, completion_context)
+            completed = True
+            logger.info("Streaming prediction completed: batches=%d", processed_batches)
+        finally:
+            if not completed:
+                progress.abort()
+                logger.warning(
+                    "Streaming prediction aborted after %d batches.",
+                    processed_batches,
+                )
 
     def _predict_batch(
         self,
         batch_data: Any,
         batch_idx: int,
-        predictions: list[Any],
         progress: Progress,
-    ) -> None:
+        *,
+        move_to_cpu: bool = False,
+    ) -> Any:
         """Process one prediction batch."""
         batch = move_to_device(batch_data, self._device)
 
@@ -1207,14 +1341,17 @@ class Battery:
         }
         with self._mixed_precision.autocast():
             prediction = self._event_handler.call(Event.PREDICT_STEP, step_context)
+        if move_to_cpu:
+            prediction = move_to_device(
+                prediction,
+                torch.device("cpu"),
+                detach=True,
+            )
         logger.debug(
             "Prediction step completed: epoch=0, batch=%d, output_type=%s",
             batch_idx,
             type(prediction).__name__,
         )
-        if prediction is not None:
-            predictions.append(prediction)
-
         after_step_context: EventContext = {
             "battery": self,
             "model": self._model,
@@ -1227,3 +1364,4 @@ class Battery:
         self._event_handler.call(Event.AFTER_PREDICT_STEP, after_step_context)
 
         progress.update()
+        return prediction

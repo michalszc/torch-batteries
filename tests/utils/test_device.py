@@ -1,10 +1,16 @@
 """Tests for torch_batteries.utils.device module."""
 
+from typing import NamedTuple
 from unittest.mock import MagicMock, patch
 
 import torch
 
 from torch_batteries.utils.device import get_device, move_to_device
+
+
+class _TensorPair(NamedTuple):
+    inputs: torch.Tensor
+    targets: torch.Tensor
 
 
 class TestGetDevice:
@@ -144,3 +150,16 @@ class TestMoveToDevice:
         device = torch.device("cpu")
         result = move_to_device(data, device)
         assert result == data
+
+    def test_detach_and_preserve_named_tuple(self) -> None:
+        """Test detached movement preserves named tuple structure."""
+        data = _TensorPair(
+            torch.ones(2, requires_grad=True),
+            torch.zeros(2, requires_grad=True),
+        )
+
+        result = move_to_device(data, torch.device("cpu"), detach=True)
+
+        assert isinstance(result, _TensorPair)
+        assert not result.inputs.requires_grad
+        assert not result.targets.requires_grad

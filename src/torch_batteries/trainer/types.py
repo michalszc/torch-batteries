@@ -87,4 +87,4 @@ class PredictResult(TypedDict):
         ```
     """
 
-    predictions: list[Any]
+    predictions: Any
