@@ -2,6 +2,7 @@
 
 from typing import Protocol, cast
 
+import pytest
 import torch
 from torch import nn
 from torch.utils.data import DataLoader, TensorDataset
@@ -82,3 +83,10 @@ def test_predict_iter_early_close_does_not_fire_completion() -> None:
     cast("_Closable", iterator).close()
 
     assert recorder.completed == []
+
+
+def test_predict_iter_requires_prediction_handler() -> None:
+    battery = Battery(nn.Linear(1, 1), device="cpu")
+
+    with pytest.raises(ValueError, match="PREDICT_STEP"):
+        list(battery.predict_iter(_loader(), verbose=0))

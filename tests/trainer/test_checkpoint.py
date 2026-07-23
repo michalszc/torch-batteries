@@ -124,6 +124,59 @@ def test_rejects_malformed_checkpoint(tmp_path: Path) -> None:
         battery.load_checkpoint(path)
 
 
+def test_rejects_full_checkpoint_with_missing_fields(tmp_path: Path) -> None:
+    source, _ = _battery()
+    path = tmp_path / "source.pth"
+    source.save_checkpoint(path)
+    payload = torch.load(path, weights_only=True)
+    del payload["model"]
+    malformed = tmp_path / "missing.pth"
+    torch.save(payload, malformed)
+    target, _ = _battery()
+
+    with pytest.raises(ValueError, match="missing fields"):
+        target.load_checkpoint(malformed)
+
+
+def test_resume_requires_optimizer_when_checkpoint_contains_one(
+    tmp_path: Path,
+) -> None:
+    source, _ = _battery()
+    path = tmp_path / "source.pth"
+    source.save_checkpoint(path)
+    target = Battery(_Model(), device="cpu")
+
+    with pytest.raises(ValueError, match="optimizer is required"):
+        target.load_checkpoint(path)
+
+
+@pytest.mark.parametrize(
+    ("field", "replacement", "exception", "message"),
+    [
+        ("callbacks", {}, TypeError, "Invalid callback state"),
+        ("metrics", [], TypeError, "Invalid metric state"),
+        ("results", [], TypeError, "Invalid training history"),
+    ],
+)
+def test_rejects_invalid_full_checkpoint_field_types(
+    tmp_path: Path,
+    field: str,
+    replacement: object,
+    exception: type[Exception],
+    message: str,
+) -> None:
+    source, _ = _battery()
+    path = tmp_path / f"{field}.pth"
+    source.save_checkpoint(path)
+    payload = torch.load(path, weights_only=True)
+    payload[field] = replacement
+    torch.save(payload, path)
+    target, _ = _battery()
+
+    with pytest.raises(exception, match=message):
+        target.load_checkpoint(path)
+
+
 def test_rejects_callback_order_mismatch(tmp_path: Path) -> None:
     battery, _ = _battery()
     battery.train(_loader(), verbose=0)
@@ -143,6 +196,31 @@ def test_rejects_callback_order_mismatch(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="callbacks do not match"):
         reordered.load_checkpoint(path)
+
+
+def test_rejects_invalid_resume_mode_and_completed_total_target(
+    tmp_path: Path,
+) -> None:
+    battery, _ = _battery()
+    with pytest.raises(ValueError, match="resume_epochs_mode"):
+        battery.train(
+            _loader(),
+            verbose=0,
+            resume_epochs_mode="invalid",
+        )
+
+    battery.train(_loader(), epochs=1, verbose=0)
+    path = tmp_path / "complete.pth"
+    battery.save_checkpoint(path)
+    restored, _ = _battery()
+    with pytest.raises(ValueError, match="does not contain any new epochs"):
+        restored.train(
+            _loader(),
+            epochs=1,
+            verbose=0,
+            resume_from=path,
+            resume_epochs_mode="total",
+        )
 
 
 def test_model_checkpoint_saves_full_training_state_by_default(

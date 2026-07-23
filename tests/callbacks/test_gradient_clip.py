@@ -78,3 +78,11 @@ def test_rejects_invalid_and_duplicate_configuration() -> None:
             optimizer=torch.optim.SGD(model.parameters(), lr=0.1),
             callbacks=[GradientClip(1), GradientClip(2)],
         )
+
+
+def test_checkpoint_configuration_is_validated() -> None:
+    clipping = GradientClip(1.0, "norm")
+
+    clipping.load_state_dict(clipping.state_dict())
+    with pytest.raises(ValueError, match="does not match"):
+        clipping.load_state_dict({"value": 2.0, "algorithm": "value"})

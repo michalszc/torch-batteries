@@ -100,3 +100,14 @@ def test_state_round_trip_and_configuration_validation() -> None:
     restored.load_state_dict(state)
 
     assert restored.optimizer_step_idx == 1
+
+
+def test_rejects_invalid_configuration_and_checkpoint_state() -> None:
+    with pytest.raises(ValueError, match="greater than zero"):
+        GradientAccumulation(0)
+
+    control = GradientAccumulation(steps=2)
+    with pytest.raises(ValueError, match="Invalid GradientAccumulation"):
+        control.load_state_dict({})
+    with pytest.raises(ValueError, match="do not match"):
+        control.load_state_dict({"steps": 3, "optimizer_step_idx": 1})

@@ -103,3 +103,81 @@ def test_scheduler_state_round_trip() -> None:
     restored.load_state_dict(state)
 
     assert restored.scheduler.last_epoch == callback.scheduler.last_epoch
+
+
+def test_rejects_invalid_interval_and_missing_plateau_metric() -> None:
+    model = _Model()
+    optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
+    with pytest.raises(ValueError, match="interval must be"):
+        LearningRateScheduler(
+            StepLR(optimizer, 1),
+            interval="batch",  # type: ignore[arg-type]
+        )
+
+    callback = LearningRateScheduler(
+        ReduceLROnPlateau(optimizer),
+        stage="train",
+        metric="loss",
+    )
+    with pytest.raises(ValueError, match="is unavailable"):
+        callback.on_train_epoch_end(EventContext(epoch=0, train_metrics={}))
+
+
+def test_validation_plateau_requires_validation_and_metric() -> None:
+    model = _Model()
+    optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
+    callback = LearningRateScheduler(
+        ReduceLROnPlateau(optimizer),
+        stage="val",
+        metric="loss",
+    )
+
+    with pytest.raises(ValueError, match="validation loader"):
+        callback.on_train_end(EventContext(epoch=0))
+    with pytest.raises(ValueError, match="is unavailable"):
+        callback.on_validation_end(EventContext(epoch=0, val_metrics={}))
+
+
+def test_rejects_invalid_scheduler_checkpoint_state() -> None:
+    model = _Model()
+    optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
+    callback = LearningRateScheduler(StepLR(optimizer, 1))
+
+    with pytest.raises(ValueError, match="does not match"):
+        callback.load_state_dict(
+            {
+                "interval": "step",
+                "stage": None,
+                "metric": None,
+                "scheduler": {},
+                "stepped_epochs": [],
+            }
+        )
+    with pytest.raises(TypeError, match="Invalid LearningRateScheduler"):
+        callback.load_state_dict(
+            {
+                "interval": "epoch",
+                "stage": None,
+                "metric": None,
+                "scheduler": None,
+                "stepped_epochs": None,
+            }
+        )
+
+
+def test_scheduler_ignores_events_for_other_routes() -> None:
+    model = _Model()
+    optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
+    ordinary = LearningRateScheduler(StepLR(optimizer, 1))
+    validation_plateau = LearningRateScheduler(
+        ReduceLROnPlateau(optimizer),
+        stage="val",
+        metric="loss",
+    )
+
+    ordinary.on_validation_end(EventContext(epoch=0, val_metrics={"loss": 1.0}))
+    validation_plateau.on_train_epoch_end(
+        EventContext(epoch=0, train_metrics={"loss": 1.0})
+    )
+
+    assert optimizer.param_groups[0]["lr"] == pytest.approx(0.1)

@@ -796,6 +796,11 @@ class TestBattery:
                 ValueError,
                 "must be scalar",
             ),
+            (
+                (torch.tensor(1.0), {"bad": "not-numeric"}),
+                TypeError,
+                "must be numeric",
+            ),
         ],
     )
     def test_invalid_step_results_raise_clear_errors(

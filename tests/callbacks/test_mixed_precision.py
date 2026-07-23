@@ -106,3 +106,49 @@ def test_state_round_trip_validates_configuration() -> None:
     restored.load_state_dict(state)
 
     assert restored.effective_precision == "bf16-mixed"
+
+
+def test_rejects_invalid_precision_and_device() -> None:
+    with pytest.raises(ValueError, match="precision must be"):
+        MixedPrecision("invalid")  # type: ignore[arg-type]
+
+    with pytest.raises(ValueError, match="does not support"):
+        MixedPrecision("amp").configure(torch.device("meta"))
+
+
+def test_rejects_invalid_or_incompatible_checkpoint_state() -> None:
+    control = MixedPrecision("amp")
+    control.configure(torch.device("cpu"))
+
+    with pytest.raises(ValueError, match="Invalid MixedPrecision"):
+        control.load_state_dict({})
+    with pytest.raises(ValueError, match="does not match"):
+        control.load_state_dict(
+            {
+                "precision": "32-true",
+                "effective_precision": "32-true",
+                "scaler": {},
+            }
+        )
+    with pytest.raises(TypeError, match="scaler checkpoint"):
+        control.load_state_dict(
+            {
+                "precision": "amp",
+                "effective_precision": "bf16-mixed",
+                "scaler": None,
+            }
+        )
+
+
+def test_fp16_control_scales_unscales_and_steps_on_cpu() -> None:
+    model = nn.Linear(1, 1)
+    optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
+    control = MixedPrecision("16-mixed")
+    control.configure(torch.device("cpu"))
+    loss = model(torch.ones(1, 1)).sum()
+
+    control.backward(loss)
+    control.unscale_(optimizer)
+    control.optimizer_step(optimizer)
+
+    assert control.scaler.is_enabled()
