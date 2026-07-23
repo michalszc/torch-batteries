@@ -8,12 +8,37 @@ import torch
 from torch import nn
 
 from torch_batteries import Event, EventContext, charge
+from torch_batteries.callbacks.base import Callback
 from torch_batteries.utils.logging import get_logger
 
 logger = get_logger("ModelCheckpoint")
 
 
-class ModelCheckpoint:
+def _optional_string(value: object) -> str | None:
+    """Validate an optional serialized path."""
+    if value is None or isinstance(value, str):
+        return value
+    msg = "checkpoint path must be a string or None"
+    raise TypeError(msg)
+
+
+def _string_float_dict(value: object) -> dict[str, float]:
+    """Validate serialized checkpoint ranking data."""
+    if not isinstance(value, dict):
+        msg = "best_k_models must be a dictionary"
+        raise TypeError(msg)
+    return {str(path): _serialized_float(score) for path, score in value.items()}
+
+
+def _serialized_float(value: object) -> float:
+    """Validate a serialized numeric value."""
+    if not isinstance(value, (int, float)):
+        msg = "checkpoint score must be numeric"
+        raise TypeError(msg)
+    return float(value)
+
+
+class ModelCheckpoint(Callback):
     """Saves the model when a monitored metric improves.
 
     Args:
@@ -99,6 +124,40 @@ class ModelCheckpoint:
     def best_k_models(self) -> dict[str, float]:
         """Returns a dictionary of the top K saved models and their scores."""
         return self._best_k_models
+
+    def state_dict(self) -> dict[str, object]:
+        """Return checkpoint ranking state for training resumption."""
+        state: dict[str, object] = {
+            "best_k_models": dict(self._best_k_models),
+            "best_model_path": self._best_model_path,
+            "kth_best_model_path": self._kth_best_model_path,
+            "best_score": self._best_score,
+            "kth_best_score": self._kth_best_score,
+        }
+        logger.debug(
+            "Serialized model checkpoint state with %d retained models.",
+            len(self._best_k_models),
+        )
+        return state
+
+    def load_state_dict(self, state_dict: dict[str, object]) -> None:
+        """Restore checkpoint ranking state."""
+        try:
+            self._best_k_models = _string_float_dict(state_dict["best_k_models"])
+            self._best_model_path = _optional_string(state_dict["best_model_path"])
+            self._kth_best_model_path = _optional_string(
+                state_dict["kth_best_model_path"]
+            )
+            self._best_score = _serialized_float(state_dict["best_score"])
+            self._kth_best_score = _serialized_float(state_dict["kth_best_score"])
+        except (KeyError, TypeError, ValueError) as error:
+            logger.exception("Invalid model checkpoint state.")
+            msg = "Invalid ModelCheckpoint checkpoint state."
+            raise ValueError(msg) from error
+        logger.info(
+            "Restored model checkpoint state with %d retained models.",
+            len(self._best_k_models),
+        )
 
     @charge(Event.AFTER_TRAIN_EPOCH)
     def run_on_train_epoch_end(self, context: EventContext) -> None:
