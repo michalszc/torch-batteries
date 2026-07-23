@@ -70,7 +70,7 @@ class LearningRateScheduler(Callback):
         )
 
     @property
-    def scheduler(self) -> LRScheduler | ReduceLROnPlateau:
+    def scheduler(self) -> LRScheduler:
         """Underlying PyTorch scheduler."""
         return self._scheduler
 
