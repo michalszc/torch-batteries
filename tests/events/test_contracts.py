@@ -1,16 +1,52 @@
 """Integration tests for documented event context contracts."""
 
+from contextlib import nullcontext
 from typing import Any, cast
 
 import torch
 from torch import nn, optim
 from torch.utils.data import DataLoader, TensorDataset
 
-from torch_batteries import Battery, Event, EventContext, StepOutput, charge
+from torch_batteries import (
+    Battery,
+    Event,
+    EventContext,
+    OptimizationStep,
+    StepOutput,
+    charge,
+)
 
 COMMON_FIELDS = {"battery", "model"}
+STEP_EXECUTION_FIELDS = COMMON_FIELDS | {
+    "optimizer",
+    "device",
+    "phase",
+    "batch",
+    "batch_idx",
+    "epoch",
+}
+OPTIMIZATION_FIELDS = STEP_EXECUTION_FIELDS | {
+    "total_batches",
+    "optimization_plan",
+    "optimizer_step",
+    "optimizer_step_idx",
+    "loss_tensor",
+    "backward_loss",
+}
 
 EXPECTED_FIELDS: dict[Event, set[str]] = {
+    Event.SETUP: COMMON_FIELDS | {"optimizer", "device"},
+    Event.STEP_EXECUTION_CONTEXT: STEP_EXECUTION_FIELDS,
+    Event.CONFIGURE_TRAIN_STEP: STEP_EXECUTION_FIELDS
+    | {"total_batches", "optimizer_step_idx"},
+    Event.BEFORE_BACKWARD: OPTIMIZATION_FIELDS,
+    Event.BACKWARD: OPTIMIZATION_FIELDS,
+    Event.AFTER_BACKWARD: OPTIMIZATION_FIELDS,
+    Event.BEFORE_GRADIENT_CLIP: OPTIMIZATION_FIELDS,
+    Event.GRADIENT_CLIP: OPTIMIZATION_FIELDS,
+    Event.BEFORE_OPTIMIZER_STEP: OPTIMIZATION_FIELDS,
+    Event.OPTIMIZER_STEP: OPTIMIZATION_FIELDS,
+    Event.AFTER_OPTIMIZER_STEP: OPTIMIZATION_FIELDS,
     Event.BEFORE_TRAIN: COMMON_FIELDS | {"optimizer"},
     Event.AFTER_TRAIN: COMMON_FIELDS
     | {
@@ -127,8 +163,19 @@ class EventRecorder:
             if event in MODEL_STEP_EVENTS:
                 continue
 
-            def record(context: EventContext, event: Event = event) -> None:
+            def record(context: EventContext, event: Event = event) -> object:
                 records[event].append(context.copy())
+                if event == Event.STEP_EXECUTION_CONTEXT:
+                    return nullcontext()
+                if event == Event.CONFIGURE_TRAIN_STEP:
+                    return OptimizationStep()
+                if event == Event.BACKWARD:
+                    context["backward_loss"].backward()
+                elif event == Event.OPTIMIZER_STEP:
+                    optimizer = context["optimizer"]
+                    assert optimizer is not None
+                    optimizer.step()
+                return None
 
             handler = charge(event)(record)
             setattr(self, f"record_{event.value}", handler)
@@ -208,8 +255,8 @@ def test_all_documented_event_context_contracts() -> None:  # noqa: PLR0915
     prediction_result = battery.predict(loader, verbose=0)
 
     assert len(Event) == 39
-    assert set(EXPECTED_FIELDS) <= set(Event)
-    assert all(records[event] for event in EXPECTED_FIELDS)
+    assert set(EXPECTED_FIELDS) == set(Event)
+    assert all(records[event] for event in Event)
 
     for event, event_records in records.items():
         for context in event_records:

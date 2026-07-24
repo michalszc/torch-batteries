@@ -14,7 +14,7 @@ from torch_batteries.callbacks.base import Callback
 from torch_batteries.callbacks.gradient_accumulation import GradientAccumulation
 from torch_batteries.callbacks.gradient_clip import GradientClip
 from torch_batteries.callbacks.mixed_precision import MixedPrecision
-from torch_batteries.events import Event, EventContext, EventHandler
+from torch_batteries.events import Event, EventContext, EventHandler, OptimizationStep
 from torch_batteries.trainer.context import copy_history_context
 from torch_batteries.trainer.types import (
     PredictResult,
@@ -62,6 +62,7 @@ class Battery:
         "_mixed_precision",
         "_model",
         "_optimizer",
+        "_optimizer_step_idx",
         "_resume_loaded",
         "_stop_training",
         "_train_results",
@@ -120,6 +121,7 @@ class Battery:
         self._event_handler = EventHandler(self._model, callbacks=callback_list)
         self._stop_training = False
         self._last_completed_epoch = -1
+        self._optimizer_step_idx = 0
         self._resume_loaded = False
         self._train_results: TrainResult = {
             "train_loss": [],
@@ -127,6 +129,13 @@ class Battery:
             "train_metrics": {},
             "val_metrics": {},
         }
+        setup_context: EventContext = {
+            "battery": self,
+            "model": self._model,
+            "optimizer": self._optimizer,
+            "device": self._device,
+        }
+        self._event_handler.call(Event.SETUP, setup_context)
 
         logger.debug("Battery initialized on device: %s", self._device)
 
@@ -322,7 +331,7 @@ class Battery:
             ],
             "metrics": self._metric_manager.state_dict(),
             "epoch": self._last_completed_epoch,
-            "optimizer_step_idx": self._gradient_accumulation.optimizer_step_idx,
+            "optimizer_step_idx": self._optimizer_step_idx,
             "results": copy.deepcopy(self._train_results),
         }
         temporary_name: str | None = None
@@ -345,7 +354,7 @@ class Battery:
             "Training checkpoint saved: path=%s, epoch=%d, optimizer_step=%d",
             checkpoint_path,
             self._last_completed_epoch,
-            self._gradient_accumulation.optimizer_step_idx,
+            self._optimizer_step_idx,
         )
 
     @staticmethod
@@ -462,6 +471,7 @@ class Battery:
             raise TypeError(msg)
         self._metric_manager.load_state_dict(metrics_state)
         self._last_completed_epoch = int(payload["epoch"])
+        self._optimizer_step_idx = int(payload["optimizer_step_idx"])
         results = payload["results"]
         if not isinstance(results, dict):
             logger.error("Checkpoint training results are not a dictionary.")
@@ -512,6 +522,7 @@ class Battery:
         self._stop_training = False
         if not resumed:
             self._gradient_accumulation.reset()
+            self._optimizer_step_idx = 0
             self._last_completed_epoch = -1
             self._train_results = {
                 "train_loss": [],
@@ -658,6 +669,91 @@ class Battery:
 
         return results
 
+    def _configure_optimization_step(
+        self,
+        batch: Any,
+        batch_idx: int,
+        total_batches: int,
+        epoch: int,
+    ) -> tuple[OptimizationStep, EventContext]:
+        """Resolve the optimization plan and its shared batch context."""
+        context: EventContext = {
+            "battery": self,
+            "model": self._model,
+            "optimizer": self._optimizer,
+            "device": self._device,
+            "phase": "train",
+            "batch": batch,
+            "batch_idx": batch_idx,
+            "total_batches": total_batches,
+            "epoch": epoch,
+            "optimizer_step_idx": self._optimizer_step_idx,
+        }
+        legacy_plan = OptimizationStep(
+            zero_grad=self._gradient_accumulation.is_group_start(batch_idx),
+            optimizer_step=self._gradient_accumulation.is_group_end(
+                batch_idx, total_batches
+            ),
+            loss_divisor=self._gradient_accumulation.group_size(
+                batch_idx, total_batches
+            ),
+        )
+        plan = self._event_handler.provide(
+            Event.CONFIGURE_TRAIN_STEP,
+            context,
+            default=legacy_plan,
+        )
+        if not isinstance(plan, OptimizationStep):
+            logger.error(
+                "Train-step provider returned %s instead of OptimizationStep.",
+                type(plan).__name__,
+            )
+            msg = "CONFIGURE_TRAIN_STEP handler must return an OptimizationStep."
+            raise TypeError(msg)
+        context["optimization_plan"] = plan
+        context["optimizer_step"] = plan.optimizer_step
+        return plan, context
+
+    def _run_optimization(
+        self,
+        loss: torch.Tensor,
+        plan: OptimizationStep,
+        context: EventContext,
+    ) -> None:
+        """Run backward and an optional optimizer step through generic events."""
+        backward_context: EventContext = {
+            **context,
+            "loss_tensor": loss,
+            "backward_loss": loss / plan.loss_divisor,
+        }
+        self._event_handler.call(Event.BEFORE_BACKWARD, backward_context)
+        backward_loss = backward_context.get("backward_loss")
+        if not isinstance(backward_loss, torch.Tensor):
+            logger.error("BEFORE_BACKWARD produced a non-tensor backward loss.")
+            msg = "BEFORE_BACKWARD must leave backward_loss as a torch.Tensor."
+            raise TypeError(msg)
+        if not self._event_handler.execute(Event.BACKWARD, backward_context):
+            self._mixed_precision.backward(backward_loss)
+        self._event_handler.call(Event.AFTER_BACKWARD, backward_context)
+        if not plan.optimizer_step:
+            return
+
+        self._event_handler.call(Event.BEFORE_GRADIENT_CLIP, backward_context)
+        if self._gradient_clip is not None:
+            self._mixed_precision.unscale_(self._optimizer)  # type: ignore[arg-type]
+        clipping_handled = self._event_handler.execute(
+            Event.GRADIENT_CLIP, backward_context
+        )
+        if not clipping_handled and self._gradient_clip is not None:
+            self._gradient_clip.apply(self._model.parameters())
+        self._event_handler.call(Event.BEFORE_OPTIMIZER_STEP, backward_context)
+        if not self._event_handler.execute(Event.OPTIMIZER_STEP, backward_context):
+            self._mixed_precision.optimizer_step(self._optimizer)  # type: ignore[arg-type]
+        self._optimizer_step_idx += 1
+        self._gradient_accumulation.record_optimizer_step()
+        backward_context["optimizer_step_idx"] = self._optimizer_step_idx
+        self._event_handler.call(Event.AFTER_OPTIMIZER_STEP, backward_context)
+
     def _train_epoch(
         self, dataloader: DataLoader, progress: Progress, epoch: int
     ) -> dict[str, float]:
@@ -691,34 +787,32 @@ class Battery:
         for batch_idx, batch_data in enumerate(dataloader):
             batch = move_to_device(batch_data, self._device)
 
-            before_step_context: EventContext = {
-                "battery": self,
-                "model": self._model,
-                "optimizer": self._optimizer,
-                "batch": batch,
-                "batch_idx": batch_idx,
-                "epoch": epoch,
-            }
-            self._event_handler.call(Event.BEFORE_TRAIN_STEP, before_step_context)
+            optimization_plan, before_step_context = self._configure_optimization_step(
+                batch,
+                batch_idx,
+                total_batches,
+                epoch,
+            )
 
-            if self._gradient_accumulation.is_group_start(batch_idx):
+            if optimization_plan.zero_grad:
                 # Optimizer is guaranteed to be non-None by train() method
                 self._optimizer.zero_grad()  # type: ignore[union-attr]
                 logger.debug(
-                    "Gradient accumulation group started: epoch=%d, batch=%d",
+                    "Gradients cleared: epoch=%d, batch=%d",
                     epoch,
                     batch_idx,
                 )
+            self._event_handler.call(Event.BEFORE_TRAIN_STEP, before_step_context)
 
             step_context: EventContext = {
-                "battery": self,
-                "model": self._model,
-                "optimizer": self._optimizer,
-                "batch": batch,
-                "batch_idx": batch_idx,
-                "epoch": epoch,
+                **before_step_context,
             }
-            with self._mixed_precision.autocast():
+            with (
+                self._event_handler.execution_context(
+                    Event.STEP_EXECUTION_CONTEXT, step_context
+                ),
+                self._mixed_precision.autocast(),
+            ):
                 result = self._event_handler.call(Event.TRAIN_STEP, step_context)
 
             loss, step_metrics, predictions, targets = self._parse_step_result(
@@ -731,21 +825,8 @@ class Battery:
             )
             manual_metric_names.update(step_metrics)
 
-            group_size = self._gradient_accumulation.group_size(
-                batch_idx, total_batches
-            )
-            self._mixed_precision.backward(loss / group_size)
-            optimizer_step = self._gradient_accumulation.is_group_end(
-                batch_idx, total_batches
-            )
-            if optimizer_step:
-                if self._gradient_clip is not None:
-                    self._mixed_precision.unscale_(self._optimizer)  # type: ignore[arg-type]
-                    self._gradient_clip.apply(self._model.parameters())
-                self._mixed_precision.optimizer_step(self._optimizer)  # type: ignore[arg-type]
-                optimizer_step_idx = self._gradient_accumulation.record_optimizer_step()
-            else:
-                optimizer_step_idx = self._gradient_accumulation.optimizer_step_idx
+            self._run_optimization(loss, optimization_plan, before_step_context)
+            optimizer_step = optimization_plan.optimizer_step
 
             batch_metrics = {
                 "loss": loss.item(),
@@ -770,7 +851,8 @@ class Battery:
                 "train_loss": loss.item(),
                 "train_metrics": batch_metrics,
                 "optimizer_step": optimizer_step,
-                "optimizer_step_idx": optimizer_step_idx,
+                "optimizer_step_idx": self._optimizer_step_idx,
+                "optimization_plan": optimization_plan,
             }
             self._event_handler.call(Event.AFTER_TRAIN_STEP, after_step_context)
 
@@ -836,6 +918,9 @@ class Battery:
                 before_step_context: EventContext = {
                     "battery": self,
                     "model": self._model,
+                    "optimizer": self._optimizer,
+                    "device": self._device,
+                    "phase": "validation",
                     "batch": batch,
                     "batch_idx": batch_idx,
                     "epoch": epoch,
@@ -845,13 +930,14 @@ class Battery:
                 )
 
                 step_context: EventContext = {
-                    "battery": self,
-                    "model": self._model,
-                    "batch": batch,
-                    "batch_idx": batch_idx,
-                    "epoch": epoch,
+                    **before_step_context,
                 }
-                with self._mixed_precision.autocast():
+                with (
+                    self._event_handler.execution_context(
+                        Event.STEP_EXECUTION_CONTEXT, step_context
+                    ),
+                    self._mixed_precision.autocast(),
+                ):
                     result = self._event_handler.call(
                         Event.VALIDATION_STEP, step_context
                     )
@@ -1043,6 +1129,8 @@ class Battery:
             "battery": self,
             "model": self._model,
             "optimizer": self._optimizer,
+            "device": self._device,
+            "phase": "test",
             "batch": batch,
             "batch_idx": batch_idx,
             "epoch": 0,
@@ -1050,14 +1138,14 @@ class Battery:
         self._event_handler.call(Event.BEFORE_TEST_STEP, before_step_context)
 
         step_context: EventContext = {
-            "battery": self,
-            "model": self._model,
-            "optimizer": self._optimizer,
-            "batch": batch,
-            "batch_idx": batch_idx,
-            "epoch": 0,
+            **before_step_context,
         }
-        with self._mixed_precision.autocast():
+        with (
+            self._event_handler.execution_context(
+                Event.STEP_EXECUTION_CONTEXT, step_context
+            ),
+            self._mixed_precision.autocast(),
+        ):
             result = self._event_handler.call(Event.TEST_STEP, step_context)
 
         loss, step_metrics, predictions, targets = self._parse_step_result(
@@ -1325,6 +1413,8 @@ class Battery:
             "battery": self,
             "model": self._model,
             "optimizer": self._optimizer,
+            "device": self._device,
+            "phase": "predict",
             "batch": batch,
             "batch_idx": batch_idx,
             "epoch": 0,
@@ -1332,14 +1422,14 @@ class Battery:
         self._event_handler.call(Event.BEFORE_PREDICT_STEP, before_step_context)
 
         step_context: EventContext = {
-            "battery": self,
-            "model": self._model,
-            "optimizer": self._optimizer,
-            "batch": batch,
-            "batch_idx": batch_idx,
-            "epoch": 0,
+            **before_step_context,
         }
-        with self._mixed_precision.autocast():
+        with (
+            self._event_handler.execution_context(
+                Event.STEP_EXECUTION_CONTEXT, step_context
+            ),
+            self._mixed_precision.autocast(),
+        ):
             prediction = self._event_handler.call(Event.PREDICT_STEP, step_context)
         if move_to_cpu:
             prediction = move_to_device(
