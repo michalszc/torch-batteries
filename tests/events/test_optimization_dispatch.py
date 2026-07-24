@@ -212,3 +212,28 @@ def test_provider_uses_handler_or_default() -> None:
         )
         == OptimizationStep()
     )
+
+
+def test_provider_rejects_malformed_internal_registration() -> None:
+    """Provider dispatch defensively requires one list-based registration."""
+    handler = EventHandler(nn.Linear(1, 1))
+    handler._event_handlers[Event.CONFIGURE_TRAIN_STEP] = lambda: None  # noqa: SLF001
+
+    with pytest.raises(ValueError, match="requires one provider handler"):
+        handler.provide(
+            Event.CONFIGURE_TRAIN_STEP,
+            EventContext(),
+            default=OptimizationStep(),
+        )
+
+
+def test_executor_rejects_multiple_internal_registrations() -> None:
+    """Executor dispatch defensively rejects ambiguous registrations."""
+    handler = EventHandler(nn.Linear(1, 1))
+    handler._event_handlers[Event.BACKWARD] = [  # noqa: SLF001
+        lambda: None,
+        lambda: None,
+    ]
+
+    with pytest.raises(ValueError, match="requires one executor handler"):
+        handler.execute(Event.BACKWARD, EventContext())

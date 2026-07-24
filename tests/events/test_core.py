@@ -263,3 +263,26 @@ class TestEventHandler:
             "InvalidCallback",
             "train_step",
         )
+
+    def test_event_introspection_describes_model_and_callback_handlers(
+        self,
+    ) -> None:
+        """Introspection exposes registered events and concrete method names."""
+
+        class Callback:
+            @charge(Event.BEFORE_BACKWARD)
+            def before_backward(self, context: EventContext) -> None:
+                del context
+
+        handler = EventHandler(DummyModel(), callbacks=[Callback()])
+
+        assert set(handler.get_all_events()) == {
+            Event.TRAIN_STEP,
+            Event.VALIDATION_STEP,
+            Event.BEFORE_BACKWARD,
+        }
+        assert handler.get_handler_info() == {
+            Event.TRAIN_STEP: "training_step",
+            Event.VALIDATION_STEP: "validation_step",
+            Event.BEFORE_BACKWARD: ["before_backward"],
+        }
