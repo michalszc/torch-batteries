@@ -88,6 +88,27 @@ class TestModelCheckpoint:
         assert checkpoint.best_model_path is not None
         assert torch.load(checkpoint.best_model_path) is not None
 
+    def test_checkpoint_filename_uses_event_epoch(self, tmp_path: Path) -> None:
+        """The public one-based event epoch is preserved in the filename."""
+        checkpoint = ModelCheckpoint(
+            stage="val",
+            metric="accuracy",
+            save_dir=str(tmp_path),
+            save_path="{epoch}-{accuracy:.2f}",
+            save_weights_only=True,
+        )
+
+        checkpoint.run_on_validation_end(
+            {
+                "model": torch.nn.Linear(1, 1),
+                "val_metrics": {"accuracy": 0.97},
+                "epoch": 1,
+            }
+        )
+
+        assert checkpoint.best_model_path is not None
+        assert Path(checkpoint.best_model_path).name == "epoch=1-accuracy=0.97.pth"
+
     def test_save_best_model(self, tmp_path: object) -> None:
         """Test saving the best model."""
         checkpoint = ModelCheckpoint(
@@ -182,7 +203,7 @@ class TestModelCheckpoint:
         with patch(
             "torch_batteries.callbacks.model_checkpoint.logger.warning"
         ) as mock_warning:
-            for epoch, accuracy in enumerate((0.9722, 0.9823, 0.9797)):
+            for epoch, accuracy in enumerate((0.9722, 0.9823, 0.9797), start=1):
                 checkpoint.run_on_validation_end(
                     {
                         "model": model,
@@ -195,7 +216,7 @@ class TestModelCheckpoint:
         assert list(checkpoint.best_k_models.values()) == [0.9823]
         retained_path = Path(next(iter(checkpoint.best_k_models)))
         assert retained_path.exists()
-        assert retained_path.name == "epoch=1-accuracy=0.98.pth"
+        assert retained_path.name == "epoch=2-accuracy=0.98.pth"
         assert set(tmp_path.glob("*.pth")) == {retained_path}
 
     def test_replacement_is_saved_before_displaced_checkpoint_is_deleted(
@@ -216,7 +237,7 @@ class TestModelCheckpoint:
             {
                 "model": model,
                 "val_metrics": {"accuracy": 0.8},
-                "epoch": 0,
+                "epoch": 1,
             }
         )
         displaced_path = Path(next(iter(checkpoint.best_k_models)))
@@ -237,7 +258,7 @@ class TestModelCheckpoint:
                 {
                     "model": model,
                     "val_metrics": {"accuracy": 0.9},
-                    "epoch": 1,
+                    "epoch": 2,
                 }
             )
 
@@ -263,7 +284,7 @@ class TestModelCheckpoint:
             {
                 "model": model,
                 "val_metrics": {"accuracy": 0.8},
-                "epoch": 0,
+                "epoch": 1,
             }
         )
         retained_path = Path(next(iter(checkpoint.best_k_models)))
@@ -279,7 +300,7 @@ class TestModelCheckpoint:
                 {
                     "model": model,
                     "val_metrics": {"accuracy": 0.9},
-                    "epoch": 1,
+                    "epoch": 2,
                 }
             )
 
@@ -426,7 +447,7 @@ class TestModelCheckpoint:
         )
         model = torch.nn.Linear(1, 1)
 
-        for epoch, loss in enumerate((0.5, 0.3, 0.4)):
+        for epoch, loss in enumerate((0.5, 0.3, 0.4), start=1):
             checkpoint.run_on_validation_end(
                 {
                     "model": model,

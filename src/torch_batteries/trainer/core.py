@@ -541,11 +541,12 @@ class Battery:
             raise ValueError(msg)
 
         for epoch in range(start_epoch, stop_epoch):
+            event_epoch = self._event_epoch(epoch)
             if self._stop_training:
-                logger.info("Training stopped early at epoch %d.", epoch)
+                logger.info("Training stopped early at epoch %d.", event_epoch)
                 break
 
-            logger.debug("Training epoch started: epoch=%d", epoch)
+            logger.debug("Training epoch started: epoch=%d", event_epoch)
             progress.start_epoch(epoch)
 
             try:
@@ -567,19 +568,19 @@ class Battery:
                 "battery": self,
                 "model": self._model,
                 "optimizer": self._optimizer,
-                "epoch": epoch,
+                "epoch": event_epoch,
                 "train_metrics": train_metrics,
                 **copy_history_context(results),
             }
             self._event_handler.call(Event.AFTER_TRAIN_EPOCH, after_epoch_context)
 
             if val_loader:
-                logger.debug("Validation phase started: epoch=%d", epoch)
+                logger.debug("Validation phase started: epoch=%d", event_epoch)
                 before_val_context: EventContext = {
                     "battery": self,
                     "model": self._model,
                     "optimizer": self._optimizer,
-                    "epoch": epoch,
+                    "epoch": event_epoch,
                     "train_metrics": train_metrics,
                     **copy_history_context(results),
                 }
@@ -603,7 +604,7 @@ class Battery:
                     "battery": self,
                     "model": self._model,
                     "optimizer": self._optimizer,
-                    "epoch": epoch,
+                    "epoch": event_epoch,
                     "train_metrics": train_metrics,
                     "val_metrics": val_metrics,
                     **copy_history_context(results),
@@ -611,14 +612,14 @@ class Battery:
                 self._event_handler.call(Event.AFTER_VALIDATION, after_val_context)
                 logger.debug(
                     "Validation phase completed: epoch=%d, metrics=%s",
-                    epoch,
+                    event_epoch,
                     val_metrics,
                 )
 
             progress.end_epoch()
             logger.debug(
                 "Training epoch completed: epoch=%d, train_metrics=%s",
-                epoch,
+                event_epoch,
                 train_metrics,
             )
             last_epoch = epoch
@@ -629,7 +630,7 @@ class Battery:
             "battery": self,
             "model": self._model,
             "optimizer": self._optimizer,
-            "epoch": last_epoch,
+            "epoch": self._event_epoch(last_epoch),
             "train_metrics": train_metrics,
             **copy_history_context(results),
         }
@@ -683,6 +684,11 @@ class Battery:
         context["optimizer_step"] = plan.optimizer_step
         return plan, context
 
+    @staticmethod
+    def _event_epoch(epoch_index: int) -> int:
+        """Translate a private zero-based index into a public epoch number."""
+        return epoch_index + 1
+
     def _run_optimization(
         self,
         loss: torch.Tensor,
@@ -729,12 +735,14 @@ class Battery:
         Returns:
             Dictionary with average loss and any additional metrics for the epoch
         """
+        event_epoch = self._event_epoch(epoch)
+
         # Trigger BEFORE_TRAIN_EPOCH event
         epoch_context: EventContext = {
             "battery": self,
             "model": self._model,
             "optimizer": self._optimizer,
-            "epoch": epoch,
+            "epoch": event_epoch,
         }
         self._event_handler.call(Event.BEFORE_TRAIN_EPOCH, epoch_context)
 
@@ -743,7 +751,7 @@ class Battery:
         progress.start_phase(Phase.TRAIN, total_batches=len(dataloader))
         self._metric_manager.reset()
         manual_metric_names: set[str] = set()
-        logger.debug("Training phase started: epoch=%d", epoch)
+        logger.debug("Training phase started: epoch=%d", event_epoch)
 
         total_batches = len(dataloader)
         for batch_idx, batch_data in enumerate(dataloader):
@@ -753,7 +761,7 @@ class Battery:
                 batch,
                 batch_idx,
                 total_batches,
-                epoch,
+                event_epoch,
             )
 
             if optimization_plan.zero_grad:
@@ -761,7 +769,7 @@ class Battery:
                 self._optimizer.zero_grad()  # type: ignore[union-attr]
                 logger.debug(
                     "Gradients cleared: epoch=%d, batch=%d",
-                    epoch,
+                    event_epoch,
                     batch_idx,
                 )
             self._event_handler.call(Event.BEFORE_TRAIN_STEP, before_step_context)
@@ -794,7 +802,7 @@ class Battery:
             }
             logger.debug(
                 "Training step completed: epoch=%d, batch=%d, metrics=%s",
-                epoch,
+                event_epoch,
                 batch_idx,
                 batch_metrics,
             )
@@ -805,7 +813,7 @@ class Battery:
                 "optimizer": self._optimizer,
                 "batch": batch,
                 "batch_idx": batch_idx,
-                "epoch": epoch,
+                "epoch": event_epoch,
                 "loss": loss.item(),
                 "train_loss": loss.item(),
                 "train_metrics": batch_metrics,
@@ -830,7 +838,9 @@ class Battery:
             }
         )
         logger.debug(
-            "Training phase completed: epoch=%d, metrics=%s", epoch, train_metrics
+            "Training phase completed: epoch=%d, metrics=%s",
+            event_epoch,
+            train_metrics,
         )
         return train_metrics
 
@@ -854,11 +864,13 @@ class Battery:
             )
             raise ValueError(msg)
 
+        event_epoch = self._event_epoch(epoch)
+
         # Trigger BEFORE_VALIDATION_EPOCH event
         before_val_epoch_context: EventContext = {
             "battery": self,
             "model": self._model,
-            "epoch": epoch,
+            "epoch": event_epoch,
         }
         self._event_handler.call(
             Event.BEFORE_VALIDATION_EPOCH, before_val_epoch_context
@@ -882,7 +894,7 @@ class Battery:
                     "phase": "validation",
                     "batch": batch,
                     "batch_idx": batch_idx,
-                    "epoch": epoch,
+                    "epoch": event_epoch,
                 }
                 self._event_handler.call(
                     Event.BEFORE_VALIDATION_STEP, before_step_context
@@ -914,7 +926,7 @@ class Battery:
                 }
                 logger.debug(
                     "Validation step completed: epoch=%d, batch=%d, metrics=%s",
-                    epoch,
+                    event_epoch,
                     batch_idx,
                     batch_metrics,
                 )
@@ -924,7 +936,7 @@ class Battery:
                     "model": self._model,
                     "batch": batch,
                     "batch_idx": batch_idx,
-                    "epoch": epoch,
+                    "epoch": event_epoch,
                     "loss": loss.item(),
                     "val_loss": loss.item(),
                     "val_metrics": batch_metrics,
@@ -952,7 +964,7 @@ class Battery:
         after_val_epoch_context: EventContext = {
             "battery": self,
             "model": self._model,
-            "epoch": epoch,
+            "epoch": event_epoch,
             "val_metrics": val_metrics,
         }
         self._event_handler.call(Event.AFTER_VALIDATION_EPOCH, after_val_epoch_context)
@@ -994,7 +1006,7 @@ class Battery:
             "battery": self,
             "model": self._model,
             "optimizer": self._optimizer,
-            "epoch": 0,
+            "epoch": 1,
         }
         self._event_handler.call(Event.BEFORE_TEST_EPOCH, before_test_epoch_context)
 
@@ -1005,7 +1017,7 @@ class Battery:
         progress.start_phase(Phase.TEST, total_batches=len(test_loader))
         self._metric_manager.reset()
         manual_metric_names: set[str] = set()
-        logger.debug("Test phase started: epoch=0")
+        logger.debug("Test phase started: epoch=1")
 
         try:
             with torch.no_grad():
@@ -1042,7 +1054,7 @@ class Battery:
             "battery": self,
             "model": self._model,
             "optimizer": self._optimizer,
-            "epoch": 0,
+            "epoch": 1,
             "loss": test_loss,
             "test_loss": test_loss,
             "test_metrics": test_metrics_context,
@@ -1058,7 +1070,7 @@ class Battery:
             "test_metrics": test_metrics_context,
         }
         self._event_handler.call(Event.AFTER_TEST, after_test_context)
-        logger.debug("Test phase completed: epoch=0, metrics=%s", test_metrics_context)
+        logger.debug("Test phase completed: epoch=1, metrics=%s", test_metrics_context)
 
         results: TestResult = {"test_loss": test_metrics_context["loss"]}
         if len(test_metrics_context) > 1:
@@ -1089,7 +1101,7 @@ class Battery:
             "phase": "test",
             "batch": batch,
             "batch_idx": batch_idx,
-            "epoch": 0,
+            "epoch": 1,
         }
         self._event_handler.call(Event.BEFORE_TEST_STEP, before_step_context)
 
@@ -1116,7 +1128,7 @@ class Battery:
             **step_metrics,
         }
         logger.debug(
-            "Test step completed: epoch=0, batch=%d, metrics=%s",
+            "Test step completed: epoch=1, batch=%d, metrics=%s",
             batch_idx,
             batch_metrics,
         )
@@ -1127,7 +1139,7 @@ class Battery:
             "optimizer": self._optimizer,
             "batch": batch,
             "batch_idx": batch_idx,
-            "epoch": 0,
+            "epoch": 1,
             "loss": loss.item(),
             "test_loss": loss.item(),
             "test_metrics": batch_metrics,
@@ -1190,7 +1202,7 @@ class Battery:
             "battery": self,
             "model": self._model,
             "optimizer": self._optimizer,
-            "epoch": 0,
+            "epoch": 1,
         }
         self._event_handler.call(
             Event.BEFORE_PREDICT_EPOCH, before_predict_epoch_context
@@ -1202,7 +1214,7 @@ class Battery:
         progress = ProgressFactory.create(verbose=verbose, total_epochs=1)
         progress.start_epoch(0)
         progress.start_phase(Phase.PREDICT, total_batches=len(data_loader))
-        logger.debug("Prediction phase started: epoch=0")
+        logger.debug("Prediction phase started: epoch=1")
 
         try:
             with torch.no_grad():
@@ -1229,7 +1241,7 @@ class Battery:
             "battery": self,
             "model": self._model,
             "optimizer": self._optimizer,
-            "epoch": 0,
+            "epoch": 1,
             "predictions": prediction_output,
             "prediction_batches": len(predictions),
         }
@@ -1244,7 +1256,7 @@ class Battery:
         }
         self._event_handler.call(Event.AFTER_PREDICT, after_predict_context)
         logger.debug(
-            "Prediction phase completed: epoch=0, outputs=%d", len(predictions)
+            "Prediction phase completed: epoch=1, outputs=%d", len(predictions)
         )
         logger.info("Prediction completed: outputs=%d", len(predictions))
 
@@ -1309,7 +1321,7 @@ class Battery:
         self._event_handler.call(Event.BEFORE_PREDICT, before_context)
         self._event_handler.call(
             Event.BEFORE_PREDICT_EPOCH,
-            {**before_context, "epoch": 0},
+            {**before_context, "epoch": 1},
         )
         self._model.eval()
         progress = ProgressFactory.create(verbose=verbose, total_epochs=1)
@@ -1335,7 +1347,7 @@ class Battery:
                 "battery": self,
                 "model": self._model,
                 "optimizer": self._optimizer,
-                "epoch": 0,
+                "epoch": 1,
                 "prediction_batches": processed_batches,
             }
             self._event_handler.call(Event.AFTER_PREDICT_EPOCH, completion_context)
@@ -1370,7 +1382,7 @@ class Battery:
             "phase": "predict",
             "batch": batch,
             "batch_idx": batch_idx,
-            "epoch": 0,
+            "epoch": 1,
         }
         self._event_handler.call(Event.BEFORE_PREDICT_STEP, before_step_context)
 
@@ -1388,7 +1400,7 @@ class Battery:
                 detach=True,
             )
         logger.debug(
-            "Prediction step completed: epoch=0, batch=%d, output_type=%s",
+            "Prediction step completed: epoch=1, batch=%d, output_type=%s",
             batch_idx,
             type(prediction).__name__,
         )
@@ -1398,7 +1410,7 @@ class Battery:
             "optimizer": self._optimizer,
             "batch": batch,
             "batch_idx": batch_idx,
-            "epoch": 0,
+            "epoch": 1,
             "predictions": prediction,
         }
         self._event_handler.call(Event.AFTER_PREDICT_STEP, after_step_context)

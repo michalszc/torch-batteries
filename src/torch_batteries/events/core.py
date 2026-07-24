@@ -66,7 +66,9 @@ class EventContext(TypedDict, total=False):
     - `optimizer`: The optimizer when available.
     - `batch`: Current batch data, usually a tuple or list of tensors.
     - `batch_idx`: Current batch index within the active phase.
-    - `epoch`: Current epoch number.
+    - `epoch`: One-based public epoch number. Training and validation workflows
+      expose `1, 2, 3, ...`; single-pass test and prediction workflows expose
+      `1`. Battery keeps any zero-based loop index private.
     - `device`: Device selected by Battery.
     - `phase`: Active workflow phase: `train`, `validation`, `test`, or
       `predict`.
@@ -142,6 +144,8 @@ class Event(Enum):
 
     Events are triggered at different points during training/testing/prediction.
     Each event receives an `EventContext` with different available fields.
+    Whenever an event lists `epoch` in its context, the value follows the
+    one-based public convention documented by `EventContext`.
 
     ## Optimization Extension Events
 

@@ -266,7 +266,7 @@ def test_all_documented_event_context_contracts() -> None:  # noqa: PLR0915
             if "optimizer" in EXPECTED_FIELDS[event]:
                 assert context["optimizer"] is optimizer
             if "epoch" in EXPECTED_FIELDS[event]:
-                assert context["epoch"] == 0
+                assert context["epoch"] == 1
             if "batch_idx" in EXPECTED_FIELDS[event]:
                 assert context["batch_idx"] in {0, 1}
             if "batch" in EXPECTED_FIELDS[event]:

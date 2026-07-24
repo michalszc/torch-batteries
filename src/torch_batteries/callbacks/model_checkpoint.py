@@ -67,6 +67,8 @@ class ModelCheckpoint(Callback):
     Missing directories are created automatically. A `.pth` suffix is added only
     when `save_path` has no explicit suffix. Static templates gain an epoch field
     when `save_top_k` is greater than one to avoid overwriting retained weights.
+    The `{epoch}` filename field uses the one-based epoch number from the event
+    context, matching progress output.
 
     Examples:
         ```python

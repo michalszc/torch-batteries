@@ -431,6 +431,9 @@ class TestBattery:
         assert len(after_train["history_val_metrics"]["mae"]) == 2
         assert isinstance(after_train["train_metrics"]["mae"], float)
         assert isinstance(after_train["val_metrics"]["mae"], float)
+        assert [context["epoch"] for context in recorder.before_validation] == [1, 2]
+        assert [context["epoch"] for context in recorder.after_validation] == [1, 2]
+        assert after_train["epoch"] == 2
 
     def test_validation_event_context_includes_available_history(self) -> None:
         """Test validation boundary contexts expose history accumulated so far."""
