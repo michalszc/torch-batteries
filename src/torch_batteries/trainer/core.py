@@ -31,6 +31,8 @@ from torch_batteries.utils.progress.types import (  # noqa: TC001
 
 logger = get_logger("trainer")
 
+_CHECKPOINT_SCHEMA_VERSION = 1
+
 
 class Battery:
     """A flexible trainer class that uses decorated methods to define training behavior.
@@ -272,7 +274,7 @@ class Battery:
         checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
         callbacks = self._checkpoint_callbacks()
         payload: dict[str, Any] = {
-            "__torch_batteries_checkpoint__": 1,
+            "__torch_batteries_checkpoint__": _CHECKPOINT_SCHEMA_VERSION,
             "model": self._model.state_dict(),
             "optimizer": (
                 self._optimizer.state_dict() if self._optimizer is not None else None
@@ -322,6 +324,35 @@ class Battery:
         )
 
     @staticmethod
+    def _validate_checkpoint_schema(
+        payload: object, checkpoint_path: Path
+    ) -> dict[str, Any]:
+        """Validate and narrow a full-checkpoint payload."""
+        if not isinstance(payload, dict):
+            logger.error("Checkpoint at %s is not a mapping.", checkpoint_path)
+            msg = "Torch-batteries checkpoint structure must be a mapping."
+            raise TypeError(msg)
+
+        schema_version = payload.get("__torch_batteries_checkpoint__")
+        if schema_version is None:
+            logger.error("Unrecognized checkpoint structure at %s.", checkpoint_path)
+            msg = "Unrecognized torch-batteries checkpoint structure."
+            raise ValueError(msg)
+        if schema_version != _CHECKPOINT_SCHEMA_VERSION:
+            logger.error(
+                "Unsupported checkpoint schema %r at %s; schema %d is required.",
+                schema_version,
+                checkpoint_path,
+                _CHECKPOINT_SCHEMA_VERSION,
+            )
+            msg = (
+                f"Checkpoint schema {schema_version!r} is unsupported; "
+                f"schema {_CHECKPOINT_SCHEMA_VERSION} is required."
+            )
+            raise ValueError(msg)
+        return payload
+
+    @staticmethod
     def _move_optimizer_state(value: Any, device: torch.device) -> Any:
         if isinstance(value, torch.Tensor):
             return value.to(device)
@@ -360,14 +391,7 @@ class Battery:
             self._resume_loaded = False
             return
 
-        if (
-            not isinstance(payload, dict)
-            or payload.get("__torch_batteries_checkpoint__") != 1
-        ):
-            logger.error("Unrecognized checkpoint structure at %s.", checkpoint_path)
-            msg = "Unrecognized torch-batteries checkpoint structure."
-            raise ValueError(msg)
-
+        payload = self._validate_checkpoint_schema(payload, checkpoint_path)
         required = {
             "model",
             "optimizer",

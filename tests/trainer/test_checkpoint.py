@@ -124,6 +124,19 @@ def test_rejects_malformed_checkpoint(tmp_path: Path) -> None:
         battery.load_checkpoint(path)
 
 
+def test_rejects_unsupported_full_checkpoint_schema(tmp_path: Path) -> None:
+    source, _ = _battery()
+    path = tmp_path / "unsupported-schema.pth"
+    source.save_checkpoint(path)
+    payload = torch.load(path, weights_only=True)
+    payload["__torch_batteries_checkpoint__"] = 2
+    torch.save(payload, path)
+    target, _ = _battery()
+
+    with pytest.raises(ValueError, match="schema 2 is unsupported"):
+        target.load_checkpoint(path)
+
+
 def test_rejects_full_checkpoint_with_missing_fields(tmp_path: Path) -> None:
     source, _ = _battery()
     path = tmp_path / "source.pth"
