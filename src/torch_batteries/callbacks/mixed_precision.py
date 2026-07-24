@@ -6,6 +6,7 @@ from typing import Any, Literal
 import torch
 
 from torch_batteries.callbacks.base import Callback
+from torch_batteries.events import Event, EventContext, charge
 from torch_batteries.utils.logging import get_logger
 
 logger = get_logger("MixedPrecision")
@@ -104,6 +105,46 @@ class MixedPrecision(Callback):
         if self._scaler.is_enabled():
             self._scaler.unscale_(optimizer)
             logger.debug("Mixed precision gradients unscaled.")
+
+    @charge(Event.SETUP)
+    def on_setup(self, context: EventContext) -> None:
+        """Resolve precision using Battery's selected device."""
+        self.configure(context["device"])
+
+    @charge(Event.STEP_EXECUTION_CONTEXT)
+    def step_execution_context(
+        self, context: EventContext
+    ) -> AbstractContextManager[None]:
+        """Provide autocast for train, validation, test, and prediction steps."""
+        logger.debug(
+            "Providing mixed-precision context for phase %s.", context["phase"]
+        )
+        return self.autocast()
+
+    @charge(Event.BACKWARD)
+    def run_backward(self, context: EventContext) -> None:
+        """Execute scaled or ordinary backward through the event contract."""
+        self.backward(context["backward_loss"])
+
+    @charge(Event.BEFORE_GRADIENT_CLIP)
+    def prepare_gradients(self, context: EventContext) -> None:
+        """Unscale gradients before optional clipping."""
+        optimizer = context["optimizer"]
+        if optimizer is None:
+            logger.error("Mixed precision requires an optimizer before clipping.")
+            msg = "MixedPrecision requires an optimizer for gradient preparation."
+            raise ValueError(msg)
+        self.unscale_(optimizer)
+
+    @charge(Event.OPTIMIZER_STEP)
+    def run_optimizer_step(self, context: EventContext) -> None:
+        """Execute the scaler-aware optimizer step."""
+        optimizer = context["optimizer"]
+        if optimizer is None:
+            logger.error("Mixed precision requires an optimizer for optimizer step.")
+            msg = "MixedPrecision requires an optimizer for optimizer step."
+            raise ValueError(msg)
+        self.optimizer_step(optimizer)
 
     def state_dict(self) -> dict[str, Any]:
         """Return precision and scaler state."""

@@ -83,7 +83,7 @@ def test_rejects_duplicate_controls() -> None:
     model = _Model()
     optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
 
-    with pytest.raises(ValueError, match="Only one GradientAccumulation"):
+    with pytest.raises(ValueError, match="accepts exactly one handler"):
         Battery(
             model,
             optimizer=optimizer,

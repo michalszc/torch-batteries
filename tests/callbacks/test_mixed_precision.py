@@ -88,7 +88,7 @@ def test_full_precision_disables_autocast() -> None:
 def test_rejects_duplicate_mixed_precision_controls() -> None:
     model = _AutocastModel()
 
-    with pytest.raises(ValueError, match="Only one MixedPrecision"):
+    with pytest.raises(ValueError, match="accepts exactly one handler"):
         Battery(
             model,
             optimizer=torch.optim.SGD(model.parameters(), lr=0.1),
@@ -152,3 +152,14 @@ def test_fp16_control_scales_unscales_and_steps_on_cpu() -> None:
     control.optimizer_step(optimizer)
 
     assert control.scaler.is_enabled()
+
+
+def test_event_operations_require_optimizer() -> None:
+    control = MixedPrecision("32-true")
+    control.configure(torch.device("cpu"))
+    context = EventContext(optimizer=None)
+
+    with pytest.raises(ValueError, match="gradient preparation"):
+        control.prepare_gradients(context)
+    with pytest.raises(ValueError, match="optimizer step"):
+        control.run_optimizer_step(context)

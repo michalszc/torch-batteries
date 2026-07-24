@@ -72,7 +72,7 @@ def test_rejects_invalid_and_duplicate_configuration() -> None:
         GradientClip(1, "unsupported")  # type: ignore[arg-type]
 
     model = _GradientModel()
-    with pytest.raises(ValueError, match="Only one GradientClip"):
+    with pytest.raises(ValueError, match="accepts exactly one handler"):
         Battery(
             model,
             optimizer=torch.optim.SGD(model.parameters(), lr=0.1),

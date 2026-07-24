@@ -3,6 +3,7 @@
 from typing import Any
 
 from torch_batteries.callbacks.base import Callback
+from torch_batteries.events import Event, EventContext, OptimizationStep, charge
 from torch_batteries.utils.logging import get_logger
 
 logger = get_logger("GradientAccumulation")
@@ -62,6 +63,41 @@ class GradientAccumulation(Callback):
             self._optimizer_step_idx,
         )
         return self._optimizer_step_idx
+
+    @charge(Event.BEFORE_TRAIN)
+    def on_train_start(self, context: EventContext) -> None:
+        """Reset progress when training is not resuming from a checkpoint."""
+        if not context.get("resumed", False):
+            self.reset()
+
+    @charge(Event.CONFIGURE_TRAIN_STEP)
+    def configure_train_step(self, context: EventContext) -> OptimizationStep:
+        """Return zeroing, scaling, and step decisions for the current batch."""
+        batch_idx = context["batch_idx"]
+        total_batches = context["total_batches"]
+        plan = OptimizationStep(
+            zero_grad=self.is_group_start(batch_idx),
+            optimizer_step=self.is_group_end(batch_idx, total_batches),
+            loss_divisor=self.group_size(batch_idx, total_batches),
+        )
+        logger.debug(
+            "Gradient accumulation plan: batch=%d, zero_grad=%s, "
+            "optimizer_step=%s, loss_divisor=%d",
+            batch_idx,
+            plan.zero_grad,
+            plan.optimizer_step,
+            plan.loss_divisor,
+        )
+        return plan
+
+    @charge(Event.AFTER_OPTIMIZER_STEP)
+    def on_optimizer_step(self, context: EventContext) -> None:
+        """Synchronize callback state with Battery's completed-step counter."""
+        self._optimizer_step_idx = context["optimizer_step_idx"]
+        logger.debug(
+            "Gradient accumulation synchronized at optimizer step %d.",
+            self._optimizer_step_idx,
+        )
 
     def state_dict(self) -> dict[str, Any]:
         """Return resumable accumulation state."""

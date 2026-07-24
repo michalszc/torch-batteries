@@ -11,9 +11,6 @@ from torch import nn
 from torch.utils.data import DataLoader
 
 from torch_batteries.callbacks.base import Callback
-from torch_batteries.callbacks.gradient_accumulation import GradientAccumulation
-from torch_batteries.callbacks.gradient_clip import GradientClip
-from torch_batteries.callbacks.mixed_precision import MixedPrecision
 from torch_batteries.events import Event, EventContext, EventHandler, OptimizationStep
 from torch_batteries.trainer.context import copy_history_context
 from torch_batteries.trainer.types import (
@@ -54,12 +51,9 @@ class Battery:
         "_callbacks",
         "_device",
         "_event_handler",
-        "_gradient_accumulation",
-        "_gradient_clip",
         "_last_completed_epoch",
         "_metric_manager",
         "_metrics",
-        "_mixed_precision",
         "_model",
         "_optimizer",
         "_optimizer_step_idx",
@@ -83,41 +77,6 @@ class Battery:
         self._metric_manager = PhaseMetricManager(self._metrics)
         callback_list = list(callbacks or [])
         self._callbacks = callback_list
-        accumulation_controls = [
-            callback
-            for callback in callback_list
-            if isinstance(callback, GradientAccumulation)
-        ]
-        if len(accumulation_controls) > 1:
-            logger.error("Multiple GradientAccumulation callbacks were configured.")
-            msg = "Only one GradientAccumulation callback may be configured."
-            raise ValueError(msg)
-        self._gradient_accumulation = (
-            accumulation_controls[0]
-            if accumulation_controls
-            else GradientAccumulation(steps=1)
-        )
-        clipping_controls = [
-            callback for callback in callback_list if isinstance(callback, GradientClip)
-        ]
-        if len(clipping_controls) > 1:
-            logger.error("Multiple GradientClip callbacks were configured.")
-            msg = "Only one GradientClip callback may be configured."
-            raise ValueError(msg)
-        self._gradient_clip = clipping_controls[0] if clipping_controls else None
-        precision_controls = [
-            callback
-            for callback in callback_list
-            if isinstance(callback, MixedPrecision)
-        ]
-        if len(precision_controls) > 1:
-            logger.error("Multiple MixedPrecision callbacks were configured.")
-            msg = "Only one MixedPrecision callback may be configured."
-            raise ValueError(msg)
-        self._mixed_precision = (
-            precision_controls[0] if precision_controls else MixedPrecision("32-true")
-        )
-        self._mixed_precision.configure(self._device)
         self._event_handler = EventHandler(self._model, callbacks=callback_list)
         self._stop_training = False
         self._last_completed_epoch = -1
@@ -297,14 +256,10 @@ class Battery:
             raise ValueError(msg)
 
     def _checkpoint_callbacks(self) -> list[Callback]:
-        """Return stateful callbacks, including implicit training controls."""
-        callbacks = [
+        """Return configured callbacks participating in checkpoint state."""
+        return [
             callback for callback in self._callbacks if isinstance(callback, Callback)
         ]
-        for control in (self._gradient_accumulation, self._mixed_precision):
-            if control not in callbacks:
-                callbacks.append(control)
-        return callbacks
 
     @staticmethod
     def _callback_identifier(callback: Callback) -> str:
@@ -521,7 +476,6 @@ class Battery:
         resumed = self._resume_loaded
         self._stop_training = False
         if not resumed:
-            self._gradient_accumulation.reset()
             self._optimizer_step_idx = 0
             self._last_completed_epoch = -1
             self._train_results = {
@@ -689,19 +643,10 @@ class Battery:
             "epoch": epoch,
             "optimizer_step_idx": self._optimizer_step_idx,
         }
-        legacy_plan = OptimizationStep(
-            zero_grad=self._gradient_accumulation.is_group_start(batch_idx),
-            optimizer_step=self._gradient_accumulation.is_group_end(
-                batch_idx, total_batches
-            ),
-            loss_divisor=self._gradient_accumulation.group_size(
-                batch_idx, total_batches
-            ),
-        )
         plan = self._event_handler.provide(
             Event.CONFIGURE_TRAIN_STEP,
             context,
-            default=legacy_plan,
+            default=OptimizationStep(),
         )
         if not isinstance(plan, OptimizationStep):
             logger.error(
@@ -733,24 +678,17 @@ class Battery:
             msg = "BEFORE_BACKWARD must leave backward_loss as a torch.Tensor."
             raise TypeError(msg)
         if not self._event_handler.execute(Event.BACKWARD, backward_context):
-            self._mixed_precision.backward(backward_loss)
+            backward_loss.backward()
         self._event_handler.call(Event.AFTER_BACKWARD, backward_context)
         if not plan.optimizer_step:
             return
 
         self._event_handler.call(Event.BEFORE_GRADIENT_CLIP, backward_context)
-        if self._gradient_clip is not None:
-            self._mixed_precision.unscale_(self._optimizer)  # type: ignore[arg-type]
-        clipping_handled = self._event_handler.execute(
-            Event.GRADIENT_CLIP, backward_context
-        )
-        if not clipping_handled and self._gradient_clip is not None:
-            self._gradient_clip.apply(self._model.parameters())
+        self._event_handler.execute(Event.GRADIENT_CLIP, backward_context)
         self._event_handler.call(Event.BEFORE_OPTIMIZER_STEP, backward_context)
         if not self._event_handler.execute(Event.OPTIMIZER_STEP, backward_context):
-            self._mixed_precision.optimizer_step(self._optimizer)  # type: ignore[arg-type]
+            self._optimizer.step()  # type: ignore[union-attr]
         self._optimizer_step_idx += 1
-        self._gradient_accumulation.record_optimizer_step()
         backward_context["optimizer_step_idx"] = self._optimizer_step_idx
         self._event_handler.call(Event.AFTER_OPTIMIZER_STEP, backward_context)
 
@@ -807,11 +745,8 @@ class Battery:
             step_context: EventContext = {
                 **before_step_context,
             }
-            with (
-                self._event_handler.execution_context(
-                    Event.STEP_EXECUTION_CONTEXT, step_context
-                ),
-                self._mixed_precision.autocast(),
+            with self._event_handler.execution_context(
+                Event.STEP_EXECUTION_CONTEXT, step_context
             ):
                 result = self._event_handler.call(Event.TRAIN_STEP, step_context)
 
@@ -932,11 +867,8 @@ class Battery:
                 step_context: EventContext = {
                     **before_step_context,
                 }
-                with (
-                    self._event_handler.execution_context(
-                        Event.STEP_EXECUTION_CONTEXT, step_context
-                    ),
-                    self._mixed_precision.autocast(),
+                with self._event_handler.execution_context(
+                    Event.STEP_EXECUTION_CONTEXT, step_context
                 ):
                     result = self._event_handler.call(
                         Event.VALIDATION_STEP, step_context
@@ -1140,11 +1072,8 @@ class Battery:
         step_context: EventContext = {
             **before_step_context,
         }
-        with (
-            self._event_handler.execution_context(
-                Event.STEP_EXECUTION_CONTEXT, step_context
-            ),
-            self._mixed_precision.autocast(),
+        with self._event_handler.execution_context(
+            Event.STEP_EXECUTION_CONTEXT, step_context
         ):
             result = self._event_handler.call(Event.TEST_STEP, step_context)
 
@@ -1424,11 +1353,8 @@ class Battery:
         step_context: EventContext = {
             **before_step_context,
         }
-        with (
-            self._event_handler.execution_context(
-                Event.STEP_EXECUTION_CONTEXT, step_context
-            ),
-            self._mixed_precision.autocast(),
+        with self._event_handler.execution_context(
+            Event.STEP_EXECUTION_CONTEXT, step_context
         ):
             prediction = self._event_handler.call(Event.PREDICT_STEP, step_context)
         if move_to_cpu:

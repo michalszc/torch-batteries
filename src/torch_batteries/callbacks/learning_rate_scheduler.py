@@ -119,7 +119,7 @@ class LearningRateScheduler(Callback):
             self._learning_rates(),
         )
 
-    @charge(Event.AFTER_TRAIN_STEP)
+    @charge(Event.AFTER_OPTIMIZER_STEP)
     def on_train_step_end(self, context: EventContext) -> None:
         """Advance step schedulers after actual optimizer steps."""
         if (

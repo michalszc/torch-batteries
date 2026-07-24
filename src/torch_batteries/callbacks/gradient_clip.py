@@ -7,6 +7,7 @@ import torch
 from torch import nn
 
 from torch_batteries.callbacks.base import Callback
+from torch_batteries.events import Event, EventContext, charge
 from torch_batteries.utils.logging import get_logger
 
 logger = get_logger("GradientClip")
@@ -68,6 +69,11 @@ class GradientClip(Callback):
         torch.nn.utils.clip_grad_value_(parameter_list, self._value)
         logger.debug("Gradient value clipping applied: clip_value=%s", self._value)
         return None
+
+    @charge(Event.GRADIENT_CLIP)
+    def run_gradient_clip(self, context: EventContext) -> None:
+        """Clip gradients exposed by the optimization event context."""
+        self.apply(context["model"].parameters())
 
     def state_dict(self) -> dict[str, Any]:
         """Return clipping configuration for strict checkpoint validation."""
