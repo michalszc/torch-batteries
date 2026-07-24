@@ -49,7 +49,7 @@ class TestSimpleProgress:
         mock_time.side_effect = [0, 10, 15]
 
         progress = SimpleProgress(total_epochs=3)
-        progress.start_epoch(0)
+        progress.start_epoch(1)
         # Simulate train and validation phases
         progress.start_phase(Phase.TRAIN)
         progress.update({"loss": 0.4}, 32)
@@ -71,7 +71,7 @@ class TestSimpleProgress:
         mock_time.side_effect = [0, 10, 12]
 
         progress = SimpleProgress(total_epochs=2)
-        progress.start_epoch(1)
+        progress.start_epoch(2)
         # Simulate only train phase
         progress.start_phase(Phase.TRAIN)
         progress.update({"loss": 0.3}, 32)

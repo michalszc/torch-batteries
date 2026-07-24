@@ -31,7 +31,7 @@ class BarProgress(Progress):
             total_epochs: Total number of epochs.
         """
         self._total_epochs = total_epochs
-        self._current_epoch = 0
+        self._current_epoch = 1
         self._current_phase: Phase | None = None
         self._pbar: Any | None = None
         self._total_metrics: dict[str, float] = {}
@@ -55,8 +55,7 @@ class BarProgress(Progress):
 
         if total_batches > 0:
             phase_name = self._current_phase.value.capitalize()
-            epoch_num = self._current_epoch + 1
-            desc = f"Epoch {epoch_num}/{self._total_epochs} [{phase_name}]"
+            desc = f"Epoch {self._current_epoch}/{self._total_epochs} [{phase_name}]"
             self._pbar = tqdm(
                 total=total_batches,
                 desc=desc,

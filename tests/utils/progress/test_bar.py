@@ -26,7 +26,7 @@ class TestBarProgress:
         mock_tqdm.return_value = mock_pbar
 
         progress = BarProgress(total_epochs=1)
-        progress.start_epoch(0)
+        progress.start_epoch(1)
         progress.start_phase(Phase.TRAIN, total_batches=10)
 
         mock_tqdm.assert_called_once_with(

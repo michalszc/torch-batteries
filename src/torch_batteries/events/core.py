@@ -68,7 +68,7 @@ class EventContext(TypedDict, total=False):
     - `batch_idx`: Current batch index within the active phase.
     - `epoch`: One-based public epoch number. Training and validation workflows
       expose `1, 2, 3, ...`; single-pass test and prediction workflows expose
-      `1`. Battery keeps any zero-based loop index private.
+      `1`.
     - `device`: Device selected by Battery.
     - `phase`: Active workflow phase: `train`, `validation`, `test`, or
       `predict`.

@@ -55,6 +55,7 @@ def test_full_checkpoint_resumes_total_epochs(tmp_path: Path) -> None:
     initial = battery.train(_loader(), epochs=2, verbose=0)
     checkpoint = tmp_path / "training.pth"
     battery.save_checkpoint(checkpoint)
+    assert torch.load(checkpoint, weights_only=True)["epoch"] == 2
     restored, restored_scheduler = _battery()
 
     result = restored.train(
