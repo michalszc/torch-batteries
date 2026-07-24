@@ -490,7 +490,7 @@ class TestEarlyStopping:
 
         with torch.no_grad():
             model.weight.add_(2.0)
-        expected = model.weight.detach().clone()
+        expected = model.weight.detach().cpu().clone()
         callback.run_on_validation_end(
             {"model": model, "battery": battery, "val_metrics": {"loss": 0.5}}
         )
