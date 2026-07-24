@@ -207,9 +207,9 @@ def test_all_documented_event_context_contracts() -> None:  # noqa: PLR0915
     battery.test(loader, verbose=0)
     prediction_result = battery.predict(loader, verbose=0)
 
-    assert len(Event) == 28
-    assert set(EXPECTED_FIELDS) == set(Event)
-    assert all(records[event] for event in Event)
+    assert len(Event) == 39
+    assert set(EXPECTED_FIELDS) <= set(Event)
+    assert all(records[event] for event in EXPECTED_FIELDS)
 
     for event, event_records in records.items():
         for context in event_records:

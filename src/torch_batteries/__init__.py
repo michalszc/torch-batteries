@@ -46,7 +46,7 @@ __version__ = "0.8.0"
 __author__ = ["Michal Szczygiel", "Arkadiusz Paterak", "Antoni Zięciak"]
 
 # Import main components
-from .events import Event, EventContext, charge
+from .events import Event, EventContext, OptimizationStep, charge
 from .tracking import (
     Run,
 )
@@ -58,6 +58,7 @@ __all__ = [
     "CollectedMetric",
     "Event",
     "EventContext",
+    "OptimizationStep",
     "PredictResult",
     "Run",
     "StatefulMetric",

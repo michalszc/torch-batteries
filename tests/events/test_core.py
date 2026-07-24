@@ -2,9 +2,11 @@
 
 from unittest.mock import patch
 
+import pytest
 import torch
 from torch import nn
 
+from torch_batteries import OptimizationStep
 from torch_batteries.events import Event, EventContext, EventHandler, charge
 
 
@@ -70,6 +72,24 @@ class TestEventContext:
 
         assert context["train_loss"] == context["loss"]
         assert context["history_train_metrics"]["accuracy"] == [0.7, 0.8]
+
+
+class TestOptimizationStep:
+    """Tests for the public optimization plan."""
+
+    def test_defaults_describe_one_standard_optimizer_step(self) -> None:
+        plan = OptimizationStep()
+
+        assert plan.zero_grad
+        assert plan.optimizer_step
+        assert plan.loss_divisor == 1
+
+    @pytest.mark.parametrize("loss_divisor", [0, -1, 1.5, True])
+    def test_loss_divisor_must_be_a_positive_integer(
+        self, loss_divisor: object
+    ) -> None:
+        with pytest.raises(ValueError, match="positive integer"):
+            OptimizationStep(loss_divisor=loss_divisor)  # type: ignore[arg-type]
 
 
 class DummyModel(nn.Module):
