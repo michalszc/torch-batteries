@@ -1,5 +1,6 @@
 """Tests for torch_batteries.trainer module."""
 
+from collections.abc import Iterator
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -937,3 +938,106 @@ class TestBattery:
 
         assert isinstance(train_result["train_loss"][0], float)
         assert isinstance(test_result["test_loss"], float)
+
+    def test_metrics_property_can_be_reconfigured(self) -> None:
+        """Replacing metrics rebuilds the phase metric manager."""
+        battery = Battery(SimpleModel())
+        original_manager = battery._metric_manager  # noqa: SLF001
+
+        battery.metrics = {"mae": mae}
+
+        assert battery.metrics == {"mae": mae}
+        assert battery._metric_manager is not original_manager  # noqa: SLF001
+
+        battery.metrics = None
+        assert battery.metrics == {}
+
+    @pytest.mark.parametrize(
+        "result",
+        [
+            (torch.tensor(1.0),),
+            (torch.tensor(1.0), []),
+            (torch.tensor(1.0), {}, "extra"),
+        ],
+    )
+    def test_malformed_legacy_step_tuple_is_rejected(
+        self, result: tuple[object, ...]
+    ) -> None:
+        """Legacy tuple results must contain exactly loss and metric mapping."""
+        battery = Battery(SimpleModel())
+
+        with pytest.raises(TypeError, match="must be \\(loss, metrics_dict\\)"):
+            battery._parse_step_result(result, "training")  # noqa: SLF001
+
+    def test_unsized_loader_is_rejected(self) -> None:
+        """Workflow loaders must expose their number of batches."""
+
+        class UnsizedLoader:
+            def __iter__(self) -> Iterator[object]:
+                return iter(())
+
+        battery = Battery(SimpleModel())
+
+        with pytest.raises(ValueError, match="must define its number of batches"):
+            battery.test(UnsizedLoader())  # type: ignore[arg-type]
+
+    def test_before_backward_must_preserve_tensor_loss(self) -> None:
+        """Callbacks cannot replace the backward loss with a non-tensor."""
+
+        class InvalidBackwardLoss:
+            @charge(Event.BEFORE_BACKWARD)
+            def replace_loss(self, context: EventContext) -> None:
+                context["backward_loss"] = "invalid"  # type: ignore[typeddict-item]
+
+        model = SimpleModel()
+        battery = Battery(
+            model,
+            optimizer=optim.SGD(model.parameters(), lr=0.01),
+            callbacks=[InvalidBackwardLoss()],
+        )
+
+        with pytest.raises(
+            TypeError,
+            match=r"BEFORE_BACKWARD must leave backward_loss as a torch.Tensor",
+        ):
+            battery.train(self.create_simple_data_loader(), verbose=0)
+
+    def test_stop_request_breaks_before_the_next_epoch(self) -> None:
+        """A callback stop request prevents another epoch from starting."""
+
+        class StopAfterFirstEpoch:
+            @charge(Event.AFTER_TRAIN_EPOCH)
+            def stop(self, context: EventContext) -> None:
+                context["battery"].stop_training = True
+
+        model = SimpleModel()
+        battery = Battery(
+            model,
+            optimizer=optim.SGD(model.parameters(), lr=0.01),
+            callbacks=[StopAfterFirstEpoch()],
+        )
+
+        result = battery.train(self.create_simple_data_loader(), epochs=3, verbose=0)
+
+        assert len(result["train_loss"]) == 1
+        assert battery.stop_training is True
+
+    def test_validation_epoch_defensively_checks_for_handler(self) -> None:
+        """The epoch executor validates its handler independently."""
+
+        class ModelWithoutValidation(nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.linear = nn.Linear(10, 1)
+
+        battery = Battery(ModelWithoutValidation())
+
+        with pytest.raises(
+            ValueError,
+            match=r"No method decorated with @charge\(Event.VALIDATION_STEP\)",
+        ):
+            battery._validate_epoch(  # noqa: SLF001
+                self.create_simple_data_loader(),
+                SilentProgress(),
+                epoch=1,
+            )

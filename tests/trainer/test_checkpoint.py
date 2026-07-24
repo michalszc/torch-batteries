@@ -2,6 +2,7 @@
 
 from pathlib import Path
 from typing import cast
+from unittest.mock import patch
 
 import pytest
 import torch
@@ -282,3 +283,66 @@ def test_model_checkpoint_can_save_raw_weights(tmp_path: Path) -> None:
 
     payload = torch.load(tmp_path / "weights.pth", weights_only=True)
     assert set(payload) == set(model.state_dict())
+
+
+def test_failed_atomic_save_removes_temporary_file(tmp_path: Path) -> None:
+    """A failed checkpoint write leaves neither target nor temporary files."""
+    battery = Battery(_Model(), device="cpu")
+    checkpoint = tmp_path / "failed.pth"
+
+    with (
+        patch(
+            "torch_batteries.trainer.core.torch.save",
+            side_effect=OSError("disk unavailable"),
+        ),
+        pytest.raises(OSError, match="disk unavailable"),
+    ):
+        battery.save_checkpoint(checkpoint)
+
+    assert not checkpoint.exists()
+    assert list(tmp_path.glob(".failed.pth.*.tmp")) == []
+
+
+def test_rejects_non_mapping_checkpoint_payload(tmp_path: Path) -> None:
+    """A serialized object must be a recognized checkpoint mapping."""
+    checkpoint = tmp_path / "list.pth"
+    torch.save(["not", "a", "checkpoint"], checkpoint)
+    battery = Battery(_Model(), device="cpu")
+
+    with pytest.raises(TypeError, match="checkpoint structure must be a mapping"):
+        battery.load_checkpoint(checkpoint)
+
+
+def test_checkpoint_read_failure_is_propagated(tmp_path: Path) -> None:
+    """Checkpoint deserialization errors remain visible to callers."""
+    battery = Battery(_Model(), device="cpu")
+    checkpoint = tmp_path / "unreadable.pth"
+
+    with (
+        patch(
+            "torch_batteries.trainer.core.torch.load",
+            side_effect=OSError("cannot read checkpoint"),
+        ),
+        pytest.raises(OSError, match="cannot read checkpoint"),
+    ):
+        battery.load_checkpoint(checkpoint)
+
+
+def test_optimizer_state_movement_preserves_nested_containers() -> None:
+    """Nested optimizer data retains its dictionary, list, and tuple shapes."""
+    tensor = torch.tensor([1.0])
+    state = {
+        "list": [tensor],
+        "tuple": (tensor, {"value": tensor}),
+        "scalar": 3,
+    }
+
+    moved = Battery._move_optimizer_state(state, torch.device("cpu"))  # noqa: SLF001
+
+    assert isinstance(moved, dict)
+    assert isinstance(moved["list"], list)
+    assert isinstance(moved["tuple"], tuple)
+    assert torch.equal(moved["list"][0], tensor)
+    assert torch.equal(moved["tuple"][0], tensor)
+    assert torch.equal(moved["tuple"][1]["value"], tensor)
+    assert moved["scalar"] == 3
