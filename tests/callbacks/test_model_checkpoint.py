@@ -13,6 +13,18 @@ if TYPE_CHECKING:
     from torch_batteries.events import EventContext
 
 
+def valid_checkpoint_state() -> dict[str, object]:
+    """Return a minimal valid callback state for corruption tests."""
+    return {
+        "best_k_models": {"first.pth": 0.8, "second.pth": 0.9},
+        "best_model_path": "second.pth",
+        "kth_best_model_path": "first.pth",
+        "best_score": 0.9,
+        "kth_best_score": 0.8,
+        "save_weights_only": False,
+    }
+
+
 class TestModelCheckpoint:
     """Test cases for ModelCheckpoint callback."""
 
@@ -487,3 +499,121 @@ class TestModelCheckpoint:
             "accuracy",
             0.8,
         )
+
+    @pytest.mark.parametrize("mode", ["min", "max"])
+    def test_state_round_trip_restores_checkpoint_ranking(self, mode: str) -> None:
+        """Checkpoint ranking metadata survives callback serialization."""
+        state = valid_checkpoint_state()
+        if mode == "min":
+            state.update(
+                {
+                    "best_model_path": "first.pth",
+                    "best_score": 0.8,
+                    "kth_best_model_path": "second.pth",
+                    "kth_best_score": 0.9,
+                }
+            )
+        source = ModelCheckpoint(
+            stage="val",
+            metric="score",
+            mode=mode,  # type: ignore[arg-type]
+        )
+        source.load_state_dict(state)
+        restored = ModelCheckpoint(
+            stage="val",
+            metric="score",
+            mode=mode,  # type: ignore[arg-type]
+        )
+
+        restored.load_state_dict(source.state_dict())
+
+        assert restored.best_k_models == {
+            "first.pth": 0.8,
+            "second.pth": 0.9,
+        }
+        assert restored.best_model_path == state["best_model_path"]
+        assert restored.best_score == state["best_score"]
+
+    @pytest.mark.parametrize(
+        ("field", "value"),
+        [
+            ("best_k_models", []),
+            ("best_k_models", {"model.pth": "high"}),
+            ("best_model_path", 1),
+            ("kth_best_model_path", object()),
+            ("best_score", "high"),
+            ("kth_best_score", None),
+            ("save_weights_only", True),
+        ],
+    )
+    def test_invalid_state_is_rejected(self, field: str, value: object) -> None:
+        """Every serialized ranking field is validated before restoration."""
+        state = valid_checkpoint_state()
+        state[field] = value
+        checkpoint = ModelCheckpoint(stage="val", metric="score")
+
+        with pytest.raises(
+            ValueError, match="Invalid ModelCheckpoint checkpoint state"
+        ):
+            checkpoint.load_state_dict(state)
+
+    def test_missing_state_field_is_rejected(self) -> None:
+        """Incomplete callback state fails with the stable callback error."""
+        checkpoint = ModelCheckpoint(stage="val", metric="score")
+
+        with pytest.raises(
+            ValueError, match="Invalid ModelCheckpoint checkpoint state"
+        ):
+            checkpoint.load_state_dict({})
+
+    def test_stage_handlers_ignore_the_opposite_stage(self) -> None:
+        """A checkpoint callback only handles its configured phase."""
+        train_checkpoint = ModelCheckpoint(stage="train", metric="loss")
+        val_checkpoint = ModelCheckpoint(stage="val", metric="loss")
+
+        train_checkpoint.run_on_validation_end({})
+        val_checkpoint.run_on_train_epoch_end({})
+
+        assert train_checkpoint.best_model_path is None
+        assert val_checkpoint.best_model_path is None
+
+    def test_static_top_k_template_without_suffix_gets_unique_paths(
+        self, tmp_path: Path
+    ) -> None:
+        """A suffixless static template gains an epoch before `.pth`."""
+        checkpoint = ModelCheckpoint(
+            stage="val",
+            metric="accuracy",
+            save_dir=str(tmp_path),
+            save_path="best",
+            save_top_k=2,
+            save_weights_only=True,
+        )
+        model = torch.nn.Linear(1, 1)
+
+        for epoch, accuracy in enumerate((0.8, 0.9), start=1):
+            checkpoint.run_on_validation_end(
+                {
+                    "model": model,
+                    "val_metrics": {"accuracy": accuracy},
+                    "epoch": epoch,
+                }
+            )
+
+        assert {Path(path).name for path in checkpoint.best_k_models} == {
+            "best-epoch=1.pth",
+            "best-epoch=2.pth",
+        }
+
+    def test_checkpoint_name_supports_prefix_without_metric_labels(self) -> None:
+        """Internal filename formatting honors prefix and label controls."""
+        checkpoint = ModelCheckpoint(stage="val", metric="accuracy")
+
+        name = checkpoint._format_checkpoint_name(  # noqa: SLF001
+            "{epoch}-{accuracy:.2f}",
+            {"epoch": 2, "accuracy": 0.95},
+            prefix="best",
+            auto_insert_metric_name=False,
+        )
+
+        assert name == "best-2-0.95"

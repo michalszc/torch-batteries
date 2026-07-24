@@ -381,3 +381,119 @@ class TestEarlyStopping:
         assert mock_info.call_args_list[1].args == (
             "Restored best model weights from early stopping.",
         )
+
+    def test_state_round_trip_preserves_progress_and_weights(self) -> None:
+        """Serialized state can be restored into a fresh callback."""
+        model = torch.nn.Linear(1, 1)
+        battery = Battery(model=model)
+        source = EarlyStopping(stage="val", metric="loss", restore_best_weights=True)
+        source.run_on_validation_end(
+            {"model": model, "battery": battery, "val_metrics": {"loss": 0.5}}
+        )
+        source.run_on_validation_end(
+            {"model": model, "battery": battery, "val_metrics": {"loss": 0.6}}
+        )
+
+        restored = EarlyStopping(stage="val", metric="loss", restore_best_weights=True)
+        restored.load_state_dict(source.state_dict())
+
+        assert restored.best_score == 0.5
+        assert restored._epochs_no_improve == 1  # noqa: SLF001
+        assert restored.best_weights is not None
+        assert source.best_weights is not None
+        for name, value in source.best_weights.items():
+            assert torch.equal(restored.best_weights[name], value)
+
+    @pytest.mark.parametrize(
+        "state",
+        [
+            {},
+            {
+                "best_score": 1.0,
+                "epochs_no_improve": object(),
+                "best_weights": None,
+            },
+            {
+                "best_score": 1.0,
+                "epochs_no_improve": None,
+                "best_weights": None,
+            },
+        ],
+    )
+    def test_invalid_state_is_rejected(self, state: dict[str, object]) -> None:
+        """Malformed callback checkpoint data raises a stable public error."""
+        callback = EarlyStopping(stage="val", metric="loss")
+
+        with pytest.raises(ValueError, match="Invalid EarlyStopping checkpoint state"):
+            callback.load_state_dict(state)
+
+    def test_resumed_train_start_preserves_restored_state(self) -> None:
+        """A resume event does not reset state loaded from a checkpoint."""
+        callback = EarlyStopping(stage="val", metric="loss")
+        callback.load_state_dict(
+            {
+                "best_score": 0.25,
+                "epochs_no_improve": 3,
+                "best_weights": None,
+            }
+        )
+
+        callback.run_on_train_start({"resumed": True})
+
+        assert callback.best_score == 0.25
+        assert callback._epochs_no_improve == 3  # noqa: SLF001
+
+    def test_stage_handlers_ignore_the_opposite_stage(self) -> None:
+        """Only the configured phase can update early-stopping state."""
+        model = torch.nn.Linear(1, 1)
+        battery = Battery(model=model)
+        train_callback = EarlyStopping(stage="train", metric="loss")
+        val_callback = EarlyStopping(stage="val", metric="loss")
+
+        train_callback.run_on_validation_end({})
+        val_callback.run_on_epoch_end({})
+
+        assert train_callback.best_score is None
+        assert val_callback.best_score is None
+
+        train_callback.run_on_epoch_end(
+            {
+                "model": model,
+                "battery": battery,
+                "train_metrics": {"loss": 0.5},
+            }
+        )
+        assert train_callback.best_score == 0.5
+
+    def test_missing_monitored_metric_is_rejected(self) -> None:
+        """A configured metric must be present in the selected phase."""
+        model = torch.nn.Linear(1, 1)
+        callback = EarlyStopping(stage="val", metric="accuracy")
+
+        with pytest.raises(ValueError, match="Metric 'accuracy' not found"):
+            callback.run_on_validation_end(
+                {
+                    "model": model,
+                    "battery": Battery(model=model),
+                    "val_metrics": {"loss": 1.0},
+                }
+            )
+
+    def test_later_improvement_replaces_best_weight_snapshot(self) -> None:
+        """Best weights follow a later improvement rather than the baseline."""
+        model = torch.nn.Linear(1, 1)
+        battery = Battery(model=model)
+        callback = EarlyStopping(stage="val", metric="loss", restore_best_weights=True)
+        callback.run_on_validation_end(
+            {"model": model, "battery": battery, "val_metrics": {"loss": 1.0}}
+        )
+
+        with torch.no_grad():
+            model.weight.add_(2.0)
+        expected = model.weight.detach().clone()
+        callback.run_on_validation_end(
+            {"model": model, "battery": battery, "val_metrics": {"loss": 0.5}}
+        )
+
+        assert callback.best_weights is not None
+        assert torch.equal(callback.best_weights["weight"], expected)
