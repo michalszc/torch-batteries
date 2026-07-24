@@ -170,6 +170,7 @@ class ModelCheckpoint(Callback):
                 state_dict["save_weights_only"],
                 expected=self._save_weights_only,
             )
+            self._refresh_kth_best()
         except (KeyError, TypeError, ValueError) as error:
             logger.exception("Invalid model checkpoint state.")
             msg = "Invalid ModelCheckpoint checkpoint state."
@@ -192,8 +193,7 @@ class ModelCheckpoint(Callback):
         metrics = {**context["train_metrics"], "epoch": context["epoch"]}
 
         battery = context.get("battery")
-        if not self._save_best_model(battery, context["model"], metrics):
-            self._save_top_k_model(battery, context["model"], metrics)
+        self._save_top_k_model(battery, context["model"], metrics)
 
     @charge(Event.AFTER_VALIDATION)
     def run_on_validation_end(self, context: EventContext) -> None:
@@ -208,47 +208,7 @@ class ModelCheckpoint(Callback):
         metrics = {**context["val_metrics"], "epoch": context["epoch"]}
 
         battery = context.get("battery")
-        if not self._save_best_model(battery, context["model"], metrics):
-            self._save_top_k_model(battery, context["model"], metrics)
-
-    def _save_best_model(
-        self,
-        battery: Battery | None,
-        model: nn.Module,
-        metrics: dict[str, float],
-    ) -> bool:
-        """Save model if it achieves new best score.
-
-        Args:
-            model: The PyTorch model to save.
-            metrics: Dictionary of current metrics.
-
-        Returns:
-            True if model was saved as new best, False otherwise.
-        """
-        current_score = metrics.get(self._metric)
-        if current_score is None:
-            logger.warning(
-                "Checkpoint monitor metric '%s' is missing; checkpoint was skipped.",
-                self._metric,
-            )
-            return False
-
-        logger.debug(
-            "Checkpoint candidate: metric=%s, score=%s, best=%s, mode=%s",
-            self._metric,
-            current_score,
-            self._best_score,
-            self._mode,
-        )
-
-        if self._monitor_op(current_score, self._best_score):
-            self._best_score = current_score
-            self._best_model_path = self._save_model(
-                battery, model, metrics, current_score
-            )
-            return True
-        return False
+        self._save_top_k_model(battery, context["model"], metrics)
 
     def _save_top_k_model(
         self,
@@ -264,31 +224,37 @@ class ModelCheckpoint(Callback):
         """
         current_score = metrics.get(self._metric)
         if current_score is None:
+            logger.warning(
+                "Checkpoint monitor metric '%s' is missing; checkpoint was skipped.",
+                self._metric,
+            )
             return
 
-        if len(self._best_k_models) < self._save_top_k or self._monitor_op(
+        is_best = self._monitor_op(current_score, self._best_score)
+        qualifies = len(self._best_k_models) < self._save_top_k or self._monitor_op(
             current_score, self._kth_best_score
-        ):
-            self._save_model(battery, model, metrics, current_score)
-
-        if len(self._best_k_models) == self._save_top_k:
-            if self._mode == "min":
-                self._kth_best_model_path = max(
-                    self._best_k_models,
-                    key=self._best_k_models.get,  # type: ignore[arg-type]
-                )
-                self._kth_best_score = self._best_k_models[self._kth_best_model_path]
-            else:
-                self._kth_best_model_path = min(
-                    self._best_k_models,
-                    key=self._best_k_models.get,  # type: ignore[arg-type]
-                )
-                self._kth_best_score = self._best_k_models[self._kth_best_model_path]
+        )
         logger.debug(
-            "Checkpoint ranking updated: retained=%d, save_top_k=%d, kth_score=%s",
-            len(self._best_k_models),
-            self._save_top_k,
+            "Checkpoint candidate: metric=%s, score=%s, best=%s, kth=%s, qualifies=%s",
+            self._metric,
+            current_score,
+            self._best_score,
             self._kth_best_score,
+            qualifies,
+        )
+        if not qualifies:
+            logger.debug(
+                "Checkpoint candidate skipped because it is outside the top %d.",
+                self._save_top_k,
+            )
+            return
+
+        self._save_model(
+            battery,
+            model,
+            metrics,
+            current_score,
+            is_best=is_best,
         )
 
     def _save_model(
@@ -297,6 +263,8 @@ class ModelCheckpoint(Callback):
         model: nn.Module,
         metrics: dict[str, float],
         current_score: float,
+        *,
+        is_best: bool,
     ) -> str:
         """Save model to disk and update top-k tracking.
 
@@ -319,18 +287,41 @@ class ModelCheckpoint(Callback):
         path = Path(self._save_dir) / filename
         path.parent.mkdir(parents=True, exist_ok=True)
         filepath = str(path)
-        self._update_top_k_models(filepath, current_score)
-        if current_score == self._best_score:
+
+        previous_state = (
+            dict(self._best_k_models),
+            self._best_model_path,
+            self._kth_best_model_path,
+            self._best_score,
+            self._kth_best_score,
+        )
+        if is_best:
+            self._best_score = current_score
             self._best_model_path = filepath
-        if self._save_weights_only or battery is None:
-            if battery is None and not self._save_weights_only:
-                logger.warning(
-                    "ModelCheckpoint context has no Battery; "
-                    "falling back to raw weights."
-                )
-            torch.save(model.state_dict(), filepath)
-        else:
-            battery.save_checkpoint(filepath)
+        displaced_path = self._update_top_k_models(filepath, current_score)
+        try:
+            if self._save_weights_only or battery is None:
+                if battery is None and not self._save_weights_only:
+                    logger.warning(
+                        "ModelCheckpoint context has no Battery; "
+                        "falling back to raw weights."
+                    )
+                torch.save(model.state_dict(), filepath)
+            else:
+                battery.save_checkpoint(filepath)
+        except Exception:
+            (
+                self._best_k_models,
+                self._best_model_path,
+                self._kth_best_model_path,
+                self._best_score,
+                self._kth_best_score,
+            ) = previous_state
+            logger.exception("Failed to save model checkpoint at: %s", filepath)
+            raise
+
+        if displaced_path is not None:
+            self._delete_checkpoint_file(displaced_path)
         logger.info(
             "Saved model checkpoint at: %s with %s: %.2f",
             filepath,
@@ -358,21 +349,57 @@ class ModelCheckpoint(Callback):
             re.search(r"\.[A-Za-z][A-Za-z0-9]*$", filename)
         )
 
-    def _update_top_k_models(self, filepath: str, current_score: float) -> None:
-        """Update top-k models tracking and remove worst model if needed.
+    def _update_top_k_models(self, filepath: str, current_score: float) -> str | None:
+        """Update top-k tracking and return the checkpoint to remove.
 
         Args:
             filepath: Path to the newly saved model.
             current_score: The metric score of the saved model.
         """
         self._best_k_models[filepath] = current_score
-
+        displaced_path: str | None = None
         if len(self._best_k_models) > self._save_top_k:
             if self._mode == "min":
-                worst_model = max(self._best_k_models, key=self._best_k_models.get)  # type: ignore[arg-type]
+                displaced_path = max(
+                    self._best_k_models,
+                    key=self._best_k_models.get,  # type: ignore[arg-type]
+                )
             else:
-                worst_model = min(self._best_k_models, key=self._best_k_models.get)  # type: ignore[arg-type]
-            self._delete_saved_model(worst_model)
+                displaced_path = min(
+                    self._best_k_models,
+                    key=self._best_k_models.get,  # type: ignore[arg-type]
+                )
+            del self._best_k_models[displaced_path]
+
+        self._refresh_kth_best()
+        logger.debug(
+            "Checkpoint ranking updated: retained=%d, save_top_k=%d, kth_score=%s",
+            len(self._best_k_models),
+            self._save_top_k,
+            self._kth_best_score,
+        )
+        return displaced_path
+
+    def _refresh_kth_best(self) -> None:
+        """Synchronize the cached K-th checkpoint with retained models."""
+        if not self._best_k_models:
+            self._kth_best_model_path = None
+            self._kth_best_score = (
+                float("inf") if self._mode == "min" else float("-inf")
+            )
+            return
+
+        if self._mode == "min":
+            self._kth_best_model_path = max(
+                self._best_k_models,
+                key=self._best_k_models.get,  # type: ignore[arg-type]
+            )
+        else:
+            self._kth_best_model_path = min(
+                self._best_k_models,
+                key=self._best_k_models.get,  # type: ignore[arg-type]
+            )
+        self._kth_best_score = self._best_k_models[self._kth_best_model_path]
 
     def _format_checkpoint_name(
         self,
@@ -424,6 +451,12 @@ class ModelCheckpoint(Callback):
             filepath: Path to the model file to delete.
         """
         del self._best_k_models[filepath]
+        self._refresh_kth_best()
+        self._delete_checkpoint_file(filepath)
+
+    @staticmethod
+    def _delete_checkpoint_file(filepath: str) -> None:
+        """Delete a checkpoint file after its replacement is safely written."""
         path = Path(filepath)
         if path.exists():
             path.unlink()

@@ -164,6 +164,130 @@ class TestModelCheckpoint:
 
         assert all(score >= 0.85 for score in checkpoint.best_k_models.values())
 
+    def test_top_one_skips_worse_checkpoint_without_cleanup_warning(
+        self, tmp_path: Path
+    ) -> None:
+        """A non-best candidate is neither saved nor passed to cleanup."""
+        checkpoint = ModelCheckpoint(
+            stage="val",
+            metric="accuracy",
+            mode="max",
+            save_dir=str(tmp_path),
+            save_path="{epoch}-{accuracy:.2f}",
+            save_top_k=1,
+            save_weights_only=True,
+        )
+        model = torch.nn.Linear(1, 1)
+
+        with patch(
+            "torch_batteries.callbacks.model_checkpoint.logger.warning"
+        ) as mock_warning:
+            for epoch, accuracy in enumerate((0.9722, 0.9823, 0.9797)):
+                checkpoint.run_on_validation_end(
+                    {
+                        "model": model,
+                        "val_metrics": {"accuracy": accuracy},
+                        "epoch": epoch,
+                    }
+                )
+
+        assert mock_warning.call_count == 0
+        assert list(checkpoint.best_k_models.values()) == [0.9823]
+        retained_path = Path(next(iter(checkpoint.best_k_models)))
+        assert retained_path.exists()
+        assert retained_path.name == "epoch=1-accuracy=0.98.pth"
+        assert set(tmp_path.glob("*.pth")) == {retained_path}
+
+    def test_replacement_is_saved_before_displaced_checkpoint_is_deleted(
+        self, tmp_path: Path
+    ) -> None:
+        """Cleanup starts only after the accepted replacement exists."""
+        checkpoint = ModelCheckpoint(
+            stage="val",
+            metric="accuracy",
+            mode="max",
+            save_dir=str(tmp_path),
+            save_path="{epoch}-{accuracy:.2f}",
+            save_top_k=1,
+            save_weights_only=True,
+        )
+        model = torch.nn.Linear(1, 1)
+        checkpoint.run_on_validation_end(
+            {
+                "model": model,
+                "val_metrics": {"accuracy": 0.8},
+                "epoch": 0,
+            }
+        )
+        displaced_path = Path(next(iter(checkpoint.best_k_models)))
+
+        original_delete = checkpoint._delete_checkpoint_file  # noqa: SLF001
+
+        def assert_replacement_exists(filepath: str) -> None:
+            assert filepath == str(displaced_path)
+            assert len(list(tmp_path.glob("*.pth"))) == 2
+            original_delete(filepath)
+
+        with patch.object(
+            checkpoint,
+            "_delete_checkpoint_file",
+            side_effect=assert_replacement_exists,
+        ):
+            checkpoint.run_on_validation_end(
+                {
+                    "model": model,
+                    "val_metrics": {"accuracy": 0.9},
+                    "epoch": 1,
+                }
+            )
+
+        retained_path = Path(next(iter(checkpoint.best_k_models)))
+        assert retained_path.exists()
+        assert not displaced_path.exists()
+
+    def test_failed_replacement_restores_checkpoint_ranking(
+        self, tmp_path: Path
+    ) -> None:
+        """A failed write leaves the previously retained checkpoint authoritative."""
+        checkpoint = ModelCheckpoint(
+            stage="val",
+            metric="accuracy",
+            mode="max",
+            save_dir=str(tmp_path),
+            save_path="{epoch}-{accuracy:.2f}",
+            save_top_k=1,
+            save_weights_only=True,
+        )
+        model = torch.nn.Linear(1, 1)
+        checkpoint.run_on_validation_end(
+            {
+                "model": model,
+                "val_metrics": {"accuracy": 0.8},
+                "epoch": 0,
+            }
+        )
+        retained_path = Path(next(iter(checkpoint.best_k_models)))
+
+        with (
+            patch(
+                "torch_batteries.callbacks.model_checkpoint.torch.save",
+                side_effect=OSError("disk unavailable"),
+            ),
+            pytest.raises(OSError, match="disk unavailable"),
+        ):
+            checkpoint.run_on_validation_end(
+                {
+                    "model": model,
+                    "val_metrics": {"accuracy": 0.9},
+                    "epoch": 1,
+                }
+            )
+
+        assert checkpoint.best_model_path == str(retained_path)
+        assert checkpoint.best_score == 0.8
+        assert checkpoint.best_k_models == {str(retained_path): 0.8}
+        assert retained_path.exists()
+
     def test_callback_does_not_mutate_context_metrics(self, tmp_path: Path) -> None:
         """Adding filename fields does not leak into shared event metrics."""
         checkpoint = ModelCheckpoint(
