@@ -1,10 +1,13 @@
 """Unit tests for WandbTracker."""
 
 import sys
+from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
+import torch
+from torch import nn
 
 from torch_batteries.tracking import WandbTracker
 from torch_batteries.tracking.types import Run
@@ -43,6 +46,15 @@ class TestWandbTracker:
         assert tracker.project == "test-project"
         assert tracker.entity == "test-entity"
         assert not tracker.is_initialized
+
+    def test_run_property_tracks_initialized_run(self, mock_wandb: MagicMock) -> None:
+        """The concrete W&B run is exposed after initialization."""
+        tracker = WandbTracker(project="test-project")
+        assert tracker.run is None
+
+        tracker.init(run=Run())
+
+        assert tracker.run is mock_wandb.init.return_value
 
     def test_init_run_basic(self, mock_wandb: MagicMock) -> None:
         """Test initializing a wandb run with basic configuration."""
@@ -277,3 +289,70 @@ class TestWandbTracker:
         assert tracker.is_initialized
         args = mock_wandb.init.call_args[1]
         assert args["config"] == {}
+
+    def test_log_model_requires_initialized_run(self) -> None:
+        """Model artifacts cannot be logged before initialization."""
+        tracker = WandbTracker(project="test-project")
+
+        with pytest.raises(RuntimeError, match="not initialized"):
+            tracker.log_model(nn.Linear(1, 1))
+
+    def test_log_model_serializes_state_and_custom_metadata(
+        self, mock_wandb: MagicMock
+    ) -> None:
+        """Artifact logging records model state, aliases, and merged metadata."""
+        tracker = WandbTracker(project="test-project")
+        tracker.init(run=Run())
+        model = nn.Linear(2, 1)
+        artifact = MagicMock()
+        captured: dict[str, Any] = {}
+
+        def inspect_artifact_file(path: str, name: str) -> None:
+            artifact_path = Path(path)
+            assert artifact_path.exists()
+            captured["path"] = artifact_path
+            captured["name"] = name
+            captured["payload"] = torch.load(artifact_path, weights_only=True)
+
+        artifact.add_file.side_effect = inspect_artifact_file
+        mock_wandb.Artifact.return_value = artifact
+
+        tracker.log_model(
+            model,
+            name="classifier",
+            aliases=["best", "production"],
+            metadata={"epoch": 4, "torch_version": "overridden"},
+        )
+
+        mock_wandb.Artifact.assert_called_once_with(
+            name="classifier-test-run-123",
+            type="model",
+            metadata={"torch_version": "overridden", "epoch": 4},
+        )
+        artifact.add_file.assert_called_once()
+        assert captured["name"] == "classifier.pt"
+        payload = captured["payload"]
+        assert isinstance(payload, dict)
+        assert payload["state_dict"].keys() == model.state_dict().keys()
+        for key, value in model.state_dict().items():
+            assert torch.equal(payload["state_dict"][key], value)
+        mock_wandb.init.return_value.log_artifact.assert_called_once_with(
+            artifact,
+            aliases=["best", "production"],
+        )
+        assert not captured["path"].exists()
+
+    def test_log_model_uses_latest_alias_by_default(
+        self, mock_wandb: MagicMock
+    ) -> None:
+        """Model artifacts receive the standard latest alias by default."""
+        tracker = WandbTracker(project="test-project")
+        tracker.init(run=Run())
+
+        tracker.log_model(nn.Linear(1, 1))
+
+        artifact = mock_wandb.Artifact.return_value
+        mock_wandb.init.return_value.log_artifact.assert_called_once_with(
+            artifact,
+            aliases=["latest"],
+        )
