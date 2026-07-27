@@ -34,6 +34,7 @@ dependencies = [
 [project.optional-dependencies]
 example = [
     "diffusers>=0.39.0",
+    "gymnasium[classic-control]>=1.2.0,<2.0.0",
     "ipykernel>=7.1.0",
     "ipywidgets>=8.1.7",
     "matplotlib>=3.10.7",
@@ -48,6 +49,7 @@ wandb = [
 ]
 all = [
     "diffusers>=0.39.0",
+    "gymnasium[classic-control]>=1.2.0,<2.0.0",
     "ipykernel>=7.1.0",
     "ipywidgets>=8.1.7",
     "matplotlib>=3.10.7",
