@@ -124,7 +124,7 @@ class PhaseMetricManager:
                 try:
                     metric.reset()
                     logger.debug("Stateful metric '%s' reset.", name)
-                except Exception:  # noqa: BLE001
+                except Exception:
                     self._failed.add(name)
                     logger.warning(
                         "Failed to reset metric '%s'; skipping this phase.",
@@ -163,7 +163,7 @@ class PhaseMetricManager:
                     batch_values[name] = _metric_float(
                         name, metric(metric_predictions, metric_targets)
                     )
-            except Exception:  # noqa: BLE001
+            except Exception:
                 self._failed.add(name)
                 logger.warning(
                     "Failed to update metric '%s'; skipping this phase.",
@@ -194,7 +194,7 @@ class PhaseMetricManager:
                     value = metric.compute()
                 results[name] = _metric_float(name, value)
                 logger.debug("Full-phase metric '%s' computed: %s", name, results[name])
-            except Exception:  # noqa: BLE001
+            except Exception:
                 logger.warning(
                     "Failed to compute metric '%s'; skipping this phase.",
                     name,
@@ -297,7 +297,7 @@ def calculate_metrics(
                 calculated_metrics[metric_name],
             )
 
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             logger.warning(
                 "Failed to calculate metric '%s': %s. Skipping this metric.",
                 metric_name,

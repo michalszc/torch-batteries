@@ -89,8 +89,8 @@ class ModelCheckpoint(Callback):
         mode: Literal["min", "max"] = "max",
         save_dir: str = ".",
         save_path: str | None = None,
-        save_top_k: int = 1,
         *,
+        save_top_k: int = 1,
         save_weights_only: bool = False,
     ) -> None:
         if stage not in {"train", "val"}:
