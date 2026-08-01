@@ -91,7 +91,7 @@ class GradientAccumulation(Callback):
         return plan
 
     @charge(Event.AFTER_OPTIMIZER_STEP)
-    def on_optimizer_step(self, context: EventContext) -> None:
+    def on_optimizer_step_end(self, context: EventContext) -> None:
         """Synchronize callback state with Battery's completed-step counter."""
         self._optimizer_step_idx = context["optimizer_step_idx"]
         logger.debug(
