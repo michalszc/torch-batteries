@@ -2,6 +2,7 @@
 
 from typing import Any
 
+import pytest
 from torch import nn
 
 from torch_batteries import EventContext
@@ -19,6 +20,7 @@ class FakeTracker(ExperimentTracker):
         self.logged_metrics: list[dict[str, Any]] = []
         self.config_updates: list[dict[str, Any]] = []
         self.summary_data: dict[str, Any] = {}
+        self.logged_models: list[dict[str, Any]] = []
         self.run: Run | None = None
         self.finished = False
         self.exit_code: int | None = None
@@ -66,7 +68,15 @@ class FakeTracker(ExperimentTracker):
         aliases: list[str] | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> None:
-        """Log a model (no-op for fake tracker)."""
+        """Record a model artifact request."""
+        self.logged_models.append(
+            {
+                "model": model,
+                "name": name,
+                "aliases": aliases,
+                "metadata": metadata,
+            }
+        )
 
 
 class TestExperimentTrackingCallback:
@@ -385,3 +395,86 @@ class TestExperimentTrackingCallback:
         # Verify step numbers in logged metrics
         steps = [m["step"] for m in tracker.logged_metrics]
         assert steps == [1, 2, 3, 4, 5, 6]
+
+    def test_state_round_trip_restores_progress_counters(self) -> None:
+        """Epoch and global-step counters survive callback checkpointing."""
+        source = ExperimentTrackingCallback(tracker=FakeTracker())
+        source._current_epoch = 4  # noqa: SLF001
+        source._global_step = 27  # noqa: SLF001
+        restored = ExperimentTrackingCallback(tracker=FakeTracker())
+
+        restored.load_state_dict(source.state_dict())
+
+        assert restored.current_epoch == 4
+        assert restored.global_step == 27
+
+    @pytest.mark.parametrize(
+        "state",
+        [
+            {},
+            {"current_epoch": object(), "global_step": 1},
+            {"current_epoch": 1, "global_step": None},
+        ],
+    )
+    def test_invalid_state_is_rejected(self, state: dict[str, object]) -> None:
+        """Malformed tracking counters fail with the callback-level error."""
+        callback = ExperimentTrackingCallback(tracker=FakeTracker())
+
+        with pytest.raises(
+            ValueError,
+            match="Invalid ExperimentTrackingCallback checkpoint state",
+        ):
+            callback.load_state_dict(state)
+
+    def test_train_end_logs_complete_history_and_model_metadata(self) -> None:
+        """Training completion prefers histories and records the model artifact."""
+        tracker = FakeTracker()
+        callback = ExperimentTrackingCallback(tracker=tracker)
+        callback.on_train_start(EventContext())
+        callback._current_epoch = 3  # noqa: SLF001
+        callback._global_step = 12  # noqa: SLF001
+        model = nn.Linear(1, 1)
+        context = EventContext(
+            history_train_metrics={"accuracy": [0.8]},
+            train_metrics={"accuracy": 0.7},
+            history_train_loss=[1.0, 0.5],
+            history_val_metrics={"accuracy": [0.75]},
+            val_metrics={"accuracy": 0.6},
+            history_val_loss=[1.2, 0.7],
+            model=model,
+        )
+
+        callback.on_train_end(context)
+
+        assert tracker.summary_data == {
+            "total_epochs": 3,
+            "total_steps": 12,
+            "train_metrics": {"accuracy": [0.8]},
+            "train_loss": [1.0, 0.5],
+            "val_metrics": {"accuracy": [0.75]},
+            "val_loss": [1.2, 0.7],
+        }
+        assert tracker.logged_models == [
+            {
+                "model": model,
+                "name": "model",
+                "aliases": None,
+                "metadata": {"epoch": 3, "global_step": 12},
+            }
+        ]
+
+    def test_train_end_falls_back_to_final_metrics(self) -> None:
+        """Final metrics are summarized when no history is available."""
+        tracker = FakeTracker()
+        callback = ExperimentTrackingCallback(tracker=tracker)
+        callback.on_train_start(EventContext())
+
+        callback.on_train_end(
+            EventContext(
+                train_metrics={"loss": 0.4},
+                val_metrics={"loss": 0.3},
+            )
+        )
+
+        assert tracker.summary_data["train_metrics"] == {"loss": 0.4}
+        assert tracker.summary_data["val_metrics"] == {"loss": 0.3}

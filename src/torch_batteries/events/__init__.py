@@ -7,7 +7,7 @@ Provides event system for training workflow control:
 - **EventHandler**: Internal handler for discovering and executing event methods
 """
 
-from .core import Event, EventContext, charge
+from .core import Event, EventContext, OptimizationStep, charge
 from .handler import EventHandler
 
-__all__ = ["Event", "EventContext", "EventHandler", "charge"]
+__all__ = ["Event", "EventContext", "EventHandler", "OptimizationStep", "charge"]

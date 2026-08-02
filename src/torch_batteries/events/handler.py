@@ -1,7 +1,8 @@
 """Event handler for managing decorated methods."""
 
-from collections.abc import Callable
-from typing import Any, ClassVar
+from collections.abc import Callable, Generator
+from contextlib import AbstractContextManager, ExitStack, contextmanager
+from typing import Any, ClassVar, cast
 
 from torch import nn
 
@@ -35,10 +36,17 @@ class EventHandler:
         Event.TEST_STEP,
         Event.PREDICT_STEP,
     ]
+    EXCLUSIVE_EVENTS: ClassVar[set[Event]] = {
+        Event.CONFIGURE_TRAIN_STEP,
+        Event.BACKWARD,
+        Event.GRADIENT_CLIP,
+        Event.OPTIMIZER_STEP,
+    }
 
     def __init__(self, model: nn.Module, callbacks: list | None = None):
         self.model = model
         self._event_handlers: dict[Event, list[Callable] | Callable] = {}
+        self._handler_labels: dict[Event, list[str]] = {}
         self._callbacks = callbacks
         self._discover_event_handlers()
 
@@ -46,6 +54,24 @@ class EventHandler:
         """Discover methods decorated with @charge."""
         self._discover_model_event_handlers()
         self._discover_callback_event_handlers()
+        self._validate_exclusive_handlers()
+
+    def _append_handler(
+        self,
+        event: Event,
+        handler: Callable,
+        label: str,
+    ) -> None:
+        """Append an ordered model or callback handler."""
+        existing = self._event_handlers.setdefault(event, [])
+        if not isinstance(existing, list):
+            logger.error(
+                "Cannot append handler to model-specific event %s.", event.value
+            )
+            msg = f"Cannot register multiple handlers for event '{event.value}'."
+            raise TypeError(msg)
+        existing.append(handler)
+        self._handler_labels.setdefault(event, []).append(label)
 
     def _discover_model_event_handlers(self) -> None:
         """Discover model-specific methods decorated with @charge."""
@@ -58,10 +84,7 @@ class EventHandler:
                 if event in self.MODEL_SPECIFIC_CALLBACKS:
                     self._event_handlers[event] = method
                 else:
-                    if event not in self._event_handlers:
-                        self._event_handlers[event] = []
-                    if isinstance(self._event_handlers[event], list):
-                        self._event_handlers[event].append(method)  # type: ignore[union-attr]
+                    self._append_handler(event, method, f"model.{name}")
                 discovered_count += 1
                 logger.debug(
                     "Discovered handler '%s' for event '%s'", name, event.value
@@ -81,7 +104,7 @@ class EventHandler:
 
         discovered_count = 0
 
-        for callback in self._callbacks:
+        for callback_idx, callback in enumerate(self._callbacks):
             for name in dir(callback):
                 method = getattr(callback, name)
                 if callable(method) and hasattr(method, "_torch_batteries_event"):
@@ -93,10 +116,11 @@ class EventHandler:
                             event.value,
                         )
                         continue
-                    if event not in self._event_handlers:
-                        self._event_handlers[event] = []
-                    if isinstance(self._event_handlers[event], list):
-                        self._event_handlers[event].append(method)  # type: ignore[union-attr]
+                    self._append_handler(
+                        event,
+                        method,
+                        f"callback[{callback_idx}].{type(callback).__name__}.{name}",
+                    )
                     discovered_count += 1
                     logger.debug(
                         "Discovered handler '%s' for event '%s' in callback '%s'",
@@ -109,6 +133,23 @@ class EventHandler:
             discovered_count,
             len(self._callbacks),
         )
+
+    def _validate_exclusive_handlers(self) -> None:
+        """Reject multiple owners for provider and executor events."""
+        for event in self.EXCLUSIVE_EVENTS:
+            labels = self._handler_labels.get(event, [])
+            if len(labels) > 1:
+                logger.error(
+                    "Conflicting handlers for exclusive event '%s': %s",
+                    event.value,
+                    labels,
+                )
+                joined = ", ".join(labels)
+                msg = (
+                    f"Event '{event.value}' accepts exactly one handler; "
+                    f"found: {joined}."
+                )
+                raise ValueError(msg)
 
     def get_handler(self, event: Event) -> list[Callable] | Callable | None:
         """Get the handler for a specific event.
@@ -155,6 +196,86 @@ class EventHandler:
             return handler(*args, **kwargs)
         logger.debug("No handler found for event '%s'", event.value)
         return None
+
+    def provide(
+        self,
+        event: Event,
+        *args: Any,
+        default: Any,
+        **kwargs: Any,
+    ) -> Any:
+        """Return an exclusive provider result or a caller-supplied default."""
+        handler = self.get_handler(event)
+        if handler is None:
+            logger.debug(
+                "No provider found for event '%s'; using default.", event.value
+            )
+            return default
+        if not isinstance(handler, list) or len(handler) != 1:
+            logger.error("Invalid provider registration for event '%s'.", event.value)
+            msg = f"Event '{event.value}' requires one provider handler."
+            raise ValueError(msg)
+        logger.debug("Calling provider for event '%s'.", event.value)
+        return handler[0](*args, **kwargs)
+
+    def execute(self, event: Event, *args: Any, **kwargs: Any) -> bool:
+        """Run one exclusive executor and report whether it handled the event."""
+        handler = self.get_handler(event)
+        if handler is None:
+            logger.debug("No executor found for event '%s'.", event.value)
+            return False
+        if not isinstance(handler, list) or len(handler) != 1:
+            logger.error("Invalid executor registration for event '%s'.", event.value)
+            msg = f"Event '{event.value}' requires one executor handler."
+            raise ValueError(msg)
+        logger.debug("Calling executor for event '%s'.", event.value)
+        result = handler[0](*args, **kwargs)
+        if result is not None:
+            logger.error(
+                "Executor for event '%s' returned %s instead of None.",
+                event.value,
+                type(result).__name__,
+            )
+            msg = f"Event '{event.value}' executor must return None."
+            raise TypeError(msg)
+        return True
+
+    @contextmanager
+    def execution_context(
+        self,
+        event: Event,
+        *args: Any,
+        **kwargs: Any,
+    ) -> Generator[None]:
+        """Enter every ordered context manager returned for an event."""
+        handler = self.get_handler(event)
+        handlers = (
+            handler
+            if isinstance(handler, list)
+            else ([] if handler is None else [handler])
+        )
+        with ExitStack() as stack:
+            for item in handlers:
+                manager = item(*args, **kwargs)
+                if not hasattr(manager, "__enter__") or not hasattr(
+                    manager, "__exit__"
+                ):
+                    logger.error(
+                        "Context provider for event '%s' returned %s.",
+                        event.value,
+                        type(manager).__name__,
+                    )
+                    msg = (
+                        f"Event '{event.value}' handlers must return context managers."
+                    )
+                    raise TypeError(msg)
+                stack.enter_context(cast("AbstractContextManager[Any]", manager))
+            logger.debug(
+                "Entered %d execution contexts for event '%s'.",
+                len(handlers),
+                event.value,
+            )
+            yield
 
     def get_all_events(self) -> list[Event]:
         """Get all events that have registered handlers.

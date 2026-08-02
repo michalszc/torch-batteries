@@ -42,22 +42,26 @@ battery.train(train_loader, val_loader, epochs=10)
 ```
 """
 
-__version__ = "0.7.0"
+__version__ = "0.8.0"
 __author__ = ["Michal Szczygiel", "Arkadiusz Paterak", "Antoni Zięciak"]
 
 # Import main components
-from .events import Event, EventContext, charge
+from .events import Event, EventContext, OptimizationStep, charge
 from .tracking import (
     Run,
 )
 from .trainer import Battery, PredictResult, StepOutput, TestResult, TrainResult
+from .utils.metrics import CollectedMetric, StatefulMetric
 
 __all__ = [
     "Battery",
+    "CollectedMetric",
     "Event",
     "EventContext",
+    "OptimizationStep",
     "PredictResult",
     "Run",
+    "StatefulMetric",
     "StepOutput",
     "TestResult",
     "TrainResult",

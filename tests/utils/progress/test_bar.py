@@ -26,7 +26,7 @@ class TestBarProgress:
         mock_tqdm.return_value = mock_pbar
 
         progress = BarProgress(total_epochs=1)
-        progress.start_epoch(0)
+        progress.start_epoch(1)
         progress.start_phase(Phase.TRAIN, total_batches=10)
 
         mock_tqdm.assert_called_once_with(
@@ -81,6 +81,13 @@ class TestBarProgress:
         mock_pbar.close.assert_called_once()
         assert isinstance(avg_metrics, dict)
         assert avg_metrics["loss"] == 0.4
+
+    def test_end_phase_without_samples_returns_empty_metrics(self) -> None:
+        """An inactive phase completes with an empty metric mapping."""
+        progress = BarProgress(total_epochs=1)
+        progress.start_phase(Phase.TEST, total_batches=0)
+
+        assert progress.end_phase() == {}
 
     @patch("builtins.print")
     def test_end_epoch_no_output(self, mock_print: MagicMock) -> None:

@@ -72,12 +72,18 @@ def get_device(device: str | torch.device = "auto") -> torch.device:
             return device
 
 
-def move_to_device(data: Any, device: torch.device) -> Any:
+def move_to_device(
+    data: Any,
+    device: torch.device,
+    *,
+    detach: bool = False,
+) -> Any:
     """Move data to device handling different data types.
 
     Args:
         data: Data to move to device (tensors, lists, tuples, etc.)
         device: Target device to move the data to
+        detach: Detach tensors from their computation graphs before moving them.
 
     Returns:
         Data moved to the specified device
@@ -89,12 +95,19 @@ def move_to_device(data: Any, device: torch.device) -> Any:
         batch_on_device = move_to_device(batch, device)
         ```
     """
-    if isinstance(data, (list, tuple)):
-        moved_data = [move_to_device(x, device) for x in data]
-        # Preserve the original type (list or tuple)
-        return type(data)(moved_data)
+    if isinstance(data, list):
+        return [move_to_device(item, device, detach=detach) for item in data]
+    if isinstance(data, tuple):
+        moved_data = [move_to_device(item, device, detach=detach) for item in data]
+        if hasattr(data, "_fields"):
+            return type(data)(*moved_data)
+        return tuple(moved_data)
     if isinstance(data, dict):
-        return {k: move_to_device(v, device) for k, v in data.items()}
+        return {
+            key: move_to_device(value, device, detach=detach)
+            for key, value in data.items()
+        }
     if isinstance(data, torch.Tensor):
-        return data.to(device)
+        tensor = data.detach() if detach else data
+        return tensor.to(device)
     return data

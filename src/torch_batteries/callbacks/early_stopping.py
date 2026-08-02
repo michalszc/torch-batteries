@@ -1,16 +1,22 @@
 """Early Stopping Callback for torch-batteries."""
 
-from typing import Any, Literal
+from __future__ import annotations
 
-from torch import Tensor, nn
+from typing import TYPE_CHECKING, Any, Literal
 
-from torch_batteries import Battery, Event, EventContext, charge
+from torch_batteries.callbacks.base import Callback
+from torch_batteries.events import Event, EventContext, charge
 from torch_batteries.utils.logging import get_logger
+
+if TYPE_CHECKING:
+    from torch import Tensor, nn
+
+    from torch_batteries.trainer import Battery
 
 logger = get_logger("EarlyStopping")
 
 
-class EarlyStopping:
+class EarlyStopping(Callback):
     """Early stops the training if selected metric doesn't improve after a given patience.
 
     Args:
@@ -74,14 +80,47 @@ class EarlyStopping:
         """Get the best model weights observed so far."""
         return self._best_weights
 
+    def state_dict(self) -> dict[str, Any]:
+        """Return early-stopping state for resumable checkpoints."""
+        state = {
+            "best_score": self._best_score,
+            "epochs_no_improve": self._epochs_no_improve,
+            "best_weights": self._best_weights,
+        }
+        logger.debug(
+            "Serialized early stopping state: best_score=%s, no_improve=%d",
+            self._best_score,
+            self._epochs_no_improve,
+        )
+        return state
+
+    def load_state_dict(self, state_dict: dict[str, Any]) -> None:
+        """Restore early-stopping state from a checkpoint."""
+        try:
+            self._best_score = state_dict["best_score"]
+            self._epochs_no_improve = int(state_dict["epochs_no_improve"])
+            self._best_weights = state_dict["best_weights"]
+        except (KeyError, TypeError, ValueError) as error:
+            logger.exception("Invalid early stopping state.")
+            msg = "Invalid EarlyStopping checkpoint state."
+            raise ValueError(msg) from error
+        logger.info(
+            "Restored early stopping state: best_score=%s, no_improve=%d",
+            self._best_score,
+            self._epochs_no_improve,
+        )
+
     @charge(Event.BEFORE_TRAIN)
-    def run_on_train_start(self, _: EventContext) -> None:
+    def run_on_train_start(self, context: EventContext) -> None:
         """
         Initialize early stopping parameters at the start of training.
 
         Args:
             _: The event context (not used here).
         """
+        if context.get("resumed", False):
+            logger.debug("Preserved restored early stopping state on resume.")
+            return
         self._best_score = None
         self._epochs_no_improve = 0
         self._best_weights = None

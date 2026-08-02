@@ -1,8 +1,9 @@
 """Core events and decorators for torch-batteries."""
 
 from collections.abc import Callable
+from dataclasses import dataclass
 from enum import Enum
-from typing import TYPE_CHECKING, Any, TypeVar
+from typing import TYPE_CHECKING, Any, Literal, TypeVar
 
 import torch
 from torch import nn
@@ -16,6 +17,39 @@ P = ParamSpec("P")
 R = TypeVar("R")
 
 logger = get_logger("events")
+
+
+@dataclass(frozen=True, slots=True)
+class OptimizationStep:
+    """Describe the gradient operations required for one training batch.
+
+    Returned by a model or callback handling
+    :attr:`Event.CONFIGURE_TRAIN_STEP`. With no handler, Battery uses these
+    defaults to zero gradients, backpropagate the full loss, and perform one
+    optimizer step per batch.
+
+    Args:
+        zero_grad: Whether gradients are cleared before the model step.
+        optimizer_step: Whether this batch completes an optimizer group.
+        loss_divisor: Positive divisor applied to the loss before backward.
+    """
+
+    zero_grad: bool = True
+    optimizer_step: bool = True
+    loss_divisor: int = 1
+
+    def __post_init__(self) -> None:
+        """Validate loss normalization before the plan reaches the trainer."""
+        if (
+            isinstance(self.loss_divisor, bool)
+            or not isinstance(self.loss_divisor, int)
+            or self.loss_divisor < 1
+        ):
+            logger.error(
+                "Invalid optimization-step loss divisor: %r", self.loss_divisor
+            )
+            msg = "OptimizationStep loss_divisor must be a positive integer."
+            raise ValueError(msg)
 
 
 class EventContext(TypedDict, total=False):
@@ -32,7 +66,23 @@ class EventContext(TypedDict, total=False):
     - `optimizer`: The optimizer when available.
     - `batch`: Current batch data, usually a tuple or list of tensors.
     - `batch_idx`: Current batch index within the active phase.
-    - `epoch`: Current epoch number.
+    - `epoch`: One-based public epoch number. Training and validation workflows
+      expose `1, 2, 3, ...`; single-pass test and prediction workflows expose
+      `1`.
+    - `device`: Device selected by Battery.
+    - `phase`: Active workflow phase: `train`, `validation`, `test`, or
+      `predict`.
+
+    Optimization keys:
+
+    - `total_batches`: Number of batches in the active training loader.
+    - `optimization_plan`: Zeroing, loss-scaling, and optimizer-boundary plan.
+    - `loss_tensor`: Original scalar loss returned by the training step.
+    - `backward_loss`: Loss tensor that will be passed to backward. A
+      `BEFORE_BACKWARD` handler may replace it.
+    - `optimizer_step`: Whether the current batch performs a real optimizer
+      step.
+    - `optimizer_step_idx`: Number of successfully completed optimizer steps.
 
     Loss keys:
 
@@ -62,14 +112,24 @@ class EventContext(TypedDict, total=False):
     battery: "torch_batteries.Battery"
     model: nn.Module
     optimizer: torch.optim.Optimizer | None
+    device: torch.device
+    phase: Literal["train", "validation", "test", "predict"]
     batch: Any
     batch_idx: int
+    total_batches: int
     epoch: int
+    optimization_plan: OptimizationStep
+    loss_tensor: torch.Tensor
+    backward_loss: torch.Tensor
     loss: float
     train_loss: float
     val_loss: float
     test_loss: float
-    predictions: torch.Tensor | list[Any]
+    predictions: Any
+    prediction_batches: int
+    optimizer_step: bool
+    optimizer_step_idx: int
+    resumed: bool
     train_metrics: dict[str, float]
     val_metrics: dict[str, float]
     test_metrics: dict[str, float]
@@ -84,6 +144,111 @@ class Event(Enum):
 
     Events are triggered at different points during training/testing/prediction.
     Each event receives an `EventContext` with different available fields.
+    Whenever an event lists `epoch` in its context, the value follows the
+    one-based public convention documented by `EventContext`.
+
+    ## Optimization Extension Events
+
+    The events below are public extension points. They may be handled by a
+    method on the model or by a callback. Broadcast handlers run model-first
+    and then in callback-list order. Exclusive providers and executors allow
+    only one handler across the model and callbacks; discovery fails with a
+    clear conflict error when more than one is registered.
+
+    - `SETUP`: Broadcast once after Battery and event discovery are complete,
+      before checkpoint state can be restored.
+        - **Context**: `battery`, `model`, `optimizer`, `device`
+        - **Return**: ignored
+        - **Default**: no operation
+
+    - `STEP_EXECUTION_CONTEXT`: Context-provider event requested immediately
+      before `TRAIN_STEP`, `VALIDATION_STEP`, `TEST_STEP`, and `PREDICT_STEP`.
+      Every handler must return a context manager. Context managers enter
+      model-first and then in callback order, and always exit in reverse order,
+      including when step execution raises.
+        - **Context**: `battery`, `model`, `optimizer`, `device`, `phase`,
+          `batch`, `batch_idx`, `epoch`
+        - **Return**: a context manager
+        - **Default**: `contextlib.nullcontext()`
+
+    - `CONFIGURE_TRAIN_STEP`: Exclusive provider called after moving a training
+      batch to the device and before zeroing gradients or running `TRAIN_STEP`.
+        - **Context**: `battery`, `model`, `optimizer`, `device`, `phase`,
+          `batch`, `batch_idx`, `total_batches`, `epoch`,
+          `optimizer_step_idx`
+        - **Return**: `OptimizationStep`
+        - **Default**: `OptimizationStep()`
+
+    - `BEFORE_BACKWARD`: Broadcast after parsing the training result and
+      dividing its loss according to the optimization plan. Handlers may
+      replace `backward_loss` but must not perform backward themselves.
+        - **Context**: training batch fields plus `loss_tensor`,
+          `backward_loss`, `optimization_plan`, `optimizer_step`, and
+          `optimizer_step_idx`
+        - **Return**: ignored
+
+    - `BACKWARD`: Exclusive executor for backpropagation. It runs for every
+      training batch, including intermediate accumulation batches.
+        - **Context**: same as `BEFORE_BACKWARD`
+        - **Return**: `None`
+        - **Default**: `backward_loss.backward()`
+
+    - `AFTER_BACKWARD`: Broadcast after backward succeeds. It is not emitted
+      when backward raises. Gradients may still be AMP-scaled at this point.
+        - **Context**: same as `BEFORE_BACKWARD`
+        - **Return**: ignored
+
+    - `BEFORE_GRADIENT_CLIP`: Broadcast only on a real optimizer boundary,
+      after backward and before clipping. Mixed-precision handlers use it to
+      unscale gradients. Every handler finishes before `GRADIENT_CLIP`.
+        - **Context**: same as `BEFORE_BACKWARD`
+        - **Return**: ignored
+
+    - `GRADIENT_CLIP`: Exclusive optional executor for gradient clipping.
+        - **Context**: same as `BEFORE_GRADIENT_CLIP`
+        - **Return**: `None`
+        - **Default**: no clipping
+
+    - `BEFORE_OPTIMIZER_STEP`: Broadcast after gradient preparation and
+      clipping, immediately before the optimizer operation.
+        - **Context**: same as `BEFORE_GRADIENT_CLIP`
+        - **Return**: ignored
+
+    - `OPTIMIZER_STEP`: Exclusive executor for the optimizer operation.
+        - **Context**: same as `BEFORE_OPTIMIZER_STEP`
+        - **Return**: `None`
+        - **Default**: `optimizer.step()`
+
+    - `AFTER_OPTIMIZER_STEP`: Broadcast after the optimizer operation succeeds
+      and Battery increments `optimizer_step_idx`. It is never emitted for
+      intermediate accumulation batches or failed optimizer operations.
+        - **Context**: same as `BEFORE_OPTIMIZER_STEP`, with the updated
+          `optimizer_step_idx`
+        - **Return**: ignored
+
+    Model provider example:
+
+    ```python
+    @charge(Event.CONFIGURE_TRAIN_STEP)
+    def configure_step(self, context: EventContext) -> OptimizationStep:
+        return OptimizationStep()
+    ```
+
+    Callback execution-context example:
+
+    ```python
+    @charge(Event.STEP_EXECUTION_CONTEXT)
+    def execution_context(self, context: EventContext):
+        return torch.autocast(context["device"].type, dtype=torch.bfloat16)
+    ```
+
+    Exclusive executor example:
+
+    ```python
+    @charge(Event.BACKWARD)
+    def backward(self, context: EventContext) -> None:
+        context["backward_loss"].backward()
+    ```
 
     ## Training Events
 
@@ -192,7 +357,20 @@ class Event(Enum):
         - **Context**: `optimizer`, `batch`, `batch_idx`, `epoch`, `predictions`
     """
 
-    # Training lifecycle events
+    # Optimization extension events
+    SETUP = "setup"
+    STEP_EXECUTION_CONTEXT = "step_execution_context"
+    CONFIGURE_TRAIN_STEP = "configure_train_step"
+    BEFORE_BACKWARD = "before_backward"
+    BACKWARD = "backward"
+    AFTER_BACKWARD = "after_backward"
+    BEFORE_GRADIENT_CLIP = "before_gradient_clip"
+    GRADIENT_CLIP = "gradient_clip"
+    BEFORE_OPTIMIZER_STEP = "before_optimizer_step"
+    OPTIMIZER_STEP = "optimizer_step"
+    AFTER_OPTIMIZER_STEP = "after_optimizer_step"
+
+    # Existing workflow lifecycle events
     BEFORE_TRAIN = "before_train"
     AFTER_TRAIN = "after_train"
     BEFORE_TRAIN_EPOCH = "before_train_epoch"

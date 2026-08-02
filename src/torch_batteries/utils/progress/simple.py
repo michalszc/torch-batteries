@@ -34,7 +34,7 @@ class SimpleProgress(Progress):
             total_epochs: Total number of epochs.
         """
         self._total_epochs = total_epochs
-        self._current_epoch = 0
+        self._current_epoch = 1
         self._current_phase: Phase | None = None
         self._epoch_start_time = 0.0
         self._training_start_time = time.time()
@@ -99,20 +99,18 @@ class SimpleProgress(Progress):
     def end_epoch(self) -> None:
         """End the current epoch and print summary."""
         epoch_time = time.time() - self._epoch_start_time
-        epoch_num = self._current_epoch + 1
-
         match self._phase_metrics:
             case {Phase.TRAIN: train_metrics, Phase.VALIDATION: val_metrics}:
                 train_str = format_metrics(train_metrics, "Train ")
                 val_str = format_metrics(val_metrics, "Val ")
                 print(
-                    f"Epoch {epoch_num}/{self._total_epochs} - "
+                    f"Epoch {self._current_epoch}/{self._total_epochs} - "
                     f"{train_str}, {val_str} ({epoch_time:.2f}s)"
                 )
             case {Phase.TRAIN: train_metrics}:
                 train_str = format_metrics(train_metrics, "Train ")
                 print(
-                    f"Epoch {epoch_num}/{self._total_epochs} - "
+                    f"Epoch {self._current_epoch}/{self._total_epochs} - "
                     f"{train_str} ({epoch_time:.2f}s)"
                 )
             case {Phase.TEST: test_metrics}:

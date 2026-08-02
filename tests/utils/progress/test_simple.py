@@ -40,6 +40,14 @@ class TestSimpleProgress:
         assert isinstance(avg_metrics, dict)
         assert abs(avg_metrics["loss"] - expected_avg) < 1e-6
 
+    def test_empty_phase_returns_and_records_empty_metrics(self) -> None:
+        """A phase without samples has a well-defined empty result."""
+        progress = SimpleProgress()
+        progress.start_phase(Phase.TRAIN)
+
+        assert progress.end_phase() == {}
+        assert progress._phase_metrics[Phase.TRAIN] == {}  # noqa: SLF001
+
     @patch("builtins.print")
     @patch("time.time")
     def test_end_epoch_with_val_loss(
@@ -49,7 +57,7 @@ class TestSimpleProgress:
         mock_time.side_effect = [0, 10, 15]
 
         progress = SimpleProgress(total_epochs=3)
-        progress.start_epoch(0)
+        progress.start_epoch(1)
         # Simulate train and validation phases
         progress.start_phase(Phase.TRAIN)
         progress.update({"loss": 0.4}, 32)
@@ -71,7 +79,7 @@ class TestSimpleProgress:
         mock_time.side_effect = [0, 10, 12]
 
         progress = SimpleProgress(total_epochs=2)
-        progress.start_epoch(1)
+        progress.start_epoch(2)
         # Simulate only train phase
         progress.start_phase(Phase.TRAIN)
         progress.update({"loss": 0.3}, 32)
@@ -93,6 +101,39 @@ class TestSimpleProgress:
         progress.end_training()
 
         mock_print.assert_called_with("Training completed in 25.00s")
+
+    @patch("builtins.print")
+    @patch("time.time")
+    def test_end_epoch_prints_test_summary(
+        self, mock_time: MagicMock, mock_print: MagicMock
+    ) -> None:
+        """A test phase prints its metrics without an epoch label."""
+        mock_time.side_effect = [0, 10, 12]
+        progress = SimpleProgress()
+        progress.start_epoch(1)
+        progress.start_phase(Phase.TEST)
+        progress.update({"loss": 0.25}, 4)
+        progress.end_phase()
+
+        progress.end_epoch()
+
+        mock_print.assert_called_once_with("Test Loss: 0.2500 (2.00s)")
+
+    @patch("builtins.print")
+    @patch("time.time")
+    def test_end_epoch_prints_prediction_summary(
+        self, mock_time: MagicMock, mock_print: MagicMock
+    ) -> None:
+        """A prediction phase reports completion without metric formatting."""
+        mock_time.side_effect = [0, 20, 21]
+        progress = SimpleProgress()
+        progress.start_epoch(1)
+        progress.start_phase(Phase.PREDICT)
+        progress.end_phase()
+
+        progress.end_epoch()
+
+        mock_print.assert_called_once_with("Prediction completed (1.00s)")
 
     @patch("builtins.print")
     def test_abort_clears_state_without_output(self, mock_print: MagicMock) -> None:

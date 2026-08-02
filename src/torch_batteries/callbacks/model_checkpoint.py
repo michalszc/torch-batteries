@@ -1,19 +1,56 @@
 """Model Checkpoint Callback for torch-batteries."""
 
+from __future__ import annotations
+
 import re
 from pathlib import Path
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 import torch
 from torch import nn
 
-from torch_batteries import Event, EventContext, charge
+from torch_batteries.callbacks.base import Callback
+from torch_batteries.events import Event, EventContext, charge
 from torch_batteries.utils.logging import get_logger
+
+if TYPE_CHECKING:
+    from torch_batteries.trainer import Battery
 
 logger = get_logger("ModelCheckpoint")
 
 
-class ModelCheckpoint:
+def _optional_string(value: object) -> str | None:
+    """Validate an optional serialized path."""
+    if value is None or isinstance(value, str):
+        return value
+    msg = "checkpoint path must be a string or None"
+    raise TypeError(msg)
+
+
+def _string_float_dict(value: object) -> dict[str, float]:
+    """Validate serialized checkpoint ranking data."""
+    if not isinstance(value, dict):
+        msg = "best_k_models must be a dictionary"
+        raise TypeError(msg)
+    return {str(path): _serialized_float(score) for path, score in value.items()}
+
+
+def _serialized_float(value: object) -> float:
+    """Validate a serialized numeric value."""
+    if not isinstance(value, (int, float)):
+        msg = "checkpoint score must be numeric"
+        raise TypeError(msg)
+    return float(value)
+
+
+def _validate_save_weights_only(value: object, *, expected: bool) -> None:
+    """Validate the serialized checkpoint format configuration."""
+    if value != expected:
+        msg = "save_weights_only configuration does not match"
+        raise ValueError(msg)
+
+
+class ModelCheckpoint(Callback):
     """Saves the model when a monitored metric improves.
 
     Args:
@@ -30,6 +67,8 @@ class ModelCheckpoint:
     Missing directories are created automatically. A `.pth` suffix is added only
     when `save_path` has no explicit suffix. Static templates gain an epoch field
     when `save_top_k` is greater than one to avoid overwriting retained weights.
+    The `{epoch}` filename field uses the one-based epoch number from the event
+    context, matching progress output.
 
     Examples:
         ```python
@@ -50,7 +89,9 @@ class ModelCheckpoint:
         mode: Literal["min", "max"] = "max",
         save_dir: str = ".",
         save_path: str | None = None,
+        *,
         save_top_k: int = 1,
+        save_weights_only: bool = False,
     ) -> None:
         if stage not in {"train", "val"}:
             msg = "stage must be one of 'train' or 'val'"
@@ -64,6 +105,7 @@ class ModelCheckpoint:
         self._save_dir = save_dir
         self._save_path = save_path
         self._save_top_k = save_top_k
+        self._save_weights_only = save_weights_only
         self._best_k_models: dict[str, float] = {}
 
         self._best_model_path: str | None = None
@@ -100,6 +142,46 @@ class ModelCheckpoint:
         """Returns a dictionary of the top K saved models and their scores."""
         return self._best_k_models
 
+    def state_dict(self) -> dict[str, object]:
+        """Return checkpoint ranking state for training resumption."""
+        state: dict[str, object] = {
+            "best_k_models": dict(self._best_k_models),
+            "best_model_path": self._best_model_path,
+            "kth_best_model_path": self._kth_best_model_path,
+            "best_score": self._best_score,
+            "kth_best_score": self._kth_best_score,
+            "save_weights_only": self._save_weights_only,
+        }
+        logger.debug(
+            "Serialized model checkpoint state with %d retained models.",
+            len(self._best_k_models),
+        )
+        return state
+
+    def load_state_dict(self, state_dict: dict[str, object]) -> None:
+        """Restore checkpoint ranking state."""
+        try:
+            self._best_k_models = _string_float_dict(state_dict["best_k_models"])
+            self._best_model_path = _optional_string(state_dict["best_model_path"])
+            self._kth_best_model_path = _optional_string(
+                state_dict["kth_best_model_path"]
+            )
+            self._best_score = _serialized_float(state_dict["best_score"])
+            self._kth_best_score = _serialized_float(state_dict["kth_best_score"])
+            _validate_save_weights_only(
+                state_dict["save_weights_only"],
+                expected=self._save_weights_only,
+            )
+            self._refresh_kth_best()
+        except (KeyError, TypeError, ValueError) as error:
+            logger.exception("Invalid model checkpoint state.")
+            msg = "Invalid ModelCheckpoint checkpoint state."
+            raise ValueError(msg) from error
+        logger.info(
+            "Restored model checkpoint state with %d retained models.",
+            len(self._best_k_models),
+        )
+
     @charge(Event.AFTER_TRAIN_EPOCH)
     def run_on_train_epoch_end(self, context: EventContext) -> None:
         """Save model checkpoint after training epoch if metric improved.
@@ -112,8 +194,8 @@ class ModelCheckpoint:
 
         metrics = {**context["train_metrics"], "epoch": context["epoch"]}
 
-        if not self._save_best_model(context["model"], metrics):
-            self._save_top_k_model(context["model"], metrics)
+        battery = context.get("battery")
+        self._save_top_k_model(battery, context["model"], metrics)
 
     @charge(Event.AFTER_VALIDATION)
     def run_on_validation_end(self, context: EventContext) -> None:
@@ -127,42 +209,15 @@ class ModelCheckpoint:
 
         metrics = {**context["val_metrics"], "epoch": context["epoch"]}
 
-        if not self._save_best_model(context["model"], metrics):
-            self._save_top_k_model(context["model"], metrics)
+        battery = context.get("battery")
+        self._save_top_k_model(battery, context["model"], metrics)
 
-    def _save_best_model(self, model: nn.Module, metrics: dict[str, float]) -> bool:
-        """Save model if it achieves new best score.
-
-        Args:
-            model: The PyTorch model to save.
-            metrics: Dictionary of current metrics.
-
-        Returns:
-            True if model was saved as new best, False otherwise.
-        """
-        current_score = metrics.get(self._metric)
-        if current_score is None:
-            logger.warning(
-                "Checkpoint monitor metric '%s' is missing; checkpoint was skipped.",
-                self._metric,
-            )
-            return False
-
-        logger.debug(
-            "Checkpoint candidate: metric=%s, score=%s, best=%s, mode=%s",
-            self._metric,
-            current_score,
-            self._best_score,
-            self._mode,
-        )
-
-        if self._monitor_op(current_score, self._best_score):
-            self._best_score = current_score
-            self._best_model_path = self._save_model(model, metrics, current_score)
-            return True
-        return False
-
-    def _save_top_k_model(self, model: nn.Module, metrics: dict[str, float]) -> None:
+    def _save_top_k_model(
+        self,
+        battery: Battery | None,
+        model: nn.Module,
+        metrics: dict[str, float],
+    ) -> None:
         """Save model if it's in top-k best models.
 
         Args:
@@ -171,35 +226,47 @@ class ModelCheckpoint:
         """
         current_score = metrics.get(self._metric)
         if current_score is None:
+            logger.warning(
+                "Checkpoint monitor metric '%s' is missing; checkpoint was skipped.",
+                self._metric,
+            )
             return
 
-        if len(self._best_k_models) < self._save_top_k or self._monitor_op(
+        is_best = self._monitor_op(current_score, self._best_score)
+        qualifies = len(self._best_k_models) < self._save_top_k or self._monitor_op(
             current_score, self._kth_best_score
-        ):
-            self._save_model(model, metrics, current_score)
-
-        if len(self._best_k_models) == self._save_top_k:
-            if self._mode == "min":
-                self._kth_best_model_path = max(
-                    self._best_k_models,
-                    key=self._best_k_models.get,  # type: ignore[arg-type]
-                )
-                self._kth_best_score = self._best_k_models[self._kth_best_model_path]
-            else:
-                self._kth_best_model_path = min(
-                    self._best_k_models,
-                    key=self._best_k_models.get,  # type: ignore[arg-type]
-                )
-                self._kth_best_score = self._best_k_models[self._kth_best_model_path]
+        )
         logger.debug(
-            "Checkpoint ranking updated: retained=%d, save_top_k=%d, kth_score=%s",
-            len(self._best_k_models),
-            self._save_top_k,
+            "Checkpoint candidate: metric=%s, score=%s, best=%s, kth=%s, qualifies=%s",
+            self._metric,
+            current_score,
+            self._best_score,
             self._kth_best_score,
+            qualifies,
+        )
+        if not qualifies:
+            logger.debug(
+                "Checkpoint candidate skipped because it is outside the top %d.",
+                self._save_top_k,
+            )
+            return
+
+        self._save_model(
+            battery,
+            model,
+            metrics,
+            current_score,
+            is_best=is_best,
         )
 
     def _save_model(
-        self, model: nn.Module, metrics: dict[str, float], current_score: float
+        self,
+        battery: Battery | None,
+        model: nn.Module,
+        metrics: dict[str, float],
+        current_score: float,
+        *,
+        is_best: bool,
     ) -> str:
         """Save model to disk and update top-k tracking.
 
@@ -222,7 +289,41 @@ class ModelCheckpoint:
         path = Path(self._save_dir) / filename
         path.parent.mkdir(parents=True, exist_ok=True)
         filepath = str(path)
-        torch.save(model.state_dict(), filepath)
+
+        previous_state = (
+            dict(self._best_k_models),
+            self._best_model_path,
+            self._kth_best_model_path,
+            self._best_score,
+            self._kth_best_score,
+        )
+        if is_best:
+            self._best_score = current_score
+            self._best_model_path = filepath
+        displaced_path = self._update_top_k_models(filepath, current_score)
+        try:
+            if self._save_weights_only or battery is None:
+                if battery is None and not self._save_weights_only:
+                    logger.warning(
+                        "ModelCheckpoint context has no Battery; "
+                        "falling back to raw weights."
+                    )
+                torch.save(model.state_dict(), filepath)
+            else:
+                battery.save_checkpoint(filepath)
+        except Exception:
+            (
+                self._best_k_models,
+                self._best_model_path,
+                self._kth_best_model_path,
+                self._best_score,
+                self._kth_best_score,
+            ) = previous_state
+            logger.exception("Failed to save model checkpoint at: %s", filepath)
+            raise
+
+        if displaced_path is not None:
+            self._delete_checkpoint_file(displaced_path)
         logger.info(
             "Saved model checkpoint at: %s with %s: %.2f",
             filepath,
@@ -230,7 +331,6 @@ class ModelCheckpoint:
             current_score,
         )
 
-        self._update_top_k_models(filepath, current_score)
         return filepath
 
     def _ensure_unique_template(self, filename: str | None) -> str | None:
@@ -251,21 +351,57 @@ class ModelCheckpoint:
             re.search(r"\.[A-Za-z][A-Za-z0-9]*$", filename)
         )
 
-    def _update_top_k_models(self, filepath: str, current_score: float) -> None:
-        """Update top-k models tracking and remove worst model if needed.
+    def _update_top_k_models(self, filepath: str, current_score: float) -> str | None:
+        """Update top-k tracking and return the checkpoint to remove.
 
         Args:
             filepath: Path to the newly saved model.
             current_score: The metric score of the saved model.
         """
         self._best_k_models[filepath] = current_score
-
+        displaced_path: str | None = None
         if len(self._best_k_models) > self._save_top_k:
             if self._mode == "min":
-                worst_model = max(self._best_k_models, key=self._best_k_models.get)  # type: ignore[arg-type]
+                displaced_path = max(
+                    self._best_k_models,
+                    key=self._best_k_models.get,  # type: ignore[arg-type]
+                )
             else:
-                worst_model = min(self._best_k_models, key=self._best_k_models.get)  # type: ignore[arg-type]
-            self._delete_saved_model(worst_model)
+                displaced_path = min(
+                    self._best_k_models,
+                    key=self._best_k_models.get,  # type: ignore[arg-type]
+                )
+            del self._best_k_models[displaced_path]
+
+        self._refresh_kth_best()
+        logger.debug(
+            "Checkpoint ranking updated: retained=%d, save_top_k=%d, kth_score=%s",
+            len(self._best_k_models),
+            self._save_top_k,
+            self._kth_best_score,
+        )
+        return displaced_path
+
+    def _refresh_kth_best(self) -> None:
+        """Synchronize the cached K-th checkpoint with retained models."""
+        if not self._best_k_models:
+            self._kth_best_model_path = None
+            self._kth_best_score = (
+                float("inf") if self._mode == "min" else float("-inf")
+            )
+            return
+
+        if self._mode == "min":
+            self._kth_best_model_path = max(
+                self._best_k_models,
+                key=self._best_k_models.get,  # type: ignore[arg-type]
+            )
+        else:
+            self._kth_best_model_path = min(
+                self._best_k_models,
+                key=self._best_k_models.get,  # type: ignore[arg-type]
+            )
+        self._kth_best_score = self._best_k_models[self._kth_best_model_path]
 
     def _format_checkpoint_name(
         self,
@@ -317,6 +453,12 @@ class ModelCheckpoint:
             filepath: Path to the model file to delete.
         """
         del self._best_k_models[filepath]
+        self._refresh_kth_best()
+        self._delete_checkpoint_file(filepath)
+
+    @staticmethod
+    def _delete_checkpoint_file(filepath: str) -> None:
+        """Delete a checkpoint file after its replacement is safely written."""
         path = Path(filepath)
         if path.exists():
             path.unlink()

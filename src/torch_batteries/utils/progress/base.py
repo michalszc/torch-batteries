@@ -23,7 +23,7 @@ class Progress(ABC):
         """Start a new epoch.
 
         Args:
-            epoch: The epoch number (0-indexed).
+            epoch: The one-based epoch number.
         """
 
     @abstractmethod

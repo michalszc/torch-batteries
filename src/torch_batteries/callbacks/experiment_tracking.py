@@ -2,7 +2,8 @@
 
 from typing import Any
 
-from torch_batteries import Event, EventContext, charge
+from torch_batteries.callbacks.base import Callback
+from torch_batteries.events import Event, EventContext, charge
 from torch_batteries.tracking.base import ExperimentTracker
 from torch_batteries.tracking.types import Run
 from torch_batteries.utils.logging import get_logger
@@ -10,7 +11,7 @@ from torch_batteries.utils.logging import get_logger
 logger = get_logger("experiment_tracking")
 
 
-class ExperimentTrackingCallback:
+class ExperimentTrackingCallback(Callback):
     """
     Callback for automatic experiment tracking during training.
 
@@ -96,6 +97,33 @@ class ExperimentTrackingCallback:
     def log_every_n_steps(self) -> int:
         """How often to log metrics (in steps)."""
         return self._log_every_n_steps
+
+    def state_dict(self) -> dict[str, int]:
+        """Return experiment progress counters."""
+        logger.debug(
+            "Serialized experiment tracking state: epoch=%d, global_step=%d",
+            self._current_epoch,
+            self._global_step,
+        )
+        return {
+            "current_epoch": self._current_epoch,
+            "global_step": self._global_step,
+        }
+
+    def load_state_dict(self, state_dict: dict[str, Any]) -> None:
+        """Restore experiment progress counters."""
+        try:
+            self._current_epoch = int(state_dict["current_epoch"])
+            self._global_step = int(state_dict["global_step"])
+        except (KeyError, TypeError, ValueError) as error:
+            logger.exception("Invalid experiment tracking callback state.")
+            msg = "Invalid ExperimentTrackingCallback checkpoint state."
+            raise ValueError(msg) from error
+        logger.info(
+            "Restored experiment tracking state: epoch=%d, global_step=%d",
+            self._current_epoch,
+            self._global_step,
+        )
 
     @charge(Event.BEFORE_TRAIN)
     def on_train_start(self, _: EventContext) -> None:
