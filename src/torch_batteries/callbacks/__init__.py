@@ -1,9 +1,21 @@
-"""Callbacks module for torch-batteries.
+"""Reusable callbacks for workflow control and optimization.
 
-Provides callback classes for training workflow control:
-- **EarlyStopping**: Stop training when monitored metric stops improving
-- **ModelCheckpoint**: Save model checkpoints when monitored metric improves
-- **ExperimentTrackingCallback**: Track experiments using external tools
+## Callback contract
+
+- **`Callback`** — optional resumable-state base class for custom callbacks.
+
+## Training control
+
+- **`EarlyStopping`** — stops training when a monitored metric stops improving.
+- **`ModelCheckpoint`** — retains the best weights-only or full-state checkpoints.
+- **`ExperimentTrackingCallback`** — logs training lifecycle data through a tracker.
+
+## Optimization
+
+- **`GradientAccumulation`** — groups batches into fewer optimizer steps.
+- **`GradientClip`** — applies value- or norm-based gradient clipping.
+- **`MixedPrecision`** — supplies autocast, scaled backward, and optimizer stepping.
+- **`LearningRateScheduler`** — advances step-, epoch-, or validation-based schedulers.
 """
 
 from .base import Callback

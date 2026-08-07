@@ -120,9 +120,8 @@ class WandbTracker(ExperimentTracker):
         Initialize wandb tracking session.
 
         Args:
-            project: The project configuration
-            experiment: Optional experiment grouping
-            run: Run configuration
+            run: Name, grouping, tags, description, job type, and configuration sent
+                to W&B. Project and entity come from this tracker.
 
         Raises:
             RuntimeError: If it is already initialized

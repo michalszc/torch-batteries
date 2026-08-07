@@ -116,7 +116,7 @@ class EarlyStopping(Callback):
         Initialize early stopping parameters at the start of training.
 
         Args:
-            _: The event context (not used here).
+            context: Event context. A resumed run preserves restored callback state.
         """
         if context.get("resumed", False):
             logger.debug("Preserved restored early stopping state on resume.")

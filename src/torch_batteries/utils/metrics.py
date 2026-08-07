@@ -14,7 +14,12 @@ type MetricCallable = Callable[[torch.Tensor, torch.Tensor], float | torch.Tenso
 
 @runtime_checkable
 class StatefulMetric(Protocol):
-    """Protocol for metrics computed from state accumulated over a full phase."""
+    """Protocol for metrics computed from state accumulated over a full phase.
+
+    ``Battery`` calls ``reset`` before each phase, ``update`` with detached
+    predictions and targets for each batch, then ``compute`` once. Implementations
+    should return one numeric scalar.
+    """
 
     def reset(self) -> None:
         """Reset metric state before a phase."""
@@ -99,7 +104,13 @@ def _metric_float(name: str, value: Any) -> float:
 
 
 class PhaseMetricManager:
-    """Coordinate callable, incremental, and collected metrics for one phase."""
+    """Coordinate callable, incremental, and collected metrics for one phase.
+
+    Ordinary callables produce batch values that are sample-weighted by progress
+    tracking. Stateful metrics own their exact aggregation. ``CollectedMetric``
+    instances share detached CPU collections. A metric that raises is skipped for
+    the remainder of the current phase.
+    """
 
     __slots__ = (
         "_collected_predictions",

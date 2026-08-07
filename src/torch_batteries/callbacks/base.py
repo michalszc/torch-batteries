@@ -15,12 +15,20 @@ class Callback:
     """
 
     def state_dict(self) -> dict[str, Any]:
-        """Return state that should be stored in a training checkpoint."""
+        """Return state that should be stored in a full training checkpoint.
+
+        Stateless callbacks inherit the empty default. Stateful callbacks should
+        return values supported by ``torch.save(..., weights_only=True)``.
+        """
         logger.debug("Callback %s has no resumable state.", type(self).__name__)
         return {}
 
     def load_state_dict(self, state_dict: dict[str, Any]) -> None:
-        """Restore state from a training checkpoint."""
+        """Restore state from a full training checkpoint.
+
+        ``Battery`` matches callback state strictly by callback type and configured
+        order before invoking this method.
+        """
         if state_dict:
             logger.warning(
                 "Callback %s ignored unexpected state keys: %s",

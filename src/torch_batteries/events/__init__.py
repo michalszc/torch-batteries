@@ -1,10 +1,13 @@
-"""Events package for torch-batteries.
+"""Lifecycle and optimization events used by the trainer and callbacks.
 
-Provides event system for training workflow control:
-- **Event**: Enumeration of all available training lifecycle events
-- **EventContext**: Context dictionary passed to event handlers
-- **charge**: Decorator to mark methods as event handlers
-- **EventHandler**: Internal handler for discovering and executing event methods
+## Public API
+
+- **`Event`** — names every lifecycle, step, and optimization extension point.
+- **`EventContext`** — typed mapping of values available to event handlers.
+- **`OptimizationStep`** — immutable gradient-operation plan for one train batch.
+- **`charge`** — marks a model or callback method as an event handler.
+- **`EventHandler`** — discovers handlers and applies broadcast, provider, executor,
+  and context-manager dispatch rules.
 """
 
 from .core import Event, EventContext, OptimizationStep, charge

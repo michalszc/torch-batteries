@@ -1,3 +1,3 @@
 # Callbacks API
 
-The generated callback reference is enabled after its public docstrings are audited.
+::: torch_batteries.callbacks
