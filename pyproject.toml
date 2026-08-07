@@ -45,7 +45,6 @@ example = [
 ]
 wandb = [
     "wandb>=0.16.0",
-    "nbformat>=5.10.4",
 ]
 all = [
     "diffusers>=0.39.0",
@@ -58,7 +57,6 @@ all = [
     "seaborn>=0.13.2",
     "torchvision>=0.24.1",
     "wandb>=0.16.0",
-    "nbformat>=5.10.4",
 ]
 
 [dependency-groups]
@@ -80,7 +78,12 @@ build = [
     "twine>=4.0.0",
 ]
 docs = [
-    "pdoc>=14.0.0"
+    # MkDocs 2 removes the plugin system and is incompatible with Material and
+    # mkdocstrings; keep the documented toolchain on the supported 1.x line.
+    "mkdocs>=1.6,<2",
+    "mkdocs-material>=9.6,<10",
+    "mkdocstrings[python]>=0.29,<1",
+    "nbformat>=5.10,<6",
 ]
 dev = [
     {include-group = "test"},

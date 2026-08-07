@@ -48,15 +48,14 @@ check-build: ## Check if build is ready for publishing
 validate-version: ## Check if versions match and differ from PyPI
 	@bash scripts/validate_version.sh
 
-docs: ## Generate HTML documentation using pdoc
-	pdoc -o docs --docformat google src/torch_batteries
+docs: ## Generate HTML documentation using MkDocs
+	NO_MKDOCS_2_WARNING=1 mkdocs build --strict
 	@echo "📚 Documentation generated in docs/ directory"
 
-docs-serve: ## Generate documentation and serve it locally
-	make docs
+docs-serve: ## Serve documentation locally using MkDocs
 	@echo "🌐 Starting local server at http://localhost:8000"
 	@echo "Press Ctrl+C to stop the server"
-	cd docs && python -m http.server 8000
+	NO_MKDOCS_2_WARNING=1 mkdocs serve --dev-addr 127.0.0.1:8000
 
 clean: ## Clean artifacts
 	rm -rf build/

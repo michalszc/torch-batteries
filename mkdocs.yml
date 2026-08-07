@@ -1,0 +1,74 @@
+site_name: torch-batteries
+site_description: Event-driven utilities for practical PyTorch workflows
+site_url: https://michalszc.github.io/torch-batteries/
+repo_url: https://github.com/michalszc/torch-batteries
+repo_name: michalszc/torch-batteries
+docs_dir: documentation
+site_dir: docs
+strict: true
+
+theme:
+  name: material
+  features:
+    - navigation.sections
+    - navigation.indexes
+    - navigation.top
+    - search.highlight
+    - content.code.copy
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          options:
+            docstring_style: google
+            show_source: false
+            show_root_heading: true
+            show_symbol_type_heading: true
+            members_order: source
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - def_list
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences
+
+nav:
+  - Home: index.md
+  - Getting Started:
+      - Overview: getting-started/index.md
+      - Installation: getting-started/installation.md
+      - Quick Start: getting-started/quickstart.md
+      - Core Concepts: getting-started/core-concepts.md
+  - Guides:
+      - Overview: guides/index.md
+      - Training and Evaluation: guides/training.md
+      - Metrics: guides/metrics.md
+      - Batches and Devices: guides/batches-and-devices.md
+      - Callbacks and Optimization: guides/callbacks.md
+      - Checkpoints and Resume: guides/checkpoints.md
+      - Prediction: guides/prediction.md
+      - Experiment Tracking: guides/tracking.md
+  - API Reference:
+      - Overview: reference/index.md
+      - Trainer: reference/trainer.md
+      - Events: reference/events.md
+      - Callbacks: reference/callbacks.md
+      - Metrics: reference/metrics.md
+      - Tracking: reference/tracking.md
+      - Results and Exceptions: reference/results-and-errors.md
+  - Examples: examples.md
+  - Troubleshooting: troubleshooting.md
+  - Release Notes: release-notes.md
+
+extra_css:
+  - stylesheets/extra.css
