@@ -56,7 +56,7 @@ def test_getting_started_workflow() -> None:
         model,
         device="cpu",
         optimizer=torch.optim.Adam(model.parameters(), lr=0.05),
-        metrics={"mae": lambda pred, target: F.l1_loss(pred, target)},
+        metrics={"mae": F.l1_loss},
     )
 
     history = battery.train(loader, loader, epochs=2, verbose=0)
