@@ -45,7 +45,7 @@ publish: ## Publish to PyPI
 check-build: ## Check if build is ready for publishing
 	python -m twine check dist/*
 
-validate-version: ## Check if versions match and differ from PyPI
+validate-version: ## Check project versions, release notes, and PyPI
 	@bash scripts/validate_version.sh
 
 docs: ## Validate and generate documentation using strict MkDocs checks
