@@ -1,4 +1,4 @@
-.PHONY: help install install-dev test lint lint-fix format format-check type-check build clean validate-version docs docs-serve
+.PHONY: help install install-dev test lint lint-fix format format-check type-check build clean validate-version docs docs-serve notebooks-check
 .DEFAULT_GOAL := help
 
 help: ## Show this help message
@@ -48,9 +48,12 @@ check-build: ## Check if build is ready for publishing
 validate-version: ## Check if versions match and differ from PyPI
 	@bash scripts/validate_version.sh
 
-docs: ## Generate HTML documentation using MkDocs
+docs: ## Validate and generate documentation using strict MkDocs checks
 	NO_MKDOCS_2_WARNING=1 mkdocs build --strict
 	@echo "📚 Documentation generated in docs/ directory"
+
+notebooks-check: ## Validate saved notebooks without executing cells
+	@bash scripts/validate_notebooks.sh
 
 docs-serve: ## Serve documentation locally using MkDocs
 	@echo "🌐 Starting local server at http://localhost:8000"

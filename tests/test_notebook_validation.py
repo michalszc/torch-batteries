@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import subprocess
 from pathlib import Path
+from typing import cast
 
 import nbformat
 import pytest
@@ -49,7 +50,7 @@ def notebook(*, version_cells: int = 1) -> nbformat.NotebookNode:
             )
         )
     cells.append(new_code_cell("answer = 42", execution_count=version_cells + 1))
-    return new_notebook(cells=cells)
+    return cast("nbformat.NotebookNode", new_notebook(cells=cells))
 
 
 def write_notebook(path: Path, value: nbformat.NotebookNode) -> None:

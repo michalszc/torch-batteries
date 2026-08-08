@@ -129,6 +129,17 @@ case "$1" in
             "Type checking failed!" \
             "Add type hints and fix type errors"
         ;;
+    notebooks-check)
+        run_check_with_summary \
+            "notebooks-check" \
+            "📓" \
+            "Static Notebook Check" \
+            "make notebooks-check" \
+            "notebooks_output.txt" \
+            "All notebooks contain valid saved release evidence!" \
+            "Static notebook validation failed!" \
+            "Run \`make notebooks-check\`; update and manually rerun only the affected notebook"
+        ;;
     test)
         run_test_check
         ;;

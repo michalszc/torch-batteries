@@ -6,6 +6,21 @@ on:
       - master
     paths:
       - "src/**"
+      - "documentation/**"
+      - "mkdocs.yml"
+      - "pyproject.toml"
+      - "Makefile"
+      - ".github/workflows/docs.yml"
+  pull_request:
+    branches:
+      - master
+    paths:
+      - "src/**"
+      - "documentation/**"
+      - "mkdocs.yml"
+      - "pyproject.toml"
+      - "Makefile"
+      - ".github/workflows/docs.yml"
 
 permissions:
   contents: read
@@ -26,23 +41,26 @@ jobs:
           cache-dependency-path: 'pyproject.toml'
 
       - name: Install dependencies
-        run: pip install -e .[all] --group docs
+        run: pip install -e . --group docs
 
       - name: Generate documentation
         run: make docs
 
       - name: Setup Pages
+        if: github.event_name == 'push'
         uses: actions/configure-pages@v4
         with:
           enablement: true
 
       - name: Upload artifact
+        if: github.event_name == 'push'
         uses: actions/upload-pages-artifact@v3
         with:
           path: './docs'
 
   deploy:
     needs: build
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     environment:
       name: github-pages
