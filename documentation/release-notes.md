@@ -4,7 +4,8 @@
 
 - Replaced pdoc with a structured MkDocs Material site, clarified public contracts,
   updated all example notebooks, and added metadata-free static documentation and
-  notebook validation without changing runtime API behavior in
+  notebook validation, and adopted the Apache License 2.0 without changing runtime
+  API behavior in
   [PR #21](https://github.com/michalszc/torch-batteries/pull/21).
 
 ## 0.8.0 — 2026-08-02

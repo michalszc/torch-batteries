@@ -98,7 +98,7 @@ torch-batteries/
 │   └── docs.yml            # Documentation generation
 ├── pyproject.toml          # Project configuration
 ├── Makefile                # Development commands
-├── LICENSE                 # MIT license
+├── LICENSE                 # Apache License 2.0
 ├── README.md               # User documentation
 ├── CONTRIBUTING.md         # This file
 ├── .gitignore              # Git ignore patterns
