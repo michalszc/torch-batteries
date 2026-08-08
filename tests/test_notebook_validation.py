@@ -79,6 +79,49 @@ def test_accepts_valid_executed_notebook(
     assert f"executed with torch-batteries {VERSION}" in result.stdout
 
 
+def test_accepts_unexecuted_installation_cell(
+    validation_project: Path, tmp_path: Path
+) -> None:
+    value = notebook()
+    value.cells.insert(
+        0,
+        new_code_cell(
+            '%pip install "torch-batteries[example]"',
+            execution_count=None,
+            outputs=[],
+        ),
+    )
+    path = tmp_path / "installation.ipynb"
+    write_notebook(path, value)
+
+    result = validate(validation_project, path)
+
+    assert result.returncode == 0
+
+
+def test_rejects_saved_installation_output(
+    validation_project: Path, tmp_path: Path
+) -> None:
+    value = notebook()
+    value.cells.insert(
+        0,
+        new_code_cell(
+            '%pip install "torch-batteries[example]"',
+            execution_count=1,
+            outputs=[
+                new_output("stream", name="stdout", text="Successfully installed")
+            ],
+        ),
+    )
+    path = tmp_path / "installation-output.ipynb"
+    write_notebook(path, value)
+
+    result = validate(validation_project, path)
+
+    assert result.returncode != 0
+    assert "must remain unexecuted with no saved outputs" in result.stdout
+
+
 @pytest.mark.parametrize(
     ("name", "content", "message"),
     [

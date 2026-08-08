@@ -103,9 +103,33 @@ for notebook in "${notebooks[@]}"; do
     fi
 
     if [ -z "$reason" ]; then
+        invalid_installation=$(jq -r '
+            .cells | to_entries[] |
+            select(.value.cell_type == "code") |
+            select(
+                (.value.source | if type == "array" then join("") else . end) |
+                test("^\\s*%pip\\s+install\\s+.*torch-batteries")
+            ) |
+            select(
+                .value.execution_count != null or
+                ((.value.outputs // []) | length) != 0
+            ) |
+            .key
+        ' "$notebook" | head -n 1)
+        if [ -n "$invalid_installation" ]; then
+            reason="installation cell $invalid_installation must remain unexecuted with no saved outputs"
+        fi
+    fi
+
+    if [ -z "$reason" ]; then
         missing_execution=$(jq -r '
             .cells | to_entries[] |
-            select(.value.cell_type == "code" and .value.execution_count == null) |
+            select(.value.cell_type == "code") |
+            select(.value.execution_count == null) |
+            select(
+                (.value.source | if type == "array" then join("") else . end) |
+                test("^\\s*%pip\\s+install\\s+.*torch-batteries") | not
+            ) |
             .key
         ' "$notebook" | head -n 1)
         if [ -n "$missing_execution" ]; then
