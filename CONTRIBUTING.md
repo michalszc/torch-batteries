@@ -91,7 +91,9 @@ torch-batteries/
 ├── assets/                 # Project assets
 ├── scripts/                # Build and CI scripts
 │   ├── ci/                 # CI-specific scripts
-│   └── validate_version.sh # Version validation script
+│   │   └── run_check.sh    # CI check dispatcher
+│   ├── validate_notebooks.sh # Static notebook checks
+│   └── validate_version.sh # Version and release checks
 ├── .github/workflows/      # CI/CD pipelines
 │   ├── ci.yml              # Continuous integration
 │   ├── cd.yml              # Continuous deployment
@@ -99,6 +101,7 @@ torch-batteries/
 ├── pyproject.toml          # Project configuration
 ├── Makefile                # Development commands
 ├── LICENSE                 # Apache License 2.0
+├── NOTICE                  # Project copyright notice
 ├── README.md               # User documentation
 ├── CONTRIBUTING.md         # This file
 ├── .gitignore              # Git ignore patterns
