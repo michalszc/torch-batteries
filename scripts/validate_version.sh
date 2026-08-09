@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Validate version consistency across project files and PyPI
+# Validate version consistency across project files, release notes, and PyPI
 
 set -e
 
@@ -23,6 +23,31 @@ fi
 
 echo ""
 echo "✅ Versions match in project files"
+
+# Check release notes
+RELEASE_NOTES="documentation/release-notes.md"
+if [ ! -f "$RELEASE_NOTES" ]; then
+    echo ""
+    echo "❌ Release notes file not found: $RELEASE_NOTES"
+    exit 1
+fi
+
+RELEASE_NOTE_COUNT=$(python -c 'import re, sys; version, path = sys.argv[1:]; lines = open(path, encoding="utf-8").read().splitlines(); print(sum(re.match(r"^##\s+" + re.escape(version) + r"(?:\s|$)", line) is not None for line in lines))' "$PYPROJECT_VERSION" "$RELEASE_NOTES")
+
+if [ "$RELEASE_NOTE_COUNT" -eq 0 ]; then
+    echo ""
+    echo "❌ Version $PYPROJECT_VERSION is missing from $RELEASE_NOTES"
+    exit 1
+fi
+
+if [ "$RELEASE_NOTE_COUNT" -ne 1 ]; then
+    echo ""
+    echo "❌ Version $PYPROJECT_VERSION appears multiple times in $RELEASE_NOTES"
+    exit 1
+fi
+
+echo "📋 Release notes:   $PYPROJECT_VERSION"
+echo "✅ Current version is included exactly once in release notes"
 
 # Check PyPI version
 PACKAGE_NAME="torch-batteries"

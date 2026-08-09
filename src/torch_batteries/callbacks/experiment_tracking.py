@@ -64,7 +64,7 @@ class ExperimentTrackingCallback(Callback):
         Args:
             tracker: The experiment tracker instance
             run: Optional run configuration
-            log_freq: How often to log metrics (in steps)
+            log_every_n_steps: Positive interval between training metric log calls.
         """
         self._tracker = tracker
         self._run = run
@@ -131,7 +131,7 @@ class ExperimentTrackingCallback(Callback):
         Initialize tracker and log configuration.
 
         Args:
-            ctx: Event context
+            _: Event context, unused by this handler.
         """
         self.tracker.init(
             run=self.run if self.run is not None else Run(),

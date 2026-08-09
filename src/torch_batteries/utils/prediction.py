@@ -10,7 +10,22 @@ logger = get_logger("prediction")
 
 
 def concatenate_predictions(outputs: list[Any]) -> Any:
-    """Recursively concatenate matching tensor leaves across prediction batches."""
+    """Recursively concatenate matching tensor leaves across prediction batches.
+
+    Dictionaries must have matching keys and tuple/list containers must have matching
+    lengths. Tensor leaves are concatenated along dimension zero. Named tuples retain
+    their concrete type.
+
+    Args:
+        outputs: Non-empty list of batch outputs with identical nested structure.
+
+    Returns:
+        A matching nested structure with tensor leaves concatenated across batches.
+
+    Raises:
+        ValueError: If outputs are empty or container/tensor shapes are incompatible.
+        TypeError: If structures differ or a leaf is not a tensor.
+    """
     if not outputs:
         logger.error("Cannot concatenate an empty prediction result.")
         msg = "Cannot concatenate predictions because no outputs were returned."

@@ -35,19 +35,29 @@ _CHECKPOINT_SCHEMA_VERSION = 1
 
 
 class Battery:
-    """A flexible trainer class that uses decorated methods to define training behavior.
+    """Run event-driven training, evaluation, and prediction for a PyTorch model.
 
-    The Battery class discovers methods decorated with `@charge(Event.*)` to automatically
-    configure training, validation, testing, and prediction workflows.
+    ``Battery`` discovers model methods decorated with :func:`~torch_batteries.charge`
+    and dispatches lifecycle events to the model and configured callbacks. It moves
+    the model and batches to the selected device, aggregates losses and metrics, and
+    can save complete resumable training state.
 
     Args:
-        model: PyTorch model
-        device: PyTorch device. If 'auto', detects available device automatically.
-        optimizer: Optimizer for training (optional)
-        metrics: Dictionary of metric functions {name: callable(pred, target)}.
-                 These metrics are automatically calculated for each batch.
-        callbacks: List of callback instances for training events (optional)
-    """  # noqa: E501
+        model: Model containing the charged step methods. It is moved to ``device``.
+        device: Explicit PyTorch device or ``"auto"``. Automatic selection prefers
+            CUDA, then MPS, then CPU.
+        optimizer: Optimizer used by :meth:`train`. It is optional for testing and
+            prediction.
+        metrics: Named callable or stateful metrics. When metrics are configured,
+            train, validation, and test steps must return :class:`StepOutput` with
+            predictions and targets.
+        callbacks: Ordered callback objects. Callback order is significant for
+            provider-style optimization events.
+
+    Note:
+        Epoch values exposed through event contexts are one-based. Prediction output
+        stays on its current device unless ``move_to_cpu=True`` is requested.
+    """
 
     __slots__ = (
         "_callbacks",
@@ -269,7 +279,23 @@ class Battery:
         return f"{callback_type.__module__}.{callback_type.__qualname__}"
 
     def save_checkpoint(self, path: str | Path) -> None:
-        """Atomically save complete resumable training state."""
+        """Atomically save complete resumable training state.
+
+        The payload contains model and optimizer state, resumable callback and metric
+        state, the last completed epoch, optimizer-step index, and accumulated results.
+        Parent directories are created automatically and the final path is replaced
+        only after serialization succeeds.
+
+        Args:
+            path: Destination checkpoint path.
+
+        Raises:
+            OSError: If the destination cannot be created or replaced.
+            Exception: Propagates serialization errors raised by :func:`torch.save`.
+
+        Warning:
+            PyTorch checkpoints should only be loaded from trusted sources.
+        """
         checkpoint_path = Path(path)
         checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
         callbacks = self._checkpoint_callbacks()
@@ -370,7 +396,25 @@ class Battery:
     def load_checkpoint(  # noqa: PLR0915
         self, path: str | Path
     ) -> None:
-        """Strictly load full training state or auto-detected raw model weights."""
+        """Load full training state or auto-detected raw model weights.
+
+        Full checkpoints are restored strictly: the model, optimizer availability,
+        ordered resumable callbacks, and stateful metrics must match the current
+        ``Battery`` configuration. Optimizer tensors are moved to this battery's
+        device. A raw model ``state_dict`` is accepted as weights-only input but does
+        not mark training as resumable.
+
+        Args:
+            path: Full checkpoint or raw model-state path.
+
+        Raises:
+            ValueError: If the schema or configured callback/metric state differs.
+            TypeError: If the serialized payload has an invalid structure.
+            RuntimeError: If strict model or optimizer restoration fails.
+
+        Warning:
+            Load only checkpoints from trusted sources.
+        """
         checkpoint_path = Path(path)
         try:
             payload = torch.load(
@@ -475,20 +519,31 @@ class Battery:
         resume_from: str | Path | None = None,
         resume_epochs_mode: str = "total",
     ) -> TrainResult:
-        """
-        Train the model for the specified number of epochs.
+        """Train the model for one or more epochs.
+
+        A fresh call resets history and optimizer-step counters. A checkpoint loaded
+        explicitly or through ``resume_from`` continues its stored history. With
+        ``resume_epochs_mode="total"``, ``epochs`` is the final epoch target; with
+        ``"additional"``, it is the number of new epochs to run.
 
         Args:
-            train_loader: Training data loader
-            val_loader: Optional validation data loader
-            epochs: Number of training epochs
-            verbose: Verbosity level (0=silent, 1=progress bars, 2=epoch logs)
+            train_loader: Sized, non-empty training loader.
+            val_loader: Optional sized, non-empty validation loader. Supplying one
+                requires a method charged for ``Event.VALIDATION_STEP``.
+            epochs: Positive epoch count or resume target, depending on
+                ``resume_epochs_mode``.
+            verbose: ``0`` for silent, ``1`` for progress bars, or ``2`` for summaries.
+            resume_from: Optional full checkpoint loaded before training starts.
+            resume_epochs_mode: ``"total"`` or ``"additional"``.
 
         Returns:
-            TrainResult containing training and validation metrics
+            Per-epoch loss histories and named metric histories. Validation entries
+            remain empty when no validation loader is supplied.
 
         Raises:
-            ValueError: If no training step handler is found
+            ValueError: If inputs, handlers, resume mode, or checkpoint state are
+                incompatible.
+            TypeError: If a step result has an unsupported structure.
         """
         if resume_epochs_mode not in {"total", "additional"}:
             logger.error("Unsupported resume epochs mode: %s", resume_epochs_mode)
@@ -967,18 +1022,22 @@ class Battery:
         return val_metrics
 
     def test(self, test_loader: DataLoader, verbose: int = 1) -> TestResult:
-        """
-        Test the model on the provided data loader.
+        """Evaluate the model once without gradient tracking.
+
+        The model is placed in evaluation mode and ``Event.TEST_STEP`` runs for each
+        batch. Callable metrics are sample-weighted; stateful and collected metrics
+        compute once over the completed phase.
 
         Args:
-            test_loader: Test data loader
-            verbose: Verbosity level (0=silent, 1=progress bar, 2=simple log)
+            test_loader: Sized, non-empty test loader.
+            verbose: ``0`` for silent, ``1`` for a progress bar, or ``2`` for a summary.
 
         Returns:
-            TestResult containing test loss
+            Average test loss and, when present, named test metrics.
 
         Raises:
-            ValueError: If no test step handler is found
+            ValueError: If the loader is empty or no test-step handler exists.
+            TypeError: If a step returns an unsupported result structure.
         """
         if not self._event_handler.has_handler(Event.TEST_STEP):
             msg = (
@@ -1152,12 +1211,15 @@ class Battery:
         move_to_cpu: bool = False,
         concatenate: bool = False,
     ) -> PredictResult:
-        """
-        Generate predictions using the model.
+        """Collect predictions from one evaluation-mode pass over a loader.
+
+        The default result contains one user-defined output per batch. Structured
+        outputs can be recursively moved to CPU and concatenated without changing
+        matching dictionary, tuple, named-tuple, or list containers.
 
         Args:
-            data_loader: Data loader for prediction
-            verbose: Verbosity level (0=silent, 1=progress bar, 2=simple log)
+            data_loader: Sized, non-empty prediction loader.
+            verbose: ``0`` for silent, ``1`` for a progress bar, or ``2`` for a summary.
             move_to_cpu: Recursively detach tensor outputs and move them to CPU.
                 This is useful when predictions should not retain accelerator memory.
             concatenate: Recursively concatenate matching tensor outputs along their
@@ -1165,10 +1227,13 @@ class Battery:
                 retain their structure.
 
         Returns:
-            PredictResult containing predictions
+            Mapping containing either a list of batch outputs or one recursively
+            concatenated structured output.
 
         Raises:
-            ValueError: If no predict step handler is found
+            ValueError: If the loader is empty, no handler exists, or output shapes
+                cannot be concatenated.
+            TypeError: If concatenated batch structures do not match.
         """
         if not self._event_handler.has_handler(Event.PREDICT_STEP):
             logger.error("Prediction requires a predict step handler.")
@@ -1271,15 +1336,21 @@ class Battery:
     ) -> Iterator[Any]:
         """Yield prediction batches without retaining the complete result.
 
+        Lifecycle events still receive the number of yielded batches, but not an
+        accumulated ``predictions`` value. Iteration must finish for final prediction
+        events to run.
+
         Args:
-            data_loader: Data loader for prediction.
-            verbose: Verbosity level (0=silent, 1=progress bar, 2=simple log).
+            data_loader: Sized, non-empty prediction loader.
+            verbose: ``0`` for silent, ``1`` for a progress bar, or ``2`` for a summary.
             move_to_cpu: Recursively detach tensor outputs and move them to CPU
                 before yielding them.
 
         Yields:
-            One prediction-step output at a time. Iteration must finish for the
-            ``AFTER_PREDICT_EPOCH`` and ``AFTER_PREDICT`` events to run.
+            One user-defined prediction-step output at a time.
+
+        Raises:
+            ValueError: If the loader is empty or no predict-step handler exists.
         """
         if not self._event_handler.has_handler(Event.PREDICT_STEP):
             logger.error("Streaming prediction requires a predict step handler.")

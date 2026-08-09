@@ -1,14 +1,14 @@
-"""Trainer module for torch-batteries package.
+"""Event-driven model training, evaluation, and prediction.
 
-Provides the main Battery trainer class for PyTorch model training,
-testing, and prediction with event-driven workflow control.
+## Public API
 
-Main Classes:
-- Battery: Main trainer class with event-driven architecture
-- TrainResult: Return type for training results
-- TestResult: Return type for test results
-- PredictResult: Return type for prediction results
-- StepOutput: Explicit output from train, validation, and test steps
+- **`Battery`** — orchestrates device placement, steps, optimization, metrics,
+  callbacks, checkpoints, testing, and prediction.
+- **`StepOutput`** — explicit loss, predictions, targets, and manual metrics returned
+  from a train, validation, or test step.
+- **`TrainResult`** — per-epoch training and validation histories.
+- **`TestResult`** — aggregate test loss and metrics.
+- **`PredictResult`** — collected or recursively concatenated prediction output.
 """
 
 from .core import Battery

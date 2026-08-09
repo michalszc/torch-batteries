@@ -12,6 +12,16 @@ class StepOutput:
 
     Predictions and targets are required when automatic ``Battery`` metrics are
     configured. Metrics returned here override automatic metrics with the same name.
+
+    Args:
+        loss: Scalar tensor used for reporting and, during training, backward.
+        predictions: Outputs produced by the same forward pass as ``loss``.
+        targets: Ground-truth tensors corresponding to ``predictions``.
+        metrics: Named scalar tensors or numeric values calculated by the step.
+
+    Note:
+        Returning predictions here avoids an additional model forward pass. Manual
+        metric names take precedence over configured automatic metric names.
     """
 
     loss: torch.Tensor
@@ -76,8 +86,8 @@ class PredictResult(TypedDict):
     Contains predictions generated from the predict step handlers.
 
     Attributes:
-        predictions: List of predictions from each batch. The format depends
-                    on what the predict_step method returns (tensors, lists, etc.)
+        predictions: Batch list by default, or recursively concatenated structured
+            output when ``Battery.predict(..., concatenate=True)`` is used.
 
     Examples:
         ```python
