@@ -2,7 +2,8 @@
 
 import copy
 import tempfile
-from collections.abc import Iterator
+from collections.abc import Generator, Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, cast
 
@@ -11,6 +12,9 @@ from torch import nn
 from torch.utils.data import DataLoader
 
 from torch_batteries.callbacks.base import Callback
+from torch_batteries.data import DataContext, DataPack, DatasetBundle
+from torch_batteries.data.handler import DataPackHandler
+from torch_batteries.data.types import DataPhase, DataStage
 from torch_batteries.events import Event, EventContext, EventHandler, OptimizationStep
 from torch_batteries.trainer.context import copy_history_context
 from torch_batteries.trainer.types import (
@@ -61,6 +65,9 @@ class Battery:
 
     __slots__ = (
         "_callbacks",
+        "_data_pack",
+        "_data_pack_handler",
+        "_data_prepared",
         "_device",
         "_event_handler",
         "_last_completed_epoch",
@@ -74,13 +81,15 @@ class Battery:
         "_train_results",
     )
 
-    def __init__(
+    def __init__(  # noqa: PLR0913
         self,
         model: nn.Module,
         device: str | torch.device = "auto",
         optimizer: torch.optim.Optimizer | None = None,
         metrics: dict[str, Metric] | None = None,
         callbacks: list | None = None,
+        *,
+        data_pack: DataPack | None = None,
     ):
         self._device = get_device(device)
         self._model = model.to(self._device)
@@ -90,6 +99,11 @@ class Battery:
         callback_list = list(callbacks or [])
         self._callbacks = callback_list
         self._event_handler = EventHandler(self._model, callbacks=callback_list)
+        self._data_pack = data_pack
+        self._data_pack_handler = (
+            DataPackHandler(data_pack) if data_pack is not None else None
+        )
+        self._data_prepared = False
         self._stop_training = False
         self._last_completed_epoch = 0
         self._optimizer_step_idx = 0
@@ -119,6 +133,11 @@ class Battery:
     def device(self) -> torch.device:
         """Get the device."""
         return self._device
+
+    @property
+    def data_pack(self) -> DataPack | None:
+        """Get the event-driven data configuration attached to this Battery."""
+        return self._data_pack
 
     @property
     def optimizer(self) -> torch.optim.Optimizer | None:
@@ -155,6 +174,91 @@ class Battery:
     def stop_training(self, value: bool) -> None:
         """Set the stop_training flag."""
         self._stop_training = value
+
+    def _data_seed(self) -> int | None:
+        """Return an optional validated seed exposed by the configured DataPack."""
+        assert self._data_pack is not None
+        seed: object = getattr(self._data_pack, "seed", None)
+        if seed is None:
+            return None
+        if isinstance(seed, bool) or not isinstance(seed, int) or seed < 0:
+            msg = "DataPack seed must be a non-negative integer."
+            raise ValueError(msg)
+        return seed
+
+    def _data_context(
+        self,
+        stage: DataStage,
+        *,
+        phase: DataPhase | None = None,
+        datasets: DatasetBundle | None = None,
+    ) -> DataContext:
+        """Build a deterministic context for one DataPack lifecycle event."""
+        assert self._data_pack is not None
+        seed = self._data_seed()
+        offsets: dict[DataPhase, int] = {
+            "train": 1,
+            "validation": 2,
+            "test": 3,
+            "predict": 4,
+        }
+        context: DataContext = {
+            "battery": self,
+            "data_pack": self._data_pack,
+            "stage": stage,
+            "device": self._device,
+        }
+        if seed is not None:
+            context["seed"] = seed
+            context["generator"] = torch.Generator().manual_seed(
+                seed if phase is None else seed + offsets[phase]
+            )
+        if phase is not None:
+            context["phase"] = phase
+        if datasets is not None:
+            context["datasets"] = datasets
+        return context
+
+    @contextmanager
+    def _data_workflow(
+        self,
+        stage: DataStage,
+        phases: tuple[tuple[DataPhase, bool], ...],
+    ) -> Generator[dict[DataPhase, DataLoader[Any]]]:
+        """Resolve implicit loaders and guarantee DataPack teardown."""
+        if self._data_pack_handler is None or self._data_pack is None:
+            msg = (
+                "No DataLoader was provided and Battery has no DataPack. "
+                "Pass a loader or configure Battery(data_pack=...)."
+            )
+            raise ValueError(msg)
+
+        handler = self._data_pack_handler
+        setup_context = self._data_context(stage)
+        datasets: DatasetBundle | None = None
+        try:
+            if not self._data_prepared:
+                handler.call(Event.PREPARE_DATA, setup_context)
+                self._data_prepared = True
+            datasets = handler.setup(setup_context)
+            loaders: dict[DataPhase, DataLoader[Any]] = {}
+            for phase, required in phases:
+                dataset = datasets.for_phase(phase)
+                if dataset is None:
+                    if required:
+                        msg = (
+                            f"DataPack '{type(self._data_pack).__name__}' did not "
+                            f"provide a dataset for phase '{phase}'."
+                        )
+                        raise ValueError(msg)
+                    continue
+                context = self._data_context(stage, phase=phase, datasets=datasets)
+                context["dataset"] = dataset
+                loaders[phase] = handler.build_loader(context, dataset)
+            yield loaders
+        finally:
+            teardown_context = self._data_context(stage, datasets=datasets)
+            handler.call(Event.TEARDOWN_DATA, teardown_context)
 
     @staticmethod
     def _validate_loss(loss: Any, phase: str) -> torch.Tensor:
@@ -509,7 +613,46 @@ class Battery:
             int(payload["optimizer_step_idx"]),
         )
 
-    def train(  # noqa: PLR0912, PLR0913, PLR0915
+    def train(  # noqa: PLR0913
+        self,
+        train_loader: DataLoader | None = None,
+        val_loader: DataLoader | None = None,
+        epochs: int = 1,
+        verbose: int = 1,
+        *,
+        resume_from: str | Path | None = None,
+        resume_epochs_mode: str = "total",
+    ) -> TrainResult:
+        """Train with explicit loaders or resolve them from the attached DataPack."""
+        if train_loader is not None:
+            return self._train_with_loaders(
+                train_loader,
+                val_loader,
+                epochs,
+                verbose,
+                resume_from=resume_from,
+                resume_epochs_mode=resume_epochs_mode,
+            )
+        if val_loader is not None:
+            msg = (
+                "An explicit validation loader cannot be combined with an implicit "
+                "DataPack training loader."
+            )
+            raise ValueError(msg)
+        with self._data_workflow(
+            "fit",
+            (("train", True), ("validation", False)),
+        ) as loaders:
+            return self._train_with_loaders(
+                loaders["train"],
+                loaders.get("validation"),
+                epochs,
+                verbose,
+                resume_from=resume_from,
+                resume_epochs_mode=resume_epochs_mode,
+            )
+
+    def _train_with_loaders(  # noqa: PLR0912, PLR0913, PLR0915
         self,
         train_loader: DataLoader,
         val_loader: DataLoader | None = None,
@@ -1021,7 +1164,22 @@ class Battery:
 
         return val_metrics
 
-    def test(self, test_loader: DataLoader, verbose: int = 1) -> TestResult:
+    def test(
+        self,
+        test_loader: DataLoader | None = None,
+        verbose: int = 1,
+    ) -> TestResult:
+        """Test with an explicit loader or resolve it from the attached DataPack."""
+        if test_loader is not None:
+            return self._test_with_loader(test_loader, verbose)
+        with self._data_workflow("test", (("test", True),)) as loaders:
+            return self._test_with_loader(loaders["test"], verbose)
+
+    def _test_with_loader(
+        self,
+        test_loader: DataLoader,
+        verbose: int = 1,
+    ) -> TestResult:
         """Evaluate the model once without gradient tracking.
 
         The model is placed in evaluation mode and ``Event.TEST_STEP`` runs for each
@@ -1205,6 +1363,30 @@ class Battery:
 
     def predict(
         self,
+        data_loader: DataLoader | None = None,
+        verbose: int = 1,
+        *,
+        move_to_cpu: bool = False,
+        concatenate: bool = False,
+    ) -> PredictResult:
+        """Predict with an explicit loader or resolve it from the attached DataPack."""
+        if data_loader is not None:
+            return self._predict_with_loader(
+                data_loader,
+                verbose,
+                move_to_cpu=move_to_cpu,
+                concatenate=concatenate,
+            )
+        with self._data_workflow("predict", (("predict", True),)) as loaders:
+            return self._predict_with_loader(
+                loaders["predict"],
+                verbose,
+                move_to_cpu=move_to_cpu,
+                concatenate=concatenate,
+            )
+
+    def _predict_with_loader(
+        self,
         data_loader: DataLoader,
         verbose: int = 1,
         *,
@@ -1328,6 +1510,28 @@ class Battery:
         return {"predictions": prediction_output}
 
     def predict_iter(
+        self,
+        data_loader: DataLoader | None = None,
+        verbose: int = 1,
+        *,
+        move_to_cpu: bool = False,
+    ) -> Iterator[Any]:
+        """Stream predictions from an explicit loader or the attached DataPack."""
+        if data_loader is not None:
+            yield from self._predict_iter_with_loader(
+                data_loader,
+                verbose,
+                move_to_cpu=move_to_cpu,
+            )
+            return
+        with self._data_workflow("predict", (("predict", True),)) as loaders:
+            yield from self._predict_iter_with_loader(
+                loaders["predict"],
+                verbose,
+                move_to_cpu=move_to_cpu,
+            )
+
+    def _predict_iter_with_loader(
         self,
         data_loader: DataLoader,
         verbose: int = 1,
