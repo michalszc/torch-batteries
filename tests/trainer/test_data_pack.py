@@ -115,6 +115,8 @@ def test_data_pack_drives_all_battery_workflows() -> None:
     data_pack = WorkflowDataPack()
     battery = _battery(data_pack)
 
+    assert battery.data_pack is data_pack
+
     train_result = battery.train(epochs=1, verbose=0)
     test_result = battery.test(verbose=0)
     predict_result = battery.predict(verbose=0, concatenate=True, move_to_cpu=True)

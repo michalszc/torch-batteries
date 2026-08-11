@@ -227,6 +227,19 @@ def test_provider_rejects_malformed_internal_registration() -> None:
         )
 
 
+def test_append_rejects_model_specific_internal_registration() -> None:
+    """Broadcast discovery cannot append to a model-specific callable slot."""
+    handler = EventHandler(nn.Linear(1, 1))
+    handler._event_handlers[Event.BEFORE_TRAIN] = lambda: None  # noqa: SLF001
+
+    with pytest.raises(TypeError, match="Cannot register multiple handlers"):
+        handler._append_handler(  # noqa: SLF001
+            Event.BEFORE_TRAIN,
+            lambda _: None,
+            "callback.invalid",
+        )
+
+
 def test_executor_rejects_multiple_internal_registrations() -> None:
     """Executor dispatch defensively rejects ambiguous registrations."""
     handler = EventHandler(nn.Linear(1, 1))

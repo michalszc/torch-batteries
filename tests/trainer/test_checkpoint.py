@@ -419,6 +419,17 @@ def test_schema_one_checkpoint_remains_loadable(tmp_path: Path) -> None:
     target.load_checkpoint(checkpoint)
 
 
+def test_schema_two_checkpoint_requires_data_pack_field(tmp_path: Path) -> None:
+    checkpoint = tmp_path / "missing-data-pack-field.pth"
+    _battery()[0].save_checkpoint(checkpoint)
+    payload = torch.load(checkpoint, weights_only=True)
+    del payload["data_pack"]
+    torch.save(payload, checkpoint)
+
+    with pytest.raises(ValueError, match="missing fields: \\['data_pack'\\]"):
+        _battery()[0].load_checkpoint(checkpoint)
+
+
 def test_checkpoint_requires_matching_data_pack(tmp_path: Path) -> None:
     checkpoint = tmp_path / "required-data-pack.pth"
     _battery_with_data_pack(_StatefulDataPack(2)).save_checkpoint(checkpoint)

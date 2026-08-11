@@ -41,6 +41,16 @@ def test_data_pack_default_state_contract_is_stateless() -> None:
     data_pack.load_state_dict({})
 
 
+def test_data_pack_default_state_warns_about_unexpected_keys(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    data_pack = DataPack()
+
+    data_pack.load_state_dict({"split": [1, 2]})
+
+    assert "ignored unexpected state keys: ['split']" in caplog.text
+
+
 @pytest.mark.parametrize(
     ("kwargs", "message"),
     [

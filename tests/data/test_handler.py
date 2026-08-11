@@ -5,7 +5,13 @@ from typing import Any
 import pytest
 import torch
 from torch import nn
-from torch.utils.data import DataLoader, IterableDataset, TensorDataset
+from torch.utils.data import (
+    BatchSampler,
+    DataLoader,
+    IterableDataset,
+    SequentialSampler,
+    TensorDataset,
+)
 
 from torch_batteries import (
     DataContext,
@@ -71,6 +77,41 @@ def test_handler_dispatches_data_lifecycle() -> None:
 
     assert len(loader) == 3
     assert data_pack.calls == ["prepare", "setup", "loader:train", "teardown"]
+
+
+def test_handler_reports_registered_events() -> None:
+    handler = DataPackHandler(ExampleDataPack())
+
+    assert handler.has_handler(Event.SETUP_DATA)
+    assert not handler.has_handler(Event.BEFORE_TRAIN)
+
+
+def test_call_rejects_provider_event() -> None:
+    data_pack = ExampleDataPack()
+    handler = DataPackHandler(data_pack)
+
+    with pytest.raises(ValueError, match="not a DataPack side-effect event"):
+        handler.call(Event.SETUP_DATA, _context(data_pack))
+
+
+def test_provide_rejects_side_effect_event() -> None:
+    data_pack = ExampleDataPack()
+    handler = DataPackHandler(data_pack)
+
+    with pytest.raises(ValueError, match="not a DataPack provider event"):
+        handler.provide(Event.PREPARE_DATA, _context(data_pack), default=None)
+
+
+def test_side_effect_handler_must_return_none() -> None:
+    class InvalidDataPack(DataPack):
+        @charge(Event.PREPARE_DATA)
+        def prepare(self, _: DataContext) -> str:
+            return "invalid"
+
+    data_pack = InvalidDataPack()
+
+    with pytest.raises(TypeError, match="handlers must return None"):
+        DataPackHandler(data_pack).call(Event.PREPARE_DATA, _context(data_pack))
 
 
 def test_setup_requires_dataset_bundle() -> None:
@@ -145,6 +186,34 @@ def test_cuda_device_enables_automatic_pin_memory() -> None:
         device=torch.device("cuda"),
     )
     assert loader.pin_memory is True
+
+
+def test_worker_prefetch_configuration_is_materialized() -> None:
+    loader = materialize_dataloader(
+        TensorDataset(torch.arange(4)),
+        DataLoaderConfig(num_workers=1, prefetch_factor=3),
+        phase="test",
+        device=torch.device("cpu"),
+    )
+
+    assert loader.num_workers == 1
+    assert loader.prefetch_factor == 3
+
+
+def test_batch_sampler_configuration_is_materialized() -> None:
+    dataset = TensorDataset(torch.arange(4))
+    batch_sampler = BatchSampler(
+        SequentialSampler(dataset), batch_size=2, drop_last=False
+    )
+
+    loader = materialize_dataloader(
+        dataset,
+        DataLoaderConfig(batch_size=None, batch_sampler=batch_sampler),
+        phase="train",
+        device=torch.device("cpu"),
+    )
+
+    assert loader.batch_sampler is batch_sampler
 
 
 class NumberStream(IterableDataset[int]):
