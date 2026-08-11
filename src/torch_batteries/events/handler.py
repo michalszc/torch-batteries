@@ -42,6 +42,12 @@ class EventHandler:
         Event.GRADIENT_CLIP,
         Event.OPTIMIZER_STEP,
     }
+    DATA_SPECIFIC_EVENTS: ClassVar[set[Event]] = {
+        Event.PREPARE_DATA,
+        Event.SETUP_DATA,
+        Event.CONFIGURE_DATALOADER,
+        Event.TEARDOWN_DATA,
+    }
 
     def __init__(self, model: nn.Module, callbacks: list | None = None):
         self.model = model
@@ -81,6 +87,12 @@ class EventHandler:
             method = getattr(self.model, name)
             if callable(method) and hasattr(method, "_torch_batteries_event"):
                 event = method._torch_batteries_event  # noqa: SLF001
+                if event in self.DATA_SPECIFIC_EVENTS:
+                    msg = (
+                        f"Model method '{name}' cannot handle DataPack event "
+                        f"'{event.value}'."
+                    )
+                    raise ValueError(msg)
                 if event in self.MODEL_SPECIFIC_CALLBACKS:
                     self._event_handlers[event] = method
                 else:
@@ -109,6 +121,12 @@ class EventHandler:
                 method = getattr(callback, name)
                 if callable(method) and hasattr(method, "_torch_batteries_event"):
                     event = method._torch_batteries_event  # noqa: SLF001
+                    if event in self.DATA_SPECIFIC_EVENTS:
+                        msg = (
+                            f"Callback '{type(callback).__name__}' cannot handle "
+                            f"DataPack event '{event.value}'."
+                        )
+                        raise ValueError(msg)
                     if event in self.MODEL_SPECIFIC_CALLBACKS:
                         logger.warning(
                             "Callback '%s' should not handle model-specific event '%s'",
