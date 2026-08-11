@@ -1,5 +1,17 @@
 # Release Notes
 
+## 0.10.0 — 2026-08-11
+
+- Added event-driven `DataPack` workflows for reusable dataset and DataLoader
+  construction across training, testing, and prediction while preserving the direct
+  DataLoader API.
+- Added validated phase-aware `DataLoaderConfig` materialization, deterministic
+  opt-in generators, guaranteed teardown, and DataPack state in schema-version-2
+  checkpoints with schema-version-1 compatibility.
+- Added the DataPack guide and API reference, converted the MNIST notebook to the
+  implicit DataPack workflow, and retained direct DataLoader coverage in the
+  function-fitting notebook.
+
 ## 0.9.0 — 2026-08-08
 
 - Replaced pdoc with a structured MkDocs Material site, clarified public contracts,
