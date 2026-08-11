@@ -7,7 +7,17 @@ from torch import nn
 from torch.nn import functional as F  # noqa: N812
 from torch.utils.data import DataLoader, TensorDataset
 
-from torch_batteries import Battery, Event, EventContext, StepOutput, charge
+from torch_batteries import (
+    Battery,
+    DataContext,
+    DataLoaderConfig,
+    DataPack,
+    DatasetBundle,
+    Event,
+    EventContext,
+    StepOutput,
+    charge,
+)
 
 
 class _DocumentedRegressor(nn.Module):
@@ -45,6 +55,33 @@ class _DocumentedRegressor(nn.Module):
         return self.forward(inputs)
 
 
+class _DocumentedDataPack(DataPack):
+    seed = 7
+
+    def __init__(self) -> None:
+        self.teardown_calls = 0
+
+    @charge(Event.SETUP_DATA)
+    def setup(self, context: DataContext) -> DatasetBundle:
+        inputs = torch.randn(16, 4, generator=context["generator"])
+        targets = inputs.sum(dim=1, keepdim=True)
+        dataset = TensorDataset(inputs, targets)
+        return DatasetBundle(
+            train=dataset,
+            validation=dataset,
+            test=dataset,
+            predict=dataset,
+        )
+
+    @charge(Event.CONFIGURE_DATALOADER)
+    def configure_loader(self, context: DataContext) -> DataLoaderConfig:
+        return DataLoaderConfig(batch_size=8)
+
+    @charge(Event.TEARDOWN_DATA)
+    def teardown(self, context: DataContext) -> None:
+        self.teardown_calls += 1
+
+
 def test_getting_started_workflow() -> None:
     """The documented train/test/predict workflow remains executable on CPU."""
     torch.manual_seed(7)
@@ -73,3 +110,24 @@ def test_getting_started_workflow() -> None:
     assert "mae" in test_result["test_metrics"]
     assert prediction_result["predictions"].shape == (16, 1)
     assert prediction_result["predictions"].device.type == "cpu"
+
+
+def test_documented_data_pack_workflow() -> None:
+    """The documented implicit-loader workflow remains executable on CPU."""
+    data_pack = _DocumentedDataPack()
+    model = _DocumentedRegressor()
+    battery = Battery(
+        model,
+        device="cpu",
+        optimizer=torch.optim.Adam(model.parameters(), lr=0.05),
+        data_pack=data_pack,
+    )
+
+    history = battery.train(epochs=1, verbose=0)
+    test_result = battery.test(verbose=0)
+    predictions = battery.predict(verbose=0, concatenate=True)
+
+    assert len(history["train_loss"]) == 1
+    assert test_result["test_loss"] >= 0
+    assert predictions["predictions"].shape == (16, 1)
+    assert data_pack.teardown_calls == 3

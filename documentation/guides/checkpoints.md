@@ -14,11 +14,13 @@ The write is atomic and creates missing parent directories. A full checkpoint st
 - Model and optimizer state
 - Ordered resumable callback state
 - Optional state exposed by configured metrics
+- The qualified DataPack type and its optional `state_dict()`
 - Last completed epoch and optimizer-step index
 - Accumulated train and validation histories
 
-Random-number-generator state and loader/sampler state are not included; set seeds
-and restore custom data state separately when exact sample order matters.
+Datasets, DataLoaders, workers, open resources, and random-number-generator state are
+not included. A DataPack can preserve construction inputs such as split indices or a
+streaming position in its own state; it should not return live data objects.
 
 ## Load and continue
 
@@ -58,6 +60,9 @@ battery.train(
 
 Optimizer tensors are mapped to the battery's current device. Model loading is strict.
 Callback types and order and resumable metric names must match the saved state.
+If the checkpoint contains DataPack state, the same qualified DataPack type must be
+attached. `train(resume_from=...)` restores it before `SETUP_DATA`, so saved splits
+affect the loaders used by the resumed workflow.
 
 ## Keep the best checkpoints
 
@@ -96,5 +101,6 @@ Restoration fails rather than silently changing an experiment when:
 - A saved optimizer exists but the new battery has none.
 - Resumable callback types or order differ.
 - Stateful metric names differ.
+- The saved and configured DataPack types differ, or a required DataPack is missing.
 - A callback's fixed configuration differs, such as accumulation steps or precision.
 - The requested total resume target contains no new epoch.

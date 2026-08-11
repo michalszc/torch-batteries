@@ -96,3 +96,7 @@ tensor here.
 
 Continue with [Core Concepts](core-concepts.md), then select a task from the
 [Guides](../guides/index.md).
+
+This example passes DataLoaders directly, which is useful when the caller already
+owns them. For reusable event-driven dataset and loader construction, continue with
+the [DataPack guide](../guides/data-pack.md).

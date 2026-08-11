@@ -4,6 +4,21 @@ Handlers receive an `EventContext`; keys vary by event. Epoch values are one-bas
 Broadcast handlers run model-first and then in callback order. Provider/executor
 events are exclusive and reject multiple handlers.
 
+Data lifecycle events are owned only by an attached `DataPack`; placing them on a
+model or callback fails during discovery.
+
+## DataPack events
+
+| Event | Dispatch | Purpose |
+| --- | --- | --- |
+| `PREPARE_DATA` | Broadcast side effect | Idempotent download/cache preparation, once per Battery |
+| `SETUP_DATA` | Exclusive provider | Return one `DatasetBundle` per workflow invocation |
+| `CONFIGURE_DATALOADER` | Exclusive provider | Return `DataLoaderConfig` or a custom `DataLoader` for each phase |
+| `TEARDOWN_DATA` | Broadcast side effect | Clean up after an implicit workflow, including failures |
+
+These handlers receive `DataContext`, documented in the [Data API](data.md), rather
+than the model-step `EventContext`.
+
 ## Workflow events
 
 | Phase | Once around workflow | Around each epoch | Around each batch | Required step |

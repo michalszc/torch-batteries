@@ -12,6 +12,22 @@ def training_step(self, context: EventContext) -> StepOutput:
 
 Supplying a validation loader without `VALIDATION_STEP` fails before training begins.
 
+## No loader or DataPack dataset was provided
+
+Pass an explicit primary DataLoader, or attach `Battery(data_pack=...)` with a
+`SETUP_DATA` handler returning `DatasetBundle`. An implicit train, test, or prediction
+workflow requires its corresponding dataset. Validation is optional.
+
+Do not pass only `val_loader`: an explicit train loader selects direct-loader mode,
+and Battery never mixes it with implicit DataPack loaders.
+
+## A DataLoaderConfig is invalid
+
+Do not combine a sampler with `shuffle=True`. A batch sampler requires
+`batch_size=None` and cannot be combined with shuffle, a sampler, or `drop_last`.
+Prefetching and persistent workers require `num_workers > 0`; iterable datasets
+cannot be shuffled.
+
 ## Optimizer is required for training
 
 Pass an optimizer during construction or assign `battery.optimizer` before `train`.
@@ -51,8 +67,9 @@ application code.
 ## A checkpoint cannot be resumed
 
 Recreate the same model, optimizer, ordered `Callback` subclasses, callback
-configuration, and resumable metrics. Raw weights initialize only the model and are
-not a resumable checkpoint. Load checkpoint files only from trusted sources.
+configuration, resumable metrics, and DataPack type. Raw weights initialize only the
+model and are not a resumable checkpoint. Load checkpoint files only from trusted
+sources.
 
 ## W&B is unavailable
 

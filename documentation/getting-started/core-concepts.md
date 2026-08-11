@@ -25,6 +25,17 @@ or `(loss, metrics)` remains supported only when no automatic metrics are config
 Public epoch numbers begin at one. Test and prediction are single-pass workflows and
 therefore expose epoch `1` to handlers.
 
+## DataPack optionally owns data construction
+
+A `DataPack` groups reusable dataset setup and DataLoader policy behind charged data
+events. It is separate from the model because data preparation has a different
+lifecycle: prepare once, set up per workflow, configure each phase loader, then tear
+down even after failure.
+
+DataPack is optional. Passing a primary DataLoader keeps the direct API and prevents
+implicit mixing for that workflow. See [DataPack Workflows](../guides/data-pack.md)
+for lifecycle, defaults, and checkpoint behavior.
+
 ## Metrics describe measurement
 
 Ordinary callables produce a value per batch. Stateful metrics implement

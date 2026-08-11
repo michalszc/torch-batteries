@@ -61,6 +61,11 @@ battery = Battery(model, optimizer=optimizer, device="cuda:1")
 The model is moved during construction. If full optimizer state is later loaded from
 a checkpoint, its tensors are recursively moved to the same device.
 
+When a DataPack returns `DataLoaderConfig(pin_memory="auto")`, loader pinning is
+enabled for CUDA and disabled for CPU or MPS. This only controls host-memory pinning;
+Battery still performs recursive batch movement before dispatching a model step.
+Explicit DataLoaders retain their own `pin_memory` setting.
+
 ## Prediction output devices
 
 Prediction outputs remain on the model device by default. Use:

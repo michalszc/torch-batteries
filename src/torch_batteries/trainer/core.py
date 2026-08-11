@@ -58,6 +58,8 @@ class Battery:
             predictions and targets.
         callbacks: Ordered callback objects. Callback order is significant for
             provider-style optimization events.
+        data_pack: Optional event-driven dataset and DataLoader configuration. When
+            attached, workflow loaders may be omitted.
 
     Note:
         Epoch values exposed through event contexts are one-based. Prediction output
@@ -438,10 +440,10 @@ class Battery:
     def save_checkpoint(self, path: str | Path) -> None:
         """Atomically save complete resumable training state.
 
-        The payload contains model and optimizer state, resumable callback and metric
-        state, the last completed epoch, optimizer-step index, and accumulated results.
-        Parent directories are created automatically and the final path is replaced
-        only after serialization succeeds.
+        The payload contains model and optimizer state, resumable callback, metric,
+        and DataPack state, the last completed epoch, optimizer-step index, and
+        accumulated results. Parent directories are created automatically and the
+        final path is replaced only after serialization succeeds.
 
         Args:
             path: Destination checkpoint path.
@@ -557,8 +559,9 @@ class Battery:
         """Load full training state or auto-detected raw model weights.
 
         Full checkpoints are restored strictly: the model, optimizer availability,
-        ordered resumable callbacks, and stateful metrics must match the current
-        ``Battery`` configuration. Optimizer tensors are moved to this battery's
+        ordered resumable callbacks, stateful metrics, and saved DataPack type must
+        match the current ``Battery`` configuration. DataPack state is restored before
+        a later implicit setup, and optimizer tensors are moved to this battery's
         device. A raw model ``state_dict`` is accepted as weights-only input but does
         not mark training as resumable.
 
@@ -680,7 +683,29 @@ class Battery:
         resume_from: str | Path | None = None,
         resume_epochs_mode: str = "total",
     ) -> TrainResult:
-        """Train with explicit loaders or resolve them from the attached DataPack."""
+        """Train the model for one or more epochs.
+
+        Passing ``train_loader`` selects direct-loader mode. When it is omitted, the
+        attached DataPack supplies train and optional validation loaders. A checkpoint
+        passed through ``resume_from`` is restored before DataPack setup.
+
+        Args:
+            train_loader: Optional sized, non-empty training loader.
+            val_loader: Optional validation loader used only with an explicit train
+                loader. Implicit validation comes from the DataPack.
+            epochs: Positive epoch count or resume target.
+            verbose: ``0`` for silent, ``1`` for progress bars, or ``2`` for summaries.
+            resume_from: Optional full checkpoint restored before data resolution.
+            resume_epochs_mode: ``"total"`` treats ``epochs`` as the final target;
+                ``"additional"`` runs that many new epochs.
+
+        Returns:
+            Per-epoch loss histories and named metric histories.
+
+        Raises:
+            ValueError: If loaders, DataPack datasets, handlers, optimizer, resume
+                mode, or checkpoint state are incompatible.
+        """
         if epochs <= 0:
             msg = "epochs must be greater than zero."
             raise ValueError(msg)
@@ -1226,7 +1251,16 @@ class Battery:
         test_loader: DataLoader | None = None,
         verbose: int = 1,
     ) -> TestResult:
-        """Test with an explicit loader or resolve it from the attached DataPack."""
+        """Evaluate once with an explicit or DataPack-provided test loader.
+
+        Args:
+            test_loader: Optional sized, non-empty test loader. When omitted, the
+                attached DataPack must provide its test dataset.
+            verbose: ``0`` for silent, ``1`` for a progress bar, or ``2`` for a summary.
+
+        Returns:
+            Average test loss and, when present, named test metrics.
+        """
         if test_loader is not None:
             return self._test_with_loader(test_loader, verbose)
         with self._data_workflow("test", (("test", True),)) as loaders:
@@ -1426,7 +1460,19 @@ class Battery:
         move_to_cpu: bool = False,
         concatenate: bool = False,
     ) -> PredictResult:
-        """Predict with an explicit loader or resolve it from the attached DataPack."""
+        """Collect predictions using an explicit or DataPack-provided loader.
+
+        Args:
+            data_loader: Optional sized, non-empty prediction loader. When omitted,
+                the attached DataPack must provide its prediction dataset.
+            verbose: ``0`` for silent, ``1`` for a progress bar, or ``2`` for a summary.
+            move_to_cpu: Recursively detach tensor outputs and move them to CPU.
+            concatenate: Recursively concatenate matching outputs along their first
+                dimension while retaining nested container structure.
+
+        Returns:
+            Mapping containing a batch-output list or one concatenated output.
+        """
         if data_loader is not None:
             return self._predict_with_loader(
                 data_loader,
@@ -1573,7 +1619,22 @@ class Battery:
         *,
         move_to_cpu: bool = False,
     ) -> Iterator[Any]:
-        """Stream predictions from an explicit loader or the attached DataPack."""
+        """Stream predictions using an explicit or DataPack-provided loader.
+
+        Args:
+            data_loader: Optional sized, non-empty prediction loader. When omitted,
+                the attached DataPack must provide its prediction dataset.
+            verbose: ``0`` for silent, ``1`` for a progress bar, or ``2`` for a summary.
+            move_to_cpu: Recursively detach tensor outputs and move them to CPU before
+                yielding them.
+
+        Yields:
+            One user-defined prediction-step output at a time.
+
+        Note:
+            Iteration must finish for final prediction and DataPack teardown events to
+            run.
+        """
         if data_loader is not None:
             yield from self._predict_iter_with_loader(
                 data_loader,

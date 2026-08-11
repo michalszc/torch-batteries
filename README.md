@@ -19,9 +19,10 @@ callbacks, checkpoints, progress, evaluation, and prediction.
 ## Features
 
 - Explicit train, validation, test, and prediction steps with `@charge`
+- Event-driven `DataPack` construction for reusable datasets and DataLoaders
 - Single-forward-pass automatic, stateful, and full-phase metrics
 - Early stopping and Top-K model checkpoints
-- Resumable model, optimizer, callback, metric, and history state
+- Resumable model, optimizer, callback, metric, DataPack, and history state
 - Gradient accumulation, clipping, mixed precision, and scheduler callbacks
 - Structured batch transfer and structured/streaming prediction
 - Optional Weights & Biases experiment tracking
@@ -105,6 +106,7 @@ methods only for the workflows you use.
 - [Quick start](https://michalszc.github.io/torch-batteries/getting-started/quickstart/)
 - [Core concepts](https://michalszc.github.io/torch-batteries/getting-started/core-concepts/)
 - [Guides](https://michalszc.github.io/torch-batteries/guides/)
+- [DataPack workflows](https://michalszc.github.io/torch-batteries/guides/data-pack/)
 - [API reference](https://michalszc.github.io/torch-batteries/reference/)
 
 ## Examples
@@ -114,7 +116,7 @@ Explore practical examples demonstrating torch-batteries features:
 | Example | Description | Notebook | Colab |
 |---------|-------------|----------|-------|
 | **Function Fitting with MLP** | Train a neural network to approximate a polynomial function using the event-driven training approach | [function_fitting.ipynb](notebooks/function_fitting.ipynb) | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/michalszc/torch-batteries/blob/master/notebooks/function_fitting.ipynb) |
-| **Image Classification with CNN** | Train a Convolutional Neural Network (CNN) for image classification | [image_classification.ipynb](notebooks/image_classification.ipynb) | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/michalszc/torch-batteries/blob/master/notebooks/image_classification.ipynb) |
+| **Image Classification with CNN** | Build MNIST datasets and DataLoaders through an event-driven DataPack | [image_classification.ipynb](notebooks/image_classification.ipynb) | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/michalszc/torch-batteries/blob/master/notebooks/image_classification.ipynb) |
 | **FashionMNIST Diffusion** | Train a class-conditioned Diffusers U-Net with optimization callbacks and streaming prediction | [fashion_mnist_diffusion.ipynb](notebooks/fashion_mnist_diffusion.ipynb) | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/michalszc/torch-batteries/blob/master/notebooks/fashion_mnist_diffusion.ipynb) |
 | **CartPole Reinforcement Learning** | Train a compact DQN from replay transitions with optimization events and stateful metrics | [cartpole_reinforcement_learning.ipynb](notebooks/cartpole_reinforcement_learning.ipynb) | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/michalszc/torch-batteries/blob/master/notebooks/cartpole_reinforcement_learning.ipynb) |
 | **CIFAR-10 ResNet18 Transfer Learning** | Fine-tune a pretrained ResNet18 with resumable training state, full-phase metrics, and structured prediction | [cifar10_transfer_learning.ipynb](notebooks/cifar10_transfer_learning.ipynb) | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/michalszc/torch-batteries/blob/master/notebooks/cifar10_transfer_learning.ipynb) |
