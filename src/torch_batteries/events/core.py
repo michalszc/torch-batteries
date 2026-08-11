@@ -357,6 +357,12 @@ class Event(Enum):
         - **Context**: `optimizer`, `batch`, `batch_idx`, `epoch`, `predictions`
     """
 
+    # DataPack lifecycle events
+    PREPARE_DATA = "prepare_data"
+    SETUP_DATA = "setup_data"
+    CONFIGURE_DATALOADER = "configure_dataloader"
+    TEARDOWN_DATA = "teardown_data"
+
     # Optimization extension events
     SETUP = "setup"
     STEP_EXECUTION_CONTEXT = "step_execution_context"
@@ -410,8 +416,8 @@ class Event(Enum):
 def charge(event: Event) -> Callable[[Callable[P, R]], Callable[P, R]]:
     """Decorator to mark methods for specific training events.
 
-    All event handlers should accept a single `EventContext` parameter containing
-    relevant context for the event. Different events populate different fields.
+    Handlers accept the context associated with the selected event. Model and callback
+    events receive `EventContext`; DataPack events receive `DataContext`.
 
     Args:
         event: The event type from the Event enum

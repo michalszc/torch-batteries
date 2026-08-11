@@ -46,6 +46,7 @@ __version__ = "0.9.0"
 __author__ = ["Michal Szczygiel", "Arkadiusz Paterak", "Antoni Zięciak"]
 
 # Import main components
+from .data import DataContext, DataLoaderConfig, DataPack, DatasetBundle
 from .events import Event, EventContext, OptimizationStep, charge
 from .tracking import (
     Run,
@@ -56,6 +57,10 @@ from .utils.metrics import CollectedMetric, StatefulMetric
 __all__ = [
     "Battery",
     "CollectedMetric",
+    "DataContext",
+    "DataLoaderConfig",
+    "DataPack",
+    "DatasetBundle",
     "Event",
     "EventContext",
     "OptimizationStep",

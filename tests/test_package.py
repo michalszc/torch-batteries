@@ -10,7 +10,7 @@ import torch
 from torch import nn
 
 import torch_batteries
-from torch_batteries import events, trainer, utils
+from torch_batteries import data, events, trainer, utils
 from torch_batteries.events import Event, EventHandler, charge
 from torch_batteries.trainer import Battery
 from torch_batteries.utils import batch, device, logging, progress
@@ -25,6 +25,7 @@ def test_package_import() -> None:
 def test_submodules_import() -> None:
     """Test that all submodules can be imported."""
     assert events is not None
+    assert data is not None
     assert trainer is not None
     assert utils is not None
 
@@ -35,6 +36,10 @@ def test_core_classes_import() -> None:
     assert EventHandler is not None
     assert charge is not None
     assert Battery is not None
+    assert torch_batteries.DataPack is not None
+    assert torch_batteries.DatasetBundle is not None
+    assert torch_batteries.DataLoaderConfig is not None
+    assert torch_batteries.DataContext is not None
 
 
 def test_utils_import() -> None:
