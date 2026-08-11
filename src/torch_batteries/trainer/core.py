@@ -35,7 +35,8 @@ from torch_batteries.utils.progress.types import (  # noqa: TC001
 
 logger = get_logger("trainer")
 
-_CHECKPOINT_SCHEMA_VERSION = 1
+_CHECKPOINT_SCHEMA_VERSION = 2
+_SUPPORTED_CHECKPOINT_SCHEMAS = {1, _CHECKPOINT_SCHEMA_VERSION}
 
 
 class Battery:
@@ -344,12 +345,8 @@ class Battery:
         self,
         train_loader: DataLoader,
         val_loader: DataLoader | None,
-        epochs: int,
     ) -> None:
         """Validate the complete training configuration before events run."""
-        if epochs <= 0:
-            msg = "epochs must be greater than zero."
-            raise ValueError(msg)
         if not self._event_handler.has_handler(Event.TRAIN_STEP):
             msg = (
                 "No method decorated with @charge(Event.TRAIN_STEP) found. "
@@ -381,6 +378,62 @@ class Battery:
     def _callback_identifier(callback: Callback) -> str:
         callback_type = type(callback)
         return f"{callback_type.__module__}.{callback_type.__qualname__}"
+
+    @staticmethod
+    def _data_pack_identifier(data_pack: DataPack) -> str:
+        """Return the stable qualified identifier stored in checkpoints."""
+        data_pack_type = type(data_pack)
+        return f"{data_pack_type.__module__}.{data_pack_type.__qualname__}"
+
+    def _checkpoint_data_pack(self) -> dict[str, Any] | None:
+        """Build and validate resumable DataPack state."""
+        if self._data_pack is None:
+            return None
+        state: object = self._data_pack.state_dict()
+        if not isinstance(state, dict):
+            msg = "DataPack state_dict() must return a dictionary."
+            raise TypeError(msg)
+        return {
+            "type": self._data_pack_identifier(self._data_pack),
+            "state": state,
+        }
+
+    def _restore_checkpoint_data_pack(
+        self,
+        payload: dict[str, Any],
+        schema_version: int,
+    ) -> None:
+        """Validate and restore DataPack state for schema version 2 and newer."""
+        if schema_version < 2:
+            return
+        if "data_pack" not in payload:
+            msg = "Training checkpoint is missing fields: ['data_pack']."
+            raise ValueError(msg)
+        saved_data_pack = payload["data_pack"]
+        if saved_data_pack is None:
+            if self._data_pack is not None:
+                msg = "Configured DataPack does not match checkpoint state."
+                raise ValueError(msg)
+            return
+        if not isinstance(saved_data_pack, dict):
+            msg = "Invalid DataPack state in training checkpoint."
+            raise TypeError(msg)
+        saved_type = saved_data_pack.get("type")
+        saved_state = saved_data_pack.get("state")
+        if not isinstance(saved_type, str) or not isinstance(saved_state, dict):
+            msg = "Invalid DataPack state in training checkpoint."
+            raise TypeError(msg)
+        if self._data_pack is None:
+            msg = "Checkpoint requires a configured DataPack."
+            raise ValueError(msg)
+        expected_type = self._data_pack_identifier(self._data_pack)
+        if saved_type != expected_type:
+            msg = (
+                "Configured DataPack does not match checkpoint state: "
+                f"expected '{saved_type}', got '{expected_type}'."
+            )
+            raise ValueError(msg)
+        self._data_pack.load_state_dict(saved_state)
 
     def save_checkpoint(self, path: str | Path) -> None:
         """Atomically save complete resumable training state.
@@ -420,6 +473,7 @@ class Battery:
             "epoch": self._last_completed_epoch,
             "optimizer_step_idx": self._optimizer_step_idx,
             "results": copy.deepcopy(self._train_results),
+            "data_pack": self._checkpoint_data_pack(),
         }
         temporary_name: str | None = None
         try:
@@ -468,16 +522,16 @@ class Battery:
             logger.error("Unrecognized checkpoint structure at %s.", checkpoint_path)
             msg = "Unrecognized torch-batteries checkpoint structure."
             raise ValueError(msg)
-        if schema_version != _CHECKPOINT_SCHEMA_VERSION:
+        if schema_version not in _SUPPORTED_CHECKPOINT_SCHEMAS:
             logger.error(
-                "Unsupported checkpoint schema %r at %s; schema %d is required.",
+                "Unsupported checkpoint schema %r at %s; supported schemas are %s.",
                 schema_version,
                 checkpoint_path,
-                _CHECKPOINT_SCHEMA_VERSION,
+                sorted(_SUPPORTED_CHECKPOINT_SCHEMAS),
             )
             msg = (
                 f"Checkpoint schema {schema_version!r} is unsupported; "
-                f"schema {_CHECKPOINT_SCHEMA_VERSION} is required."
+                f"supported schemas are {sorted(_SUPPORTED_CHECKPOINT_SCHEMAS)}."
             )
             raise ValueError(msg)
         return payload
@@ -540,6 +594,7 @@ class Battery:
             return
 
         payload = self._validate_checkpoint_schema(payload, checkpoint_path)
+        schema_version = int(payload["__torch_batteries_checkpoint__"])
         required = {
             "model",
             "optimizer",
@@ -554,6 +609,8 @@ class Battery:
             logger.error("Checkpoint is missing required fields: %s", missing)
             msg = f"Training checkpoint is missing fields: {missing}."
             raise ValueError(msg)
+
+        self._restore_checkpoint_data_pack(payload, schema_version)
 
         self._model.load_state_dict(payload["model"], strict=True)
         saved_optimizer = payload["optimizer"]
@@ -624,13 +681,22 @@ class Battery:
         resume_epochs_mode: str = "total",
     ) -> TrainResult:
         """Train with explicit loaders or resolve them from the attached DataPack."""
+        if epochs <= 0:
+            msg = "epochs must be greater than zero."
+            raise ValueError(msg)
+        if resume_epochs_mode not in {"total", "additional"}:
+            logger.error("Unsupported resume epochs mode: %s", resume_epochs_mode)
+            msg = "resume_epochs_mode must be 'total' or 'additional'."
+            raise ValueError(msg)
+        if resume_from is not None:
+            self.load_checkpoint(resume_from)
+
         if train_loader is not None:
             return self._train_with_loaders(
                 train_loader,
                 val_loader,
                 epochs,
                 verbose,
-                resume_from=resume_from,
                 resume_epochs_mode=resume_epochs_mode,
             )
         if val_loader is not None:
@@ -648,24 +714,22 @@ class Battery:
                 loaders.get("validation"),
                 epochs,
                 verbose,
-                resume_from=resume_from,
                 resume_epochs_mode=resume_epochs_mode,
             )
 
-    def _train_with_loaders(  # noqa: PLR0912, PLR0913, PLR0915
+    def _train_with_loaders(  # noqa: PLR0912, PLR0915
         self,
         train_loader: DataLoader,
         val_loader: DataLoader | None = None,
         epochs: int = 1,
         verbose: int = 1,
         *,
-        resume_from: str | Path | None = None,
         resume_epochs_mode: str = "total",
     ) -> TrainResult:
         """Train the model for one or more epochs.
 
         A fresh call resets history and optimizer-step counters. A checkpoint loaded
-        explicitly or through ``resume_from`` continues its stored history. With
+        before this method is called continues its stored history. With
         ``resume_epochs_mode="total"``, ``epochs`` is the final epoch target; with
         ``"additional"``, it is the number of new epochs to run.
 
@@ -676,7 +740,6 @@ class Battery:
             epochs: Positive epoch count or resume target, depending on
                 ``resume_epochs_mode``.
             verbose: ``0`` for silent, ``1`` for progress bars, or ``2`` for summaries.
-            resume_from: Optional full checkpoint loaded before training starts.
             resume_epochs_mode: ``"total"`` or ``"additional"``.
 
         Returns:
@@ -688,13 +751,7 @@ class Battery:
                 incompatible.
             TypeError: If a step result has an unsupported structure.
         """
-        if resume_epochs_mode not in {"total", "additional"}:
-            logger.error("Unsupported resume epochs mode: %s", resume_epochs_mode)
-            msg = "resume_epochs_mode must be 'total' or 'additional'."
-            raise ValueError(msg)
-        self._validate_train_inputs(train_loader, val_loader, epochs)
-        if resume_from is not None:
-            self.load_checkpoint(resume_from)
+        self._validate_train_inputs(train_loader, val_loader)
         resumed = self._resume_loaded
         self._stop_training = False
         if not resumed:
