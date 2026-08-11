@@ -33,6 +33,7 @@ dependencies = [
 
 [project.optional-dependencies]
 example = [
+    "datasets>=5.0.1,<6.0.0",
     "diffusers>=0.39.0",
     "gymnasium[classic-control]>=1.2.0,<2.0.0",
     "ipykernel>=7.1.0",
@@ -47,6 +48,7 @@ wandb = [
     "wandb>=0.16.0",
 ]
 all = [
+    "datasets>=5.0.1,<6.0.0",
     "diffusers>=0.39.0",
     "gymnasium[classic-control]>=1.2.0,<2.0.0",
     "ipykernel>=7.1.0",
