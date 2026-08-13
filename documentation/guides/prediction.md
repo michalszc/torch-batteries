@@ -80,9 +80,26 @@ for batch_output in battery.predict_iter(dataset="Predict1", move_to_cpu=True):
     write_batch(batch_output)
 ```
 
-Streaming does not retain prior outputs in `Battery`. The iterator must be fully
-consumed for `AFTER_PREDICT_EPOCH` and `AFTER_PREDICT` handlers to run. Breaking early
-closes the generator without emitting those successful-completion events.
+Streaming does not retain prior outputs in `Battery`. Fully consume the iterator for
+`AFTER_PREDICT_EPOCH` and `AFTER_PREDICT` handlers to run. If an implicit DataPack
+stream may stop early, explicitly close the generator so `TEARDOWN_DATA` runs
+immediately:
+
+```python
+from contextlib import closing
+
+with closing(
+    battery.predict_iter(dataset="Predict1", move_to_cpu=True)
+) as predictions:
+    for batch_output in predictions:
+        write_batch(batch_output)
+        if finished:
+            break
+```
+
+Closing an incomplete stream does not emit the successful-completion prediction
+events. An ordinary `break` does not guarantee immediate cleanup when the iterator is
+retained, so do not rely on garbage collection to release DataPack resources.
 
 Prediction loaders must be sized and non-empty. A dataset may return features only;
 the prediction step controls how its batch is unpacked and does not require targets.

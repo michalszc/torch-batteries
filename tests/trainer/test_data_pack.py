@@ -1,5 +1,6 @@
 """End-to-end tests for Battery workflows backed by a DataPack."""
 
+from contextlib import closing
 from typing import Any, cast
 
 import pytest
@@ -284,6 +285,17 @@ def test_predict_iter_requires_selection_for_multiple_datasets() -> None:
     assert outputs[0].device.type == "cpu"
     assert data_pack.loader_datasets == ["out_of_domain"]
     assert data_pack.teardown_stages == ["predict", "predict"]
+
+
+def test_predict_iter_early_close_tears_down_implicit_data_pack() -> None:
+    data_pack = WorkflowDataPack()
+    predictions = _battery(data_pack).predict_iter(verbose=0)
+
+    with closing(predictions) as outputs:
+        next(outputs)
+        assert data_pack.teardown_stages == []
+
+    assert data_pack.teardown_stages == ["predict"]
 
 
 def test_explicit_loader_uses_direct_mode_without_data_pack_events() -> None:
