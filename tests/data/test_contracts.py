@@ -31,6 +31,20 @@ def test_dataset_bundle_normalizes_named_and_singular_datasets() -> None:
     assert bundle.datasets_for_phase("validation") == {}
 
 
+@pytest.mark.parametrize("phase", ["train", "validation"])
+def test_dataset_bundle_rejects_named_training_datasets(phase: str) -> None:
+    dataset = TensorDataset(torch.arange(2))
+
+    with pytest.raises(TypeError, match=rf"{phase} dataset must be .*Dataset"):
+        DatasetBundle(**{phase: {"named": dataset}})  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("phase", ["train", "validation", "test", "predict"])
+def test_dataset_bundle_rejects_unsupported_dataset_objects(phase: str) -> None:
+    with pytest.raises(TypeError, match=rf"{phase} dataset must be .*got object"):
+        DatasetBundle(**{phase: object()})  # type: ignore[arg-type]
+
+
 @pytest.mark.parametrize("phase", ["test", "predict"])
 def test_dataset_bundle_rejects_empty_named_datasets(phase: str) -> None:
     with pytest.raises(ValueError, match=f"{phase} dataset mapping cannot be empty"):

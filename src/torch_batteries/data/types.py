@@ -20,7 +20,11 @@ DataStage = Literal["fit", "test", "predict"]
 
 @dataclass(frozen=True, slots=True)
 class DatasetBundle:
-    """Datasets made available by a charged ``SETUP_DATA`` provider."""
+    """Datasets made available by a charged ``SETUP_DATA`` provider.
+
+    Training and validation accept one PyTorch dataset. Test and prediction also
+    accept a non-empty mapping of non-blank names to PyTorch datasets.
+    """
 
     train: DatasetType | None = None
     validation: DatasetType | None = None
@@ -28,13 +32,30 @@ class DatasetBundle:
     predict: DatasetCollection | None = None
 
     def __post_init__(self) -> None:
-        """Validate named test and prediction dataset collections."""
+        """Validate every configured dataset against its phase contract."""
+        for phase in ("train", "validation"):
+            configured = getattr(self, phase)
+            if configured is None or isinstance(configured, (Dataset, IterableDataset)):
+                continue
+            returned = type(configured).__name__
+            msg = (
+                f"DatasetBundle {phase} dataset must be a PyTorch Dataset or "
+                f"IterableDataset, or None, got {returned}."
+            )
+            raise TypeError(msg)
+
         for phase in ("test", "predict"):
             configured = getattr(self, phase)
-            if isinstance(configured, (Dataset, IterableDataset)):
+            if configured is None or isinstance(configured, (Dataset, IterableDataset)):
                 continue
             if not isinstance(configured, Mapping):
-                continue
+                returned = type(configured).__name__
+                msg = (
+                    f"DatasetBundle {phase} dataset must be a PyTorch Dataset or "
+                    "IterableDataset, a non-empty mapping of dataset names to "
+                    f"datasets, or None, got {returned}."
+                )
+                raise TypeError(msg)
             if not configured:
                 msg = f"DatasetBundle {phase} dataset mapping cannot be empty."
                 raise ValueError(msg)
