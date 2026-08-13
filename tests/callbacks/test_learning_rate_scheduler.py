@@ -131,7 +131,62 @@ def test_scheduler_state_round_trip() -> None:
     restored = LearningRateScheduler(StepLR(restored_optimizer, 1))
     restored.load_state_dict(state)
 
+    assert "phase" in state
+    assert "stage" not in state
     assert restored.scheduler.last_epoch == callback.scheduler.last_epoch
+
+
+def test_loads_legacy_scheduler_stage_state() -> None:
+    """Scheduler state from before the phase rename remains loadable."""
+    model = _Model()
+    optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
+    callback = LearningRateScheduler(
+        ReduceLROnPlateau(optimizer),
+        phase="val",
+        metric="loss",
+    )
+    state = callback.state_dict()
+    state["stage"] = state.pop("phase")
+
+    callback.load_state_dict(state)
+
+
+@pytest.mark.parametrize(
+    "phase_keys",
+    [
+        {},
+        {"phase": None, "stage": None},
+    ],
+)
+def test_rejects_ambiguous_scheduler_phase_state(
+    phase_keys: dict[str, object],
+) -> None:
+    """Checkpoint state identifies its monitoring phase with exactly one key."""
+    model = _Model()
+    optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
+    callback = LearningRateScheduler(StepLR(optimizer, 1))
+    state = callback.state_dict()
+    state.pop("phase")
+    state.update(phase_keys)
+
+    with pytest.raises(ValueError, match="exactly one"):
+        callback.load_state_dict(state)
+
+
+def test_rejects_mismatched_scheduler_phase_state() -> None:
+    """The restored monitoring phase must match callback configuration."""
+    model = _Model()
+    optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
+    callback = LearningRateScheduler(
+        ReduceLROnPlateau(optimizer),
+        phase="train",
+        metric="loss",
+    )
+    state = callback.state_dict()
+    state["phase"] = "val"
+
+    with pytest.raises(ValueError, match="does not match"):
+        callback.load_state_dict(state)
 
 
 def test_rejects_invalid_interval_and_missing_plateau_metric() -> None:

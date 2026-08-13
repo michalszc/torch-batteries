@@ -179,7 +179,7 @@ class LearningRateScheduler(Callback):
         """Return scheduler and advancement state."""
         return {
             "interval": self._interval,
-            "stage": self._phase,
+            "phase": self._phase,
             "metric": self._metric,
             "scheduler": self._scheduler.state_dict(),
             "stepped_epochs": sorted(self._stepped_epochs),
@@ -187,9 +187,22 @@ class LearningRateScheduler(Callback):
 
     def load_state_dict(self, state_dict: dict[str, Any]) -> None:
         """Restore scheduler state after validating its configuration."""
+        has_phase = "phase" in state_dict
+        has_stage = "stage" in state_dict
+        if has_phase == has_stage:
+            logger.error(
+                "Learning-rate scheduler checkpoint must contain exactly one "
+                "monitoring phase key."
+            )
+            msg = (
+                "LearningRateScheduler checkpoint state must contain exactly one "
+                "of 'phase' or legacy 'stage'."
+            )
+            raise ValueError(msg)
+        checkpoint_phase = state_dict["phase"] if has_phase else state_dict["stage"]
         if (
             state_dict.get("interval") != self._interval
-            or state_dict.get("stage") != self._phase
+            or checkpoint_phase != self._phase
             or state_dict.get("metric") != self._metric
         ):
             logger.error("Learning-rate scheduler checkpoint configuration mismatch.")
