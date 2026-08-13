@@ -9,15 +9,18 @@ model or callback fails during discovery.
 
 ## DataPack events
 
-| Event | Dispatch | Purpose |
-| --- | --- | --- |
-| `PREPARE_DATA` | Broadcast side effect | Idempotent download/cache preparation, once per Battery |
-| `SETUP_DATA` | Exclusive provider | Return one `DatasetBundle` per workflow invocation |
-| `CONFIGURE_DATALOADER` | Exclusive provider | Return `DataLoaderConfig` or a custom `DataLoader` for each phase |
-| `TEARDOWN_DATA` | Broadcast side effect | Clean up after an implicit workflow, including failures |
-
 These handlers receive `DataContext`, documented in the [Data API](data.md), rather
-than the model-step `EventContext`.
+than the model-step `EventContext`. Every data event receives `battery`, `data_pack`,
+`stage`, and `device`. The stage is `"fit"`, `"test"`, or `"predict"`. When the
+DataPack defines a non-negative `seed`, the context also contains `seed` and a
+deterministic `generator`.
+
+| Event | Dispatch and timing | Additional context | Return or default |
+| --- | --- | --- | --- |
+| `PREPARE_DATA` | Idempotent download/cache preparation, at most once per Battery | None | `None`; defaults to no operation |
+| `SETUP_DATA` | Once per implicit workflow; branch on `stage` | None | One `DatasetBundle`; no implicit-workflow default |
+| `CONFIGURE_DATALOADER` | Once for every selected dataset | `phase`, `datasets`, `dataset`, `dataset_name`; phase-specific `generator` | `DataLoaderConfig` or custom `DataLoader`; defaults to `DataLoaderConfig()` |
+| `TEARDOWN_DATA` | On every implicit-workflow exit, including failures | `datasets` when setup succeeded | `None`; defaults to no operation |
 
 ## Workflow events
 

@@ -145,9 +145,46 @@ class Event(Enum):
     """Events that can be used with the @charge decorator.
 
     Events are triggered at different points during training/testing/prediction.
-    Each event receives an `EventContext` with different available fields.
-    Whenever an event lists `epoch` in its context, the value follows the
-    one-based public convention documented by `EventContext`.
+    Model and callback events receive an `EventContext`; DataPack lifecycle events
+    receive a `DataContext`. Whenever an event lists `epoch` in its context, the
+    value follows the one-based public convention documented by `EventContext`.
+
+    ## DataPack Lifecycle Events
+
+    These events may be handled only by the DataPack attached to a Battery. The
+    `stage` field is `"fit"`, `"test"`, or `"predict"`. A DataPack that defines a
+    non-negative `seed` also receives `seed` and a deterministic `generator`.
+
+    - `PREPARE_DATA`: Broadcast side-effect event for idempotent downloads and
+      cache population. It runs at most once per Battery, before the first implicit
+      setup.
+        - **Context**: `battery`, `data_pack`, `stage`, `device`; optional `seed`,
+          `generator`
+        - **Return**: `None`
+        - **Default**: no operation
+
+    - `SETUP_DATA`: Exclusive provider called once for every implicit fit, test, or
+      prediction workflow. Use `stage` to construct and return only the datasets
+      required by the active workflow.
+        - **Context**: same as `PREPARE_DATA`
+        - **Return**: `DatasetBundle`
+        - **Default**: none; an implicit workflow requires exactly one valid bundle
+
+    - `CONFIGURE_DATALOADER`: Exclusive provider called for every dataset selected
+      from the setup bundle. The phase-specific `generator` uses a deterministic
+      offset from the DataPack seed.
+        - **Context**: `battery`, `data_pack`, `stage`, `device`, `phase`,
+          `datasets`, `dataset`, `dataset_name`; optional `seed`, `generator`
+        - **Return**: `DataLoaderConfig` or `torch.utils.data.DataLoader`
+        - **Default**: `DataLoaderConfig()`
+
+    - `TEARDOWN_DATA`: Broadcast side-effect event that always runs when an implicit
+      workflow exits, including after setup, loader, or model failures. `datasets`
+      is present only when setup completed successfully.
+        - **Context**: `battery`, `data_pack`, `stage`, `device`; optional `seed`,
+          `generator`, `datasets`
+        - **Return**: `None`
+        - **Default**: no operation
 
     ## Optimization Extension Events
 

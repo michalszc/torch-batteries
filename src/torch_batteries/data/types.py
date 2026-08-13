@@ -158,7 +158,14 @@ class DataLoaderConfig:
 
 
 class DataContext(TypedDict, total=False):
-    """Context passed to methods charged for DataPack lifecycle events."""
+    """Context passed to methods charged for DataPack lifecycle events.
+
+    Every event receives ``battery``, ``data_pack``, ``stage``, and ``device``.
+    ``stage`` identifies the implicit workflow as ``"fit"``, ``"test"``, or
+    ``"predict"``. A configured DataPack seed adds ``seed`` and ``generator``.
+    Loader configuration additionally receives ``phase``, ``datasets``, ``dataset``,
+    and ``dataset_name``. Teardown receives ``datasets`` only when setup succeeded.
+    """
 
     battery: "torch_batteries.Battery"
     data_pack: "DataPack"
