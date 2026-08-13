@@ -2,7 +2,7 @@
 
 import copy
 import tempfile
-from collections.abc import Generator, Iterator
+from collections.abc import Generator, Iterator, Mapping
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, cast, overload
@@ -20,6 +20,7 @@ from torch_batteries.trainer.context import (
     copy_history_context,
     dataset_identity_context,
 )
+from torch_batteries.trainer.data import ResolvedDataWorkflow
 from torch_batteries.trainer.types import (
     PredictResult,
     StepOutput,
@@ -236,7 +237,7 @@ class Battery:
         *,
         dataset_name: str | None = None,
         require_dataset_name_for_multiple: bool = False,
-    ) -> Generator[dict[DataPhase, dict[str, DataLoader[Any]]]]:
+    ) -> Generator[ResolvedDataWorkflow]:
         """Resolve implicit loaders and guarantee DataPack teardown."""
         if self._data_pack_handler is None or self._data_pack is None:
             msg = (
@@ -254,7 +255,10 @@ class Battery:
                 self._data_prepared = True
             datasets = handler.setup(setup_context)
             loaders: dict[DataPhase, dict[str, DataLoader[Any]]] = {}
+            named_phases: set[DataPhase] = set()
             for phase, required in phases:
+                if isinstance(datasets.for_phase(phase), Mapping):
+                    named_phases.add(phase)
                 phase_datasets = datasets.datasets_for_phase(phase)
                 if not phase_datasets:
                     if required:
@@ -295,7 +299,7 @@ class Battery:
                     context["dataset"] = dataset
                     phase_loaders[name] = handler.build_loader(context, dataset)
                 loaders[phase] = phase_loaders
-            yield loaders
+            yield ResolvedDataWorkflow(loaders, frozenset(named_phases))
         finally:
             teardown_context = self._data_context(stage, datasets=datasets)
             handler.call(Event.TEARDOWN_DATA, teardown_context)
@@ -770,9 +774,9 @@ class Battery:
         with self._data_workflow(
             "fit",
             (("train", True), ("validation", False)),
-        ) as loaders:
-            train_loaders = loaders["train"]
-            validation_loaders = loaders.get("validation", {})
+        ) as workflow:
+            train_loaders = workflow.loaders["train"]
+            validation_loaders = workflow.loaders.get("validation", {})
             return self._train_with_loaders(
                 next(iter(train_loaders.values())),
                 next(iter(validation_loaders.values()), None),
@@ -1329,8 +1333,8 @@ class Battery:
                 combined with an explicit loader.
 
         Returns:
-            One test result for a selected or singular dataset, otherwise results
-            keyed by dataset name.
+            One test result for an explicit, selected, or bare dataset. A named
+            dataset mapping returns results keyed by dataset name.
         """
         if test_loader is not None:
             if dataset is not None:
@@ -1339,8 +1343,8 @@ class Battery:
             return self._test_with_loader(test_loader, verbose)
         with self._data_workflow(
             "test", (("test", True),), dataset_name=dataset
-        ) as loaders:
-            test_loaders = loaders["test"]
+        ) as workflow:
+            test_loaders = workflow.loaders["test"]
             results = {
                 name: self._test_with_loader(
                     loader,
@@ -1349,7 +1353,7 @@ class Battery:
                 )
                 for name, loader in test_loaders.items()
             }
-            if len(results) == 1:
+            if dataset is not None or "test" not in workflow.named_phases:
                 return next(iter(results.values()))
             return results
 
@@ -1605,8 +1609,8 @@ class Battery:
                 cannot be combined with an explicit loader.
 
         Returns:
-            One prediction result for a selected or singular dataset, otherwise
-            results keyed by dataset name.
+            One prediction result for an explicit, selected, or bare dataset. A named
+            dataset mapping returns results keyed by dataset name.
         """
         if data_loader is not None:
             if dataset is not None:
@@ -1620,8 +1624,8 @@ class Battery:
             )
         with self._data_workflow(
             "predict", (("predict", True),), dataset_name=dataset
-        ) as loaders:
-            prediction_loaders = loaders["predict"]
+        ) as workflow:
+            prediction_loaders = workflow.loaders["predict"]
             results = {
                 name: self._predict_with_loader(
                     loader,
@@ -1632,7 +1636,7 @@ class Battery:
                 )
                 for name, loader in prediction_loaders.items()
             }
-            if len(results) == 1:
+            if dataset is not None or "predict" not in workflow.named_phases:
                 return next(iter(results.values()))
             return results
 
@@ -1773,7 +1777,7 @@ class Battery:
         *,
         move_to_cpu: bool = False,
         dataset: str | None = None,
-    ) -> Iterator[Any]:
+    ) -> Generator[Any]:
         """Stream predictions using an explicit or DataPack-provided loader.
 
         Args:
@@ -1807,8 +1811,8 @@ class Battery:
             (("predict", True),),
             dataset_name=dataset,
             require_dataset_name_for_multiple=True,
-        ) as loaders:
-            prediction_loaders = loaders["predict"]
+        ) as workflow:
+            prediction_loaders = workflow.loaders["predict"]
             name, loader = next(iter(prediction_loaders.items()))
             yield from self._predict_iter_with_loader(
                 loader,

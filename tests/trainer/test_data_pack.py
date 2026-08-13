@@ -140,6 +140,17 @@ class MultipleWorkflowDataPack(WorkflowDataPack):
         )
 
 
+class SingleNamedWorkflowDataPack(WorkflowDataPack):
+    @charge(Event.SETUP_DATA)
+    def setup(self, context: DataContext) -> DatasetBundle:
+        self.setup_stages.append(context["stage"])
+        self.generator_seeds.append(context["generator"].initial_seed())
+        return DatasetBundle(
+            test={"production": self.dataset},
+            predict={"production": self.dataset},
+        )
+
+
 def test_data_pack_drives_all_battery_workflows() -> None:
     data_pack = WorkflowDataPack()
     battery = _battery(data_pack)
@@ -223,6 +234,22 @@ def test_multiple_test_and_prediction_datasets_run_independently() -> None:
     assert model.predict_dataset_contexts.count("in_domain") == 2
     assert model.predict_dataset_contexts.count("out_of_domain") == 1
     assert data_pack.teardown_stages == ["test", "predict"]
+
+
+def test_single_named_dataset_preserves_mapping_result_shape() -> None:
+    data_pack = SingleNamedWorkflowDataPack()
+    battery = _battery(data_pack)
+
+    test_results = cast("dict[str, Any]", battery.test(verbose=0))
+    prediction_results = cast(
+        "dict[str, Any]",
+        battery.predict(verbose=0, concatenate=True),
+    )
+
+    assert set(test_results) == {"production"}
+    assert "test_loss" in test_results["production"]
+    assert set(prediction_results) == {"production"}
+    assert prediction_results["production"]["predictions"].shape == (4, 1)
 
 
 def test_named_dataset_selection_returns_singular_result() -> None:

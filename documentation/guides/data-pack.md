@@ -89,8 +89,9 @@ test_2_result = battery.test(dataset="Test2")
 predict_1_result = battery.predict(dataset="Predict1")
 ```
 
-A singular dataset, or one selected by name, retains the ordinary singular result
-shape. Training and validation datasets remain singular.
+A bare dataset, or one selected by name, retains the ordinary singular result shape.
+A named mapping always returns a mapping, including when it contains one entry.
+Training and validation datasets remain singular.
 
 `datasets_for_phase()` normalizes a singular dataset under the name `"default"` so
 internal workflow code can handle singular and named datasets uniformly. Therefore,

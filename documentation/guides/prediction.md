@@ -59,11 +59,11 @@ results = battery.predict(move_to_cpu=True, concatenate=True)
 predict_1_outputs = results["Predict1"]["predictions"]
 ```
 
-When exactly one dataset is configured, prediction keeps its existing `PredictResult`
-shape. With multiple datasets, results are keyed by dataset name. Pass
-`dataset="Predict1"` to run only one and receive the singular result shape. Dataset
-selection is available only for implicit DataPack workflows and cannot accompany an
-explicit DataLoader.
+A bare prediction dataset returns the ordinary `PredictResult` shape. A named mapping
+always returns results keyed by dataset name, including when the mapping contains one
+entry. Pass `dataset="Predict1"` to run only one and receive the singular result shape.
+Dataset selection is available only for implicit DataPack workflows and cannot
+accompany an explicit DataLoader.
 
 ## Stream large predictions
 
