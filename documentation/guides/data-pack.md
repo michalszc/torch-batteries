@@ -100,10 +100,34 @@ the selector has the same result. Named mappings should use meaningful domain na
 instead of relying on `"default"`.
 
 `PREPARE_DATA` is for idempotent downloads and cache population. It runs at most once
-for an attached DataPack. `SETUP_DATA` runs once for each `train`, `test`, or
-`predict` call. `CONFIGURE_DATALOADER` runs for every dataset used by that call.
-`TEARDOWN_DATA` always runs after an implicit workflow, including when setup, loader
-construction, or model execution raises.
+for an attached DataPack, and Battery guarantees it runs before the first implicit
+`SETUP_DATA` call. Setup runs once for each `train`, `test`, or `predict` call.
+`CONFIGURE_DATALOADER` runs for every dataset used by that call. `TEARDOWN_DATA`
+always runs after an implicit workflow, including when setup, loader construction, or
+model execution raises.
+
+## Set up only the active stage
+
+The full-bundle pattern above is useful when every dataset is cheap to construct. If
+each stage reads a different source or performs expensive transforms, branch before
+constructing datasets so the workflow builds only what it will use:
+
+```python
+class StageAwareData(DataPack):
+    @charge(Event.SETUP_DATA)
+    def setup(self, context: DataContext) -> DatasetBundle:
+        if context["stage"] == "fit":
+            train = build_training_dataset()
+            validation = build_validation_dataset()
+            return DatasetBundle(train=train, validation=validation)
+        if context["stage"] == "test":
+            return DatasetBundle(test=build_test_dataset())
+        return DatasetBundle(predict=build_prediction_dataset())
+```
+
+The stage is `"fit"`, `"test"`, or `"predict"`. Battery guarantees preparation has
+already run before setup, so the setup handler does not need to check whether
+`PREPARE_DATA` was called.
 
 ## Understand the context
 

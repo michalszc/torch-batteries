@@ -88,6 +88,32 @@ class _DocumentedDataPack(DataPack):
         self.teardown_calls += 1
 
 
+class _StageAwareDocumentedDataPack(DataPack):
+    seed = 7
+
+    def __init__(self) -> None:
+        self.built_stages: list[str] = []
+
+    def _build_dataset(self, stage: str, generator: torch.Generator) -> TensorDataset:
+        self.built_stages.append(stage)
+        inputs = torch.randn(8, 4, generator=generator)
+        return TensorDataset(inputs, inputs.sum(dim=1, keepdim=True))
+
+    @charge(Event.SETUP_DATA)
+    def setup(self, context: DataContext) -> DatasetBundle:
+        stage = context["stage"]
+        if stage == "fit":
+            dataset = self._build_dataset(stage, context["generator"])
+            return DatasetBundle(train=dataset, validation=dataset)
+        if stage == "test":
+            return DatasetBundle(test=self._build_dataset(stage, context["generator"]))
+        return DatasetBundle(predict=self._build_dataset(stage, context["generator"]))
+
+    @charge(Event.CONFIGURE_DATALOADER)
+    def configure_loader(self, context: DataContext) -> DataLoaderConfig:
+        return DataLoaderConfig(batch_size=8)
+
+
 def test_getting_started_workflow() -> None:
     """The documented train/test/predict workflow remains executable on CPU."""
     torch.manual_seed(7)
@@ -140,3 +166,21 @@ def test_documented_data_pack_workflow() -> None:
     assert test_result["test_loss"] >= 0
     assert predictions["predictions"].shape == (16, 1)
     assert data_pack.teardown_calls == 3
+
+
+def test_documented_stage_aware_data_pack_builds_only_active_stage() -> None:
+    """The stage-aware example constructs only datasets used by each workflow."""
+    data_pack = _StageAwareDocumentedDataPack()
+    model = _DocumentedRegressor()
+    battery = Battery(
+        model,
+        device="cpu",
+        optimizer=torch.optim.Adam(model.parameters(), lr=0.05),
+        data_pack=data_pack,
+    )
+
+    battery.train(epochs=1, verbose=0)
+    battery.test(verbose=0)
+    battery.predict(verbose=0)
+
+    assert data_pack.built_stages == ["fit", "test", "predict"]
