@@ -22,5 +22,5 @@ your first complete workflow in the [quick start](getting-started/quickstart.md)
 - **Getting Started** introduces the model, trainer, event, data, and result contracts.
 - **Guides** explain complete user workflows and their trade-offs.
 - **API Reference** is generated from the installed package's public docstrings.
-- **Examples** links the seven maintained notebooks and their Colab versions.
+- **Examples** links the maintained notebooks and their Colab versions.
 - **Troubleshooting** maps common errors to concrete corrections.
