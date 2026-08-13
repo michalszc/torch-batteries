@@ -125,9 +125,7 @@ class StageAwareData(DataPack):
         return DatasetBundle(predict=build_prediction_dataset())
 ```
 
-The stage is `"fit"`, `"test"`, or `"predict"`. Battery guarantees preparation has
-already run before setup, so the setup handler does not need to check whether
-`PREPARE_DATA` was called.
+The stage is `"fit"`, `"test"`, or `"predict"`.
 
 ## Understand the context
 
