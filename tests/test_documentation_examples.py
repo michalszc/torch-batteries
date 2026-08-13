@@ -18,6 +18,12 @@ from torch_batteries import (
     StepOutput,
     charge,
 )
+from torch_batteries import (
+    PredictResult as BatteryPredictResult,
+)
+from torch_batteries import (
+    TestResult as BatteryTestResult,
+)
 
 
 class _DocumentedRegressor(nn.Module):
@@ -124,8 +130,11 @@ def test_documented_data_pack_workflow() -> None:
     )
 
     history = battery.train(epochs=1, verbose=0)
-    test_result = battery.test(verbose=0)
-    predictions = battery.predict(verbose=0, concatenate=True)
+    test_result = cast("BatteryTestResult", battery.test(verbose=0))
+    predictions = cast(
+        "BatteryPredictResult",
+        battery.predict(verbose=0, concatenate=True),
+    )
 
     assert len(history["train_loss"]) == 1
     assert test_result["test_loss"] >= 0

@@ -1,6 +1,6 @@
 """End-to-end tests for Battery workflows backed by a DataPack."""
 
-from typing import cast
+from typing import Any, cast
 
 import pytest
 import torch
@@ -26,6 +26,8 @@ class WorkflowModel(nn.Module):
         super().__init__()
         self.linear = nn.Linear(2, 1)
         self.fail_training = fail_training
+        self.test_dataset_contexts: list[str | None] = []
+        self.predict_dataset_contexts: list[str | None] = []
 
     def forward(self, inputs: torch.Tensor) -> torch.Tensor:
         return self.linear.forward(inputs)
@@ -52,10 +54,12 @@ class WorkflowModel(nn.Module):
 
     @charge(Event.TEST_STEP)
     def test_step(self, context: EventContext) -> StepOutput:
+        self.test_dataset_contexts.append(context.get("dataset_name"))
         return self._step(context)
 
     @charge(Event.PREDICT_STEP)
     def predict_step(self, context: EventContext) -> torch.Tensor:
+        self.predict_dataset_contexts.append(context.get("dataset_name"))
         inputs, _ = cast("tuple[torch.Tensor, torch.Tensor]", context["batch"])
         return self.forward(inputs)
 
@@ -71,6 +75,7 @@ class WorkflowDataPack(DataPack):
         self.prepare_calls = 0
         self.setup_stages: list[str] = []
         self.loader_phases: list[str] = []
+        self.loader_datasets: list[str | None] = []
         self.generator_seeds: list[int] = []
         self.teardown_stages: list[str] = []
 
@@ -93,6 +98,7 @@ class WorkflowDataPack(DataPack):
     @charge(Event.CONFIGURE_DATALOADER)
     def configure(self, context: DataContext) -> DataLoaderConfig:
         self.loader_phases.append(context["phase"])
+        self.loader_datasets.append(context.get("dataset_name"))
         self.generator_seeds.append(context["generator"].initial_seed())
         return DataLoaderConfig(batch_size=2)
 
@@ -111,6 +117,28 @@ def _battery(data_pack: DataPack, *, fail_training: bool = False) -> Battery:
     )
 
 
+class MultipleWorkflowDataPack(WorkflowDataPack):
+    def __init__(self) -> None:
+        super().__init__()
+        inputs = torch.tensor([[5.0, 1.0], [6.0, 2.0]])
+        self.secondary_dataset = TensorDataset(
+            inputs,
+            inputs.sum(dim=1, keepdim=True),
+        )
+
+    @charge(Event.SETUP_DATA)
+    def setup(self, context: DataContext) -> DatasetBundle:
+        self.setup_stages.append(context["stage"])
+        self.generator_seeds.append(context["generator"].initial_seed())
+        return DatasetBundle(
+            test={"in_domain": self.dataset, "out_of_domain": self.secondary_dataset},
+            predict={
+                "in_domain": self.dataset,
+                "out_of_domain": self.secondary_dataset,
+            },
+        )
+
+
 def test_data_pack_drives_all_battery_workflows() -> None:
     data_pack = WorkflowDataPack()
     battery = _battery(data_pack)
@@ -119,7 +147,10 @@ def test_data_pack_drives_all_battery_workflows() -> None:
 
     train_result = battery.train(epochs=1, verbose=0)
     test_result = battery.test(verbose=0)
-    predict_result = battery.predict(verbose=0, concatenate=True, move_to_cpu=True)
+    predict_result = cast(
+        "dict[str, Any]",
+        battery.predict(verbose=0, concatenate=True, move_to_cpu=True),
+    )
     streamed = list(battery.predict_iter(verbose=0, move_to_cpu=True))
 
     assert len(train_result["train_loss"]) == 1
@@ -138,6 +169,121 @@ def test_data_pack_drives_all_battery_workflows() -> None:
         "predict",
     ]
     assert data_pack.generator_seeds == [11, 11, 12, 13, 11, 14, 11, 15, 11, 15]
+
+
+def test_multiple_test_and_prediction_datasets_run_independently() -> None:
+    class ResetTrackingMetric:
+        def __init__(self) -> None:
+            self.reset_calls = 0
+            self.samples = 0
+
+        def reset(self) -> None:
+            self.reset_calls += 1
+            self.samples = 0
+
+        def update(self, predictions: torch.Tensor, targets: torch.Tensor) -> None:
+            self.samples += predictions.shape[0]
+
+        def compute(self) -> float:
+            return float(self.samples)
+
+    data_pack = MultipleWorkflowDataPack()
+    model = WorkflowModel()
+    metric = ResetTrackingMetric()
+    battery = Battery(
+        model,
+        device="cpu",
+        optimizer=torch.optim.SGD(model.parameters(), lr=0.01),
+        metrics={"samples": metric},
+        data_pack=data_pack,
+    )
+
+    raw_test_results = battery.test(verbose=0)
+    raw_prediction_results = battery.predict(
+        verbose=0,
+        concatenate=True,
+        move_to_cpu=True,
+    )
+    test_results = cast("dict[str, Any]", raw_test_results)
+    prediction_results = cast("dict[str, Any]", raw_prediction_results)
+
+    assert set(test_results) == {"in_domain", "out_of_domain"}
+    assert test_results["in_domain"]["test_metrics"]["samples"] == 4.0
+    assert test_results["out_of_domain"]["test_metrics"]["samples"] == 2.0
+    assert set(prediction_results) == {"in_domain", "out_of_domain"}
+    assert prediction_results["in_domain"]["predictions"].shape == (4, 1)
+    assert prediction_results["out_of_domain"]["predictions"].shape == (2, 1)
+    assert metric.reset_calls == 2
+    assert data_pack.loader_datasets.count("in_domain") == 2
+    assert data_pack.loader_datasets.count("out_of_domain") == 2
+    assert data_pack.generator_seeds == [11, 11, 14, 14, 11, 15, 15]
+    assert model.test_dataset_contexts.count("in_domain") == 2
+    assert model.test_dataset_contexts.count("out_of_domain") == 1
+    assert model.predict_dataset_contexts.count("in_domain") == 2
+    assert model.predict_dataset_contexts.count("out_of_domain") == 1
+    assert data_pack.teardown_stages == ["test", "predict"]
+
+
+def test_named_dataset_selection_returns_singular_result() -> None:
+    data_pack = MultipleWorkflowDataPack()
+    battery = _battery(data_pack)
+
+    test_result = battery.test(verbose=0, dataset="out_of_domain")
+    prediction_result = cast(
+        "dict[str, Any]",
+        battery.predict(
+            verbose=0,
+            dataset="out_of_domain",
+            concatenate=True,
+        ),
+    )
+
+    assert "test_loss" in test_result
+    assert "out_of_domain" not in test_result
+    assert prediction_result["predictions"].shape == (2, 1)
+    assert data_pack.loader_datasets == ["out_of_domain", "out_of_domain"]
+    assert data_pack.generator_seeds == [11, 11, 14, 11, 15]
+
+
+def test_named_dataset_errors_are_actionable() -> None:
+    data_pack = MultipleWorkflowDataPack()
+    battery = _battery(data_pack)
+    loader = DataLoader(data_pack.dataset, batch_size=2)
+
+    with pytest.raises(ValueError, match=r"Available datasets.*in_domain"):
+        battery.test(verbose=0, dataset="missing")
+    with pytest.raises(ValueError, match="explicit test loader"):
+        battery.test(  # type: ignore[call-overload]
+            loader, verbose=0, dataset="in_domain"
+        )
+    with pytest.raises(ValueError, match="explicit prediction loader"):
+        battery.predict(  # type: ignore[call-overload]
+            loader, verbose=0, dataset="in_domain"
+        )
+    with pytest.raises(ValueError, match="explicit prediction loader"):
+        list(battery.predict_iter(loader, verbose=0, dataset="in_domain"))
+
+    assert data_pack.teardown_stages == ["test"]
+
+
+def test_predict_iter_requires_selection_for_multiple_datasets() -> None:
+    data_pack = MultipleWorkflowDataPack()
+    battery = _battery(data_pack)
+
+    with pytest.raises(ValueError, match=r"predict_iter\(\) requires dataset="):
+        list(battery.predict_iter(verbose=0))
+    outputs = list(
+        battery.predict_iter(
+            verbose=0,
+            dataset="out_of_domain",
+            move_to_cpu=True,
+        )
+    )
+
+    assert len(outputs) == 1
+    assert outputs[0].device.type == "cpu"
+    assert data_pack.loader_datasets == ["out_of_domain"]
+    assert data_pack.teardown_stages == ["predict", "predict"]
 
 
 def test_explicit_loader_uses_direct_mode_without_data_pack_events() -> None:

@@ -46,10 +46,37 @@ Tensor leaves concatenate along dimension zero. Every batch must return the same
 dictionary keys and matching container lengths; tensor shapes must be compatible
 outside their first dimension. Unsupported leaves and mismatched structures raise.
 
+## Predict named datasets
+
+A DataPack can provide a mapping of prediction datasets:
+
+```python
+return DatasetBundle(
+    predict={"Predict1": predict_1, "Predict2": predict_2},
+)
+
+results = battery.predict(move_to_cpu=True, concatenate=True)
+predict_1_outputs = results["Predict1"]["predictions"]
+```
+
+When exactly one dataset is configured, prediction keeps its existing `PredictResult`
+shape. With multiple datasets, results are keyed by dataset name. Pass
+`dataset="Predict1"` to run only one and receive the singular result shape. Dataset
+selection is available only for implicit DataPack workflows and cannot accompany an
+explicit DataLoader.
+
 ## Stream large predictions
 
 ```python
 for batch_output in battery.predict_iter(loader, move_to_cpu=True):
+    write_batch(batch_output)
+```
+
+Streaming an implicit DataPack with multiple prediction datasets requires an explicit
+selection, because otherwise each output's source would be ambiguous:
+
+```python
+for batch_output in battery.predict_iter(dataset="Predict1", move_to_cpu=True):
     write_batch(batch_output)
 ```
 

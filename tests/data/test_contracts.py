@@ -18,6 +18,38 @@ def test_dataset_bundle_selects_datasets_by_phase() -> None:
     assert bundle.for_phase("test") is dataset
 
 
+def test_dataset_bundle_normalizes_named_and_singular_datasets() -> None:
+    first = TensorDataset(torch.arange(2))
+    second = TensorDataset(torch.arange(3))
+    named = {"in_domain": first, "out_of_domain": second}
+    bundle = DatasetBundle(train=first, test=named, predict=second)
+
+    assert bundle.for_phase("test") is named
+    assert bundle.datasets_for_phase("train") == {"default": first}
+    assert bundle.datasets_for_phase("test") == named
+    assert bundle.datasets_for_phase("predict") == {"default": second}
+    assert bundle.datasets_for_phase("validation") == {}
+
+
+@pytest.mark.parametrize("phase", ["test", "predict"])
+def test_dataset_bundle_rejects_empty_named_datasets(phase: str) -> None:
+    with pytest.raises(ValueError, match=f"{phase} dataset mapping cannot be empty"):
+        DatasetBundle(**{phase: {}})  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("name", ["", "   ", 1])
+def test_dataset_bundle_rejects_invalid_dataset_names(name: object) -> None:
+    dataset = TensorDataset(torch.arange(2))
+
+    with pytest.raises(ValueError, match="names must be non-blank strings"):
+        DatasetBundle(test={name: dataset})  # type: ignore[dict-item]
+
+
+def test_dataset_bundle_rejects_invalid_named_dataset_values() -> None:
+    with pytest.raises(TypeError, match="must be a PyTorch Dataset"):
+        DatasetBundle(predict={"invalid": object()})  # type: ignore[dict-item]
+
+
 def test_data_context_supports_public_fields() -> None:
     data_pack = DataPack()
     generator = torch.Generator().manual_seed(7)

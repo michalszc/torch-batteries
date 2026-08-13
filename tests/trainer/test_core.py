@@ -979,7 +979,7 @@ class TestBattery:
         battery = Battery(SimpleModel())
 
         with pytest.raises(ValueError, match="must define its number of batches"):
-            battery.test(UnsizedLoader())  # type: ignore[arg-type]
+            battery.test(UnsizedLoader())  # type: ignore[call-overload]
 
     def test_before_backward_must_preserve_tensor_loss(self) -> None:
         """Callbacks cannot replace the backward loss with a non-tensor."""

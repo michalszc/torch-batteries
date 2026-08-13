@@ -1,6 +1,6 @@
 """Public types used by event-driven DataPack workflows."""
 
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal, TypedDict
 
@@ -13,6 +13,7 @@ if TYPE_CHECKING:
     from .base import DataPack
 
 DatasetType = Dataset[Any] | IterableDataset[Any]
+DatasetCollection = DatasetType | Mapping[str, DatasetType]
 DataPhase = Literal["train", "validation", "test", "predict"]
 DataStage = Literal["fit", "test", "predict"]
 
@@ -23,11 +24,37 @@ class DatasetBundle:
 
     train: DatasetType | None = None
     validation: DatasetType | None = None
-    test: DatasetType | None = None
-    predict: DatasetType | None = None
+    test: DatasetCollection | None = None
+    predict: DatasetCollection | None = None
 
-    def for_phase(self, phase: DataPhase) -> DatasetType | None:
-        """Return the dataset configured for a workflow phase."""
+    def __post_init__(self) -> None:
+        """Validate named test and prediction dataset collections."""
+        for phase in ("test", "predict"):
+            configured = getattr(self, phase)
+            if isinstance(configured, (Dataset, IterableDataset)):
+                continue
+            if not isinstance(configured, Mapping):
+                continue
+            if not configured:
+                msg = f"DatasetBundle {phase} dataset mapping cannot be empty."
+                raise ValueError(msg)
+            for name, dataset in configured.items():
+                if not isinstance(name, str) or not name.strip():
+                    msg = (
+                        f"DatasetBundle {phase} dataset names must be non-blank "
+                        "strings."
+                    )
+                    raise ValueError(msg)
+                if not isinstance(dataset, (Dataset, IterableDataset)):
+                    returned = type(dataset).__name__
+                    msg = (
+                        f"DatasetBundle {phase} dataset '{name}' must be a PyTorch "
+                        f"Dataset or IterableDataset, got {returned}."
+                    )
+                    raise TypeError(msg)
+
+    def for_phase(self, phase: DataPhase) -> DatasetCollection | None:
+        """Return the dataset or named datasets configured for a workflow phase."""
         match phase:
             case "train":
                 return self.train
@@ -37,6 +64,15 @@ class DatasetBundle:
                 return self.test
             case "predict":
                 return self.predict
+
+    def datasets_for_phase(self, phase: DataPhase) -> dict[str, DatasetType]:
+        """Return phase datasets normalized to a mapping."""
+        configured = self.for_phase(phase)
+        if configured is None:
+            return {}
+        if isinstance(configured, (Dataset, IterableDataset)):
+            return {"default": configured}
+        return dict(configured)
 
 
 @dataclass(frozen=True, slots=True)
@@ -109,6 +145,7 @@ class DataContext(TypedDict, total=False):
     phase: DataPhase
     datasets: DatasetBundle
     dataset: DatasetType
+    dataset_name: str
     device: torch.device
     seed: int
     generator: torch.Generator

@@ -5,7 +5,7 @@ import tempfile
 from collections.abc import Generator, Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, cast, overload
 
 import torch
 from torch import nn
@@ -16,7 +16,10 @@ from torch_batteries.data import DataContext, DataPack, DatasetBundle
 from torch_batteries.data.handler import DataPackHandler
 from torch_batteries.data.types import DataPhase, DataStage
 from torch_batteries.events import Event, EventContext, EventHandler, OptimizationStep
-from torch_batteries.trainer.context import copy_history_context
+from torch_batteries.trainer.context import (
+    copy_history_context,
+    dataset_identity_context,
+)
 from torch_batteries.trainer.types import (
     PredictResult,
     StepOutput,
@@ -195,6 +198,7 @@ class Battery:
         *,
         phase: DataPhase | None = None,
         datasets: DatasetBundle | None = None,
+        dataset_name: str | None = None,
     ) -> DataContext:
         """Build a deterministic context for one DataPack lifecycle event."""
         assert self._data_pack is not None
@@ -220,6 +224,8 @@ class Battery:
             context["phase"] = phase
         if datasets is not None:
             context["datasets"] = datasets
+        if dataset_name is not None:
+            context["dataset_name"] = dataset_name
         return context
 
     @contextmanager
@@ -227,7 +233,10 @@ class Battery:
         self,
         stage: DataStage,
         phases: tuple[tuple[DataPhase, bool], ...],
-    ) -> Generator[dict[DataPhase, DataLoader[Any]]]:
+        *,
+        dataset_name: str | None = None,
+        require_dataset_name_for_multiple: bool = False,
+    ) -> Generator[dict[DataPhase, dict[str, DataLoader[Any]]]]:
         """Resolve implicit loaders and guarantee DataPack teardown."""
         if self._data_pack_handler is None or self._data_pack is None:
             msg = (
@@ -244,10 +253,10 @@ class Battery:
                 handler.call(Event.PREPARE_DATA, setup_context)
                 self._data_prepared = True
             datasets = handler.setup(setup_context)
-            loaders: dict[DataPhase, DataLoader[Any]] = {}
+            loaders: dict[DataPhase, dict[str, DataLoader[Any]]] = {}
             for phase, required in phases:
-                dataset = datasets.for_phase(phase)
-                if dataset is None:
+                phase_datasets = datasets.datasets_for_phase(phase)
+                if not phase_datasets:
                     if required:
                         msg = (
                             f"DataPack '{type(self._data_pack).__name__}' did not "
@@ -255,9 +264,37 @@ class Battery:
                         )
                         raise ValueError(msg)
                     continue
-                context = self._data_context(stage, phase=phase, datasets=datasets)
-                context["dataset"] = dataset
-                loaders[phase] = handler.build_loader(context, dataset)
+                if (
+                    require_dataset_name_for_multiple
+                    and dataset_name is None
+                    and len(phase_datasets) > 1
+                ):
+                    available = ", ".join(repr(name) for name in phase_datasets)
+                    msg = (
+                        "predict_iter() requires dataset= when multiple prediction "
+                        f"datasets are configured. Available datasets: {available}."
+                    )
+                    raise ValueError(msg)
+                if dataset_name is not None:
+                    if dataset_name not in phase_datasets:
+                        available = ", ".join(repr(name) for name in phase_datasets)
+                        msg = (
+                            f"Unknown dataset {dataset_name!r} for phase '{phase}'. "
+                            f"Available datasets: {available}."
+                        )
+                        raise ValueError(msg)
+                    phase_datasets = {dataset_name: phase_datasets[dataset_name]}
+                phase_loaders: dict[str, DataLoader[Any]] = {}
+                for name, dataset in phase_datasets.items():
+                    context = self._data_context(
+                        stage,
+                        phase=phase,
+                        datasets=datasets,
+                        dataset_name=name,
+                    )
+                    context["dataset"] = dataset
+                    phase_loaders[name] = handler.build_loader(context, dataset)
+                loaders[phase] = phase_loaders
             yield loaders
         finally:
             teardown_context = self._data_context(stage, datasets=datasets)
@@ -734,9 +771,11 @@ class Battery:
             "fit",
             (("train", True), ("validation", False)),
         ) as loaders:
+            train_loaders = loaders["train"]
+            validation_loaders = loaders.get("validation", {})
             return self._train_with_loaders(
-                loaders["train"],
-                loaders.get("validation"),
+                next(iter(train_loaders.values())),
+                next(iter(validation_loaders.values()), None),
                 epochs,
                 verbose,
                 resume_epochs_mode=resume_epochs_mode,
@@ -1246,30 +1285,80 @@ class Battery:
 
         return val_metrics
 
+    @overload
+    def test(
+        self,
+        test_loader: DataLoader,
+        verbose: int = 1,
+        *,
+        dataset: None = None,
+    ) -> TestResult: ...
+
+    @overload
+    def test(
+        self,
+        test_loader: None = None,
+        verbose: int = 1,
+        *,
+        dataset: str,
+    ) -> TestResult: ...
+
+    @overload
     def test(
         self,
         test_loader: DataLoader | None = None,
         verbose: int = 1,
-    ) -> TestResult:
+        *,
+        dataset: None = None,
+    ) -> TestResult | dict[str, TestResult]: ...
+
+    def test(
+        self,
+        test_loader: DataLoader | None = None,
+        verbose: int = 1,
+        *,
+        dataset: str | None = None,
+    ) -> TestResult | dict[str, TestResult]:
         """Evaluate once with an explicit or DataPack-provided test loader.
 
         Args:
             test_loader: Optional sized, non-empty test loader. When omitted, the
                 attached DataPack must provide its test dataset.
             verbose: ``0`` for silent, ``1`` for a progress bar, or ``2`` for a summary.
+            dataset: Optional name selecting one DataPack test dataset. It cannot be
+                combined with an explicit loader.
 
         Returns:
-            Average test loss and, when present, named test metrics.
+            One test result for a selected or singular dataset, otherwise results
+            keyed by dataset name.
         """
         if test_loader is not None:
+            if dataset is not None:
+                msg = "dataset cannot be combined with an explicit test loader."
+                raise ValueError(msg)
             return self._test_with_loader(test_loader, verbose)
-        with self._data_workflow("test", (("test", True),)) as loaders:
-            return self._test_with_loader(loaders["test"], verbose)
+        with self._data_workflow(
+            "test", (("test", True),), dataset_name=dataset
+        ) as loaders:
+            test_loaders = loaders["test"]
+            results = {
+                name: self._test_with_loader(
+                    loader,
+                    verbose,
+                    dataset_name=name,
+                )
+                for name, loader in test_loaders.items()
+            }
+            if len(results) == 1:
+                return next(iter(results.values()))
+            return results
 
     def _test_with_loader(
         self,
         test_loader: DataLoader,
         verbose: int = 1,
+        *,
+        dataset_name: str | None = None,
     ) -> TestResult:
         """Evaluate the model once without gradient tracking.
 
@@ -1302,6 +1391,7 @@ class Battery:
             "battery": self,
             "model": self._model,
             "optimizer": self._optimizer,
+            **dataset_identity_context(dataset_name),
         }
         self._event_handler.call(Event.BEFORE_TEST, before_test_context)
 
@@ -1310,6 +1400,7 @@ class Battery:
             "model": self._model,
             "optimizer": self._optimizer,
             "epoch": 1,
+            **dataset_identity_context(dataset_name),
         }
         self._event_handler.call(Event.BEFORE_TEST_EPOCH, before_test_epoch_context)
 
@@ -1330,6 +1421,7 @@ class Battery:
                         batch_idx,
                         progress,
                         manual_metric_names,
+                        dataset_name=dataset_name,
                     )
         except BaseException:
             progress.abort()
@@ -1361,6 +1453,7 @@ class Battery:
             "loss": test_loss,
             "test_loss": test_loss,
             "test_metrics": test_metrics_context,
+            **dataset_identity_context(dataset_name),
         }
         self._event_handler.call(Event.AFTER_TEST_EPOCH, after_test_epoch_context)
 
@@ -1371,6 +1464,7 @@ class Battery:
             "loss": test_loss,
             "test_loss": test_loss,
             "test_metrics": test_metrics_context,
+            **dataset_identity_context(dataset_name),
         }
         self._event_handler.call(Event.AFTER_TEST, after_test_context)
         logger.debug("Test phase completed: epoch=1, metrics=%s", test_metrics_context)
@@ -1392,6 +1486,8 @@ class Battery:
         batch_idx: int,
         progress: Progress,
         manual_metric_names: set[str],
+        *,
+        dataset_name: str | None = None,
     ) -> None:
         """Process one test batch."""
         batch = move_to_device(batch_data, self._device)
@@ -1405,6 +1501,7 @@ class Battery:
             "batch": batch,
             "batch_idx": batch_idx,
             "epoch": 1,
+            **dataset_identity_context(dataset_name),
         }
         self._event_handler.call(Event.BEFORE_TEST_STEP, before_step_context)
 
@@ -1446,11 +1543,45 @@ class Battery:
             "loss": loss.item(),
             "test_loss": loss.item(),
             "test_metrics": batch_metrics,
+            **dataset_identity_context(dataset_name),
         }
         self._event_handler.call(Event.AFTER_TEST_STEP, after_step_context)
 
         num_samples = get_batch_size(batch)
         progress.update(cast("ProgressMetrics", batch_metrics), num_samples)
+
+    @overload
+    def predict(
+        self,
+        data_loader: DataLoader,
+        verbose: int = 1,
+        *,
+        move_to_cpu: bool = False,
+        concatenate: bool = False,
+        dataset: None = None,
+    ) -> PredictResult: ...
+
+    @overload
+    def predict(
+        self,
+        data_loader: None = None,
+        verbose: int = 1,
+        *,
+        move_to_cpu: bool = False,
+        concatenate: bool = False,
+        dataset: str,
+    ) -> PredictResult: ...
+
+    @overload
+    def predict(
+        self,
+        data_loader: DataLoader | None = None,
+        verbose: int = 1,
+        *,
+        move_to_cpu: bool = False,
+        concatenate: bool = False,
+        dataset: None = None,
+    ) -> PredictResult | dict[str, PredictResult]: ...
 
     def predict(
         self,
@@ -1459,7 +1590,8 @@ class Battery:
         *,
         move_to_cpu: bool = False,
         concatenate: bool = False,
-    ) -> PredictResult:
+        dataset: str | None = None,
+    ) -> PredictResult | dict[str, PredictResult]:
         """Collect predictions using an explicit or DataPack-provided loader.
 
         Args:
@@ -1469,24 +1601,40 @@ class Battery:
             move_to_cpu: Recursively detach tensor outputs and move them to CPU.
             concatenate: Recursively concatenate matching outputs along their first
                 dimension while retaining nested container structure.
+            dataset: Optional name selecting one DataPack prediction dataset. It
+                cannot be combined with an explicit loader.
 
         Returns:
-            Mapping containing a batch-output list or one concatenated output.
+            One prediction result for a selected or singular dataset, otherwise
+            results keyed by dataset name.
         """
         if data_loader is not None:
+            if dataset is not None:
+                msg = "dataset cannot be combined with an explicit prediction loader."
+                raise ValueError(msg)
             return self._predict_with_loader(
                 data_loader,
                 verbose,
                 move_to_cpu=move_to_cpu,
                 concatenate=concatenate,
             )
-        with self._data_workflow("predict", (("predict", True),)) as loaders:
-            return self._predict_with_loader(
-                loaders["predict"],
-                verbose,
-                move_to_cpu=move_to_cpu,
-                concatenate=concatenate,
-            )
+        with self._data_workflow(
+            "predict", (("predict", True),), dataset_name=dataset
+        ) as loaders:
+            prediction_loaders = loaders["predict"]
+            results = {
+                name: self._predict_with_loader(
+                    loader,
+                    verbose,
+                    move_to_cpu=move_to_cpu,
+                    concatenate=concatenate,
+                    dataset_name=name,
+                )
+                for name, loader in prediction_loaders.items()
+            }
+            if len(results) == 1:
+                return next(iter(results.values()))
+            return results
 
     def _predict_with_loader(
         self,
@@ -1495,6 +1643,7 @@ class Battery:
         *,
         move_to_cpu: bool = False,
         concatenate: bool = False,
+        dataset_name: str | None = None,
     ) -> PredictResult:
         """Collect predictions from one evaluation-mode pass over a loader.
 
@@ -1540,6 +1689,7 @@ class Battery:
             "battery": self,
             "model": self._model,
             "optimizer": self._optimizer,
+            **dataset_identity_context(dataset_name),
         }
         self._event_handler.call(Event.BEFORE_PREDICT, before_predict_context)
 
@@ -1548,6 +1698,7 @@ class Battery:
             "model": self._model,
             "optimizer": self._optimizer,
             "epoch": 1,
+            **dataset_identity_context(dataset_name),
         }
         self._event_handler.call(
             Event.BEFORE_PREDICT_EPOCH, before_predict_epoch_context
@@ -1569,6 +1720,7 @@ class Battery:
                         batch_idx,
                         progress,
                         move_to_cpu=move_to_cpu,
+                        dataset_name=dataset_name,
                     )
                     if prediction is not None:
                         predictions.append(prediction)
@@ -1589,6 +1741,7 @@ class Battery:
             "epoch": 1,
             "predictions": prediction_output,
             "prediction_batches": len(predictions),
+            **dataset_identity_context(dataset_name),
         }
         self._event_handler.call(Event.AFTER_PREDICT_EPOCH, after_predict_epoch_context)
 
@@ -1598,6 +1751,7 @@ class Battery:
             "optimizer": self._optimizer,
             "predictions": prediction_output,
             "prediction_batches": len(predictions),
+            **dataset_identity_context(dataset_name),
         }
         self._event_handler.call(Event.AFTER_PREDICT, after_predict_context)
         logger.debug(
@@ -1618,6 +1772,7 @@ class Battery:
         verbose: int = 1,
         *,
         move_to_cpu: bool = False,
+        dataset: str | None = None,
     ) -> Iterator[Any]:
         """Stream predictions using an explicit or DataPack-provided loader.
 
@@ -1627,6 +1782,8 @@ class Battery:
             verbose: ``0`` for silent, ``1`` for a progress bar, or ``2`` for a summary.
             move_to_cpu: Recursively detach tensor outputs and move them to CPU before
                 yielding them.
+            dataset: Optional name selecting one DataPack prediction dataset. It is
+                required when the DataPack provides multiple prediction datasets.
 
         Yields:
             One user-defined prediction-step output at a time.
@@ -1636,17 +1793,28 @@ class Battery:
             run.
         """
         if data_loader is not None:
+            if dataset is not None:
+                msg = "dataset cannot be combined with an explicit prediction loader."
+                raise ValueError(msg)
             yield from self._predict_iter_with_loader(
                 data_loader,
                 verbose,
                 move_to_cpu=move_to_cpu,
             )
             return
-        with self._data_workflow("predict", (("predict", True),)) as loaders:
+        with self._data_workflow(
+            "predict",
+            (("predict", True),),
+            dataset_name=dataset,
+            require_dataset_name_for_multiple=True,
+        ) as loaders:
+            prediction_loaders = loaders["predict"]
+            name, loader = next(iter(prediction_loaders.items()))
             yield from self._predict_iter_with_loader(
-                loaders["predict"],
+                loader,
                 verbose,
                 move_to_cpu=move_to_cpu,
+                dataset_name=name,
             )
 
     def _predict_iter_with_loader(
@@ -1655,6 +1823,7 @@ class Battery:
         verbose: int = 1,
         *,
         move_to_cpu: bool = False,
+        dataset_name: str | None = None,
     ) -> Iterator[Any]:
         """Yield prediction batches without retaining the complete result.
 
@@ -1691,6 +1860,7 @@ class Battery:
             data_loader,
             verbose,
             move_to_cpu=move_to_cpu,
+            dataset_name=dataset_name,
         )
 
     def _prediction_iterator(
@@ -1699,12 +1869,14 @@ class Battery:
         verbose: int,
         *,
         move_to_cpu: bool,
+        dataset_name: str | None = None,
     ) -> Iterator[Any]:
         """Run lazy prediction lifecycle and yield each non-None output."""
         before_context: EventContext = {
             "battery": self,
             "model": self._model,
             "optimizer": self._optimizer,
+            **dataset_identity_context(dataset_name),
         }
         self._event_handler.call(Event.BEFORE_PREDICT, before_context)
         self._event_handler.call(
@@ -1725,6 +1897,7 @@ class Battery:
                         batch_idx,
                         progress,
                         move_to_cpu=move_to_cpu,
+                        dataset_name=dataset_name,
                     )
                     processed_batches += 1
                     if prediction is not None:
@@ -1737,6 +1910,7 @@ class Battery:
                 "optimizer": self._optimizer,
                 "epoch": 1,
                 "prediction_batches": processed_batches,
+                **dataset_identity_context(dataset_name),
             }
             self._event_handler.call(Event.AFTER_PREDICT_EPOCH, completion_context)
             completion_context.pop("epoch")
@@ -1758,6 +1932,7 @@ class Battery:
         progress: Progress,
         *,
         move_to_cpu: bool = False,
+        dataset_name: str | None = None,
     ) -> Any:
         """Process one prediction batch."""
         batch = move_to_device(batch_data, self._device)
@@ -1771,6 +1946,7 @@ class Battery:
             "batch": batch,
             "batch_idx": batch_idx,
             "epoch": 1,
+            **dataset_identity_context(dataset_name),
         }
         self._event_handler.call(Event.BEFORE_PREDICT_STEP, before_step_context)
 
@@ -1800,6 +1976,7 @@ class Battery:
             "batch_idx": batch_idx,
             "epoch": 1,
             "predictions": prediction,
+            **dataset_identity_context(dataset_name),
         }
         self._event_handler.call(Event.AFTER_PREDICT_STEP, after_step_context)
 

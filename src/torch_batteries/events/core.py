@@ -72,6 +72,7 @@ class EventContext(TypedDict, total=False):
     - `device`: Device selected by Battery.
     - `phase`: Active workflow phase: `train`, `validation`, `test`, or
       `predict`.
+    - `dataset_name`: Name of the active implicit DataPack dataset.
 
     Optimization keys:
 
@@ -114,6 +115,7 @@ class EventContext(TypedDict, total=False):
     optimizer: torch.optim.Optimizer | None
     device: torch.device
     phase: Literal["train", "validation", "test", "predict"]
+    dataset_name: str
     batch: Any
     batch_idx: int
     total_batches: int

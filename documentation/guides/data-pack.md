@@ -69,6 +69,35 @@ battery.test()
 battery.predict(move_to_cpu=True, concatenate=True)
 ```
 
+Test and prediction phases can expose several named datasets:
+
+```python
+return DatasetBundle(
+    train=train,
+    validation=validation,
+    test={"Test1": test_1, "Test2": test_2},
+    predict={"Predict1": predict_1, "Predict2": predict_2},
+)
+```
+
+Without a selector, `battery.test()` and `battery.predict()` run every named dataset
+and return results keyed by those names. Select one dataset when only one pass is
+needed:
+
+```python
+test_2_result = battery.test(dataset="Test2")
+predict_1_result = battery.predict(dataset="Predict1")
+```
+
+A singular dataset, or one selected by name, retains the ordinary singular result
+shape. Training and validation datasets remain singular.
+
+`datasets_for_phase()` normalizes a singular dataset under the name `"default"` so
+internal workflow code can handle singular and named datasets uniformly. Therefore,
+`dataset="default"` selects a singular test or prediction dataset, although omitting
+the selector has the same result. Named mappings should use meaningful domain names
+instead of relying on `"default"`.
+
 `PREPARE_DATA` is for idempotent downloads and cache population. It runs at most once
 for an attached DataPack. `SETUP_DATA` runs once for each `train`, `test`, or
 `predict` call. `CONFIGURE_DATALOADER` runs for every dataset used by that call.
@@ -79,13 +108,17 @@ construction, or model execution raises.
 
 `DataContext` contains `battery`, `data_pack`, `stage`, and `device`. Setup also gets
 an optional `seed` and `generator`; loader configuration additionally gets `phase`,
-`datasets`, and the current `dataset`. Teardown receives `datasets` when setup
+`datasets`, the current `dataset`, and its `dataset_name`. Test and prediction event
+contexts expose the same identity field. Teardown receives `datasets` when setup
 completed.
+
+`dataset_name` is the stable identifier intended for logging and branching.
 
 There is no framework default seed. Define a non-negative integer `seed` attribute on
 the DataPack only when its construction needs deterministic generators. Each phase
-gets a separate generator derived from that seed. A `DataLoaderConfig.generator`
-overrides the context generator.
+gets a separate generator derived from that seed. All datasets in the same phase
+receive the same phase seed. A `DataLoaderConfig.generator` overrides the context
+generator.
 
 ## Configure DataLoaders
 
