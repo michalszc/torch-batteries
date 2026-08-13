@@ -252,7 +252,7 @@ def test_model_checkpoint_saves_full_training_state_by_default(
 ) -> None:
     model = _Model()
     callback = ModelCheckpoint(
-        stage="train",
+        phase="train",
         metric="loss",
         mode="min",
         save_dir=str(tmp_path),
@@ -274,7 +274,7 @@ def test_model_checkpoint_saves_full_training_state_by_default(
 def test_model_checkpoint_can_save_raw_weights(tmp_path: Path) -> None:
     model = _Model()
     callback = ModelCheckpoint(
-        stage="train",
+        phase="train",
         metric="loss",
         mode="min",
         save_dir=str(tmp_path),

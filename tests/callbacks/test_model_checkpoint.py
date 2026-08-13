@@ -31,39 +31,61 @@ class TestModelCheckpoint:
     def test_initialization(self) -> None:
         """Test ModelCheckpoint initialization with valid parameters."""
         checkpoint = ModelCheckpoint(
-            stage="val",
+            phase="val",
             metric="accuracy",
             mode="max",
             save_dir="./checkpoints",
             save_path="best_model.pth",
             save_top_k=3,
         )
-        assert checkpoint._stage == "val"  # noqa: SLF001
+        assert checkpoint._phase == "val"  # noqa: SLF001
         assert checkpoint._metric == "accuracy"  # noqa: SLF001
         assert checkpoint._mode == "max"  # noqa: SLF001
         assert checkpoint._save_dir == "./checkpoints"  # noqa: SLF001
         assert checkpoint._save_path == "best_model.pth"  # noqa: SLF001
         assert checkpoint._save_top_k == 3  # noqa: SLF001
 
-    def test_invalid_stage(self) -> None:
-        """Test ModelCheckpoint initialization with invalid stage."""
-        with pytest.raises(ValueError, match="stage must be one of 'train' or 'val'"):
-            ModelCheckpoint(stage="invalid", metric="accuracy")  # type: ignore[arg-type]
+    def test_invalid_phase(self) -> None:
+        """Test ModelCheckpoint initialization with an invalid phase."""
+        with pytest.raises(ValueError, match="phase must be one of 'train' or 'val'"):
+            ModelCheckpoint(phase="invalid", metric="accuracy")  # type: ignore[arg-type]
+
+    def test_deprecated_stage_alias(self, caplog: pytest.LogCaptureFixture) -> None:
+        """The deprecated stage keyword resolves to the monitoring phase."""
+        checkpoint = ModelCheckpoint(stage="val", metric="accuracy")
+
+        assert checkpoint._phase == "val"  # noqa: SLF001
+        assert "'stage' is deprecated; use 'phase' instead" in caplog.text
+
+    def test_rejects_phase_and_stage(self) -> None:
+        """Canonical and deprecated monitoring keywords are mutually exclusive."""
+        with pytest.raises(TypeError, match="cannot both be provided"):
+            ModelCheckpoint(phase="train", stage="val", metric="accuracy")
+
+    def test_requires_phase(self) -> None:
+        """A monitoring phase remains required when the alias is omitted."""
+        with pytest.raises(TypeError, match="required argument: 'phase'"):
+            ModelCheckpoint(metric="accuracy")
+
+    def test_requires_metric(self) -> None:
+        """The monitored metric remains required with compatibility syntax."""
+        with pytest.raises(TypeError, match="required argument: 'metric'"):
+            ModelCheckpoint(phase="val")
 
     def test_invalid_mode(self) -> None:
         """Test ModelCheckpoint initialization with invalid mode."""
         with pytest.raises(ValueError, match="mode must be one of 'min' or 'max'"):
-            ModelCheckpoint(stage="val", metric="accuracy", mode="invalid")  # type: ignore[arg-type]
+            ModelCheckpoint(phase="val", metric="accuracy", mode="invalid")  # type: ignore[arg-type]
 
     def test_invalid_save_top_k(self) -> None:
         """At least one checkpoint must be retained."""
         with pytest.raises(ValueError, match="save_top_k"):
-            ModelCheckpoint(stage="val", metric="loss", save_top_k=0)
+            ModelCheckpoint(phase="val", metric="loss", save_top_k=0)
 
     def test_run_on_validation_end(self, tmp_path: object) -> None:
         """Test run_on_validation_end method."""
         checkpoint = ModelCheckpoint(
-            stage="val",
+            phase="val",
             metric="accuracy",
             mode="max",
             save_dir=str(tmp_path),
@@ -83,7 +105,7 @@ class TestModelCheckpoint:
     def test_run_on_train_epoch_end(self, tmp_path: object) -> None:
         """Test run_on_test_end method."""
         checkpoint = ModelCheckpoint(
-            stage="train",
+            phase="train",
             metric="accuracy",
             mode="max",
             save_dir=str(tmp_path),
@@ -103,7 +125,7 @@ class TestModelCheckpoint:
     def test_checkpoint_filename_uses_event_epoch(self, tmp_path: Path) -> None:
         """The public one-based event epoch is preserved in the filename."""
         checkpoint = ModelCheckpoint(
-            stage="val",
+            phase="val",
             metric="accuracy",
             save_dir=str(tmp_path),
             save_path="{epoch}-{accuracy:.2f}",
@@ -124,7 +146,7 @@ class TestModelCheckpoint:
     def test_save_best_model(self, tmp_path: object) -> None:
         """Test saving the best model."""
         checkpoint = ModelCheckpoint(
-            stage="val",
+            phase="val",
             metric="accuracy",
             mode="max",
             save_dir=str(tmp_path),
@@ -153,7 +175,7 @@ class TestModelCheckpoint:
     def test_save_top_k_model(self, tmp_path: object) -> None:
         """Test saving top K models."""
         checkpoint = ModelCheckpoint(
-            stage="val",
+            phase="val",
             metric="accuracy",
             mode="max",
             save_dir=str(tmp_path),
@@ -202,7 +224,7 @@ class TestModelCheckpoint:
     ) -> None:
         """A non-best candidate is neither saved nor passed to cleanup."""
         checkpoint = ModelCheckpoint(
-            stage="val",
+            phase="val",
             metric="accuracy",
             mode="max",
             save_dir=str(tmp_path),
@@ -236,7 +258,7 @@ class TestModelCheckpoint:
     ) -> None:
         """Cleanup starts only after the accepted replacement exists."""
         checkpoint = ModelCheckpoint(
-            stage="val",
+            phase="val",
             metric="accuracy",
             mode="max",
             save_dir=str(tmp_path),
@@ -283,7 +305,7 @@ class TestModelCheckpoint:
     ) -> None:
         """A failed write leaves the previously retained checkpoint authoritative."""
         checkpoint = ModelCheckpoint(
-            stage="val",
+            phase="val",
             metric="accuracy",
             mode="max",
             save_dir=str(tmp_path),
@@ -324,7 +346,7 @@ class TestModelCheckpoint:
     def test_callback_does_not_mutate_context_metrics(self, tmp_path: Path) -> None:
         """Adding filename fields does not leak into shared event metrics."""
         checkpoint = ModelCheckpoint(
-            stage="val", metric="accuracy", save_dir=str(tmp_path)
+            phase="val", metric="accuracy", save_dir=str(tmp_path)
         )
         metrics = {"accuracy": 0.8}
         context: EventContext = {
@@ -342,7 +364,7 @@ class TestModelCheckpoint:
     ) -> None:
         """Nested checkpoint templates and explicit suffixes are respected."""
         checkpoint = ModelCheckpoint(
-            stage="val",
+            phase="val",
             metric="accuracy",
             save_dir=str(tmp_path / "missing"),
             save_path="nested/best.pt",
@@ -364,7 +386,7 @@ class TestModelCheckpoint:
     def test_adds_suffix_after_decimal_metric_value(self, tmp_path: Path) -> None:
         """Decimal metric formatting is not mistaken for a file suffix."""
         checkpoint = ModelCheckpoint(
-            stage="val",
+            phase="val",
             metric="accuracy",
             save_dir=str(tmp_path),
             save_path="accuracy-{accuracy:.2f}",
@@ -385,7 +407,7 @@ class TestModelCheckpoint:
     ) -> None:
         """Static top-k names cannot overwrite checkpoints from prior epochs."""
         checkpoint = ModelCheckpoint(
-            stage="val",
+            phase="val",
             metric="accuracy",
             save_dir=str(tmp_path),
             save_path="best.pth",
@@ -410,7 +432,7 @@ class TestModelCheckpoint:
     def test_cleanup_tolerates_already_missing_file(self, tmp_path: Path) -> None:
         """Top-k cleanup remains safe when a checkpoint was removed externally."""
         checkpoint = ModelCheckpoint(
-            stage="val", metric="accuracy", save_dir=str(tmp_path)
+            phase="val", metric="accuracy", save_dir=str(tmp_path)
         )
         missing_path = tmp_path / "missing.pth"
         checkpoint._best_k_models[str(missing_path)] = 0.5  # noqa: SLF001
@@ -429,7 +451,7 @@ class TestModelCheckpoint:
     def test_missing_monitor_metric_logs_warning(self, tmp_path: Path) -> None:
         """Missing checkpoint monitor data is visible at WARNING level."""
         checkpoint = ModelCheckpoint(
-            stage="val", metric="accuracy", save_dir=str(tmp_path)
+            phase="val", metric="accuracy", save_dir=str(tmp_path)
         )
 
         with patch(
@@ -451,7 +473,7 @@ class TestModelCheckpoint:
     def test_min_mode_retains_two_lowest_checkpoints(self, tmp_path: Path) -> None:
         """Minimum-mode top-k retention evicts the highest loss checkpoint."""
         checkpoint = ModelCheckpoint(
-            stage="val",
+            phase="val",
             metric="loss",
             mode="min",
             save_dir=str(tmp_path),
@@ -478,7 +500,7 @@ class TestModelCheckpoint:
     def test_checkpoint_save_log_is_unconditional(self, tmp_path: Path) -> None:
         """A successful checkpoint always emits its INFO outcome log."""
         checkpoint = ModelCheckpoint(
-            stage="val", metric="accuracy", save_dir=str(tmp_path)
+            phase="val", metric="accuracy", save_dir=str(tmp_path)
         )
 
         with patch(
@@ -514,13 +536,13 @@ class TestModelCheckpoint:
                 }
             )
         source = ModelCheckpoint(
-            stage="val",
+            phase="val",
             metric="score",
             mode=mode,  # type: ignore[arg-type]
         )
         source.load_state_dict(state)
         restored = ModelCheckpoint(
-            stage="val",
+            phase="val",
             metric="score",
             mode=mode,  # type: ignore[arg-type]
         )
@@ -550,7 +572,7 @@ class TestModelCheckpoint:
         """Every serialized ranking field is validated before restoration."""
         state = valid_checkpoint_state()
         state[field] = value
-        checkpoint = ModelCheckpoint(stage="val", metric="score")
+        checkpoint = ModelCheckpoint(phase="val", metric="score")
 
         with pytest.raises(
             ValueError, match="Invalid ModelCheckpoint checkpoint state"
@@ -559,17 +581,17 @@ class TestModelCheckpoint:
 
     def test_missing_state_field_is_rejected(self) -> None:
         """Incomplete callback state fails with the stable callback error."""
-        checkpoint = ModelCheckpoint(stage="val", metric="score")
+        checkpoint = ModelCheckpoint(phase="val", metric="score")
 
         with pytest.raises(
             ValueError, match="Invalid ModelCheckpoint checkpoint state"
         ):
             checkpoint.load_state_dict({})
 
-    def test_stage_handlers_ignore_the_opposite_stage(self) -> None:
+    def test_phase_handlers_ignore_the_opposite_phase(self) -> None:
         """A checkpoint callback only handles its configured phase."""
-        train_checkpoint = ModelCheckpoint(stage="train", metric="loss")
-        val_checkpoint = ModelCheckpoint(stage="val", metric="loss")
+        train_checkpoint = ModelCheckpoint(phase="train", metric="loss")
+        val_checkpoint = ModelCheckpoint(phase="val", metric="loss")
 
         train_checkpoint.run_on_validation_end({})
         val_checkpoint.run_on_train_epoch_end({})
@@ -582,7 +604,7 @@ class TestModelCheckpoint:
     ) -> None:
         """A suffixless static template gains an epoch before `.pth`."""
         checkpoint = ModelCheckpoint(
-            stage="val",
+            phase="val",
             metric="accuracy",
             save_dir=str(tmp_path),
             save_path="best",
@@ -607,7 +629,7 @@ class TestModelCheckpoint:
 
     def test_checkpoint_name_supports_prefix_without_metric_labels(self) -> None:
         """Internal filename formatting honors prefix and label controls."""
-        checkpoint = ModelCheckpoint(stage="val", metric="accuracy")
+        checkpoint = ModelCheckpoint(phase="val", metric="accuracy")
 
         name = checkpoint._format_checkpoint_name(  # noqa: SLF001
             "{epoch}-{accuracy:.2f}",
