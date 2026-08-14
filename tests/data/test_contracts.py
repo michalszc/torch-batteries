@@ -4,9 +4,16 @@ from typing import Any
 
 import pytest
 import torch
-from torch.utils.data import BatchSampler, SequentialSampler, TensorDataset
+from torch.utils.data import BatchSampler, DataLoader, SequentialSampler, TensorDataset
 
-from torch_batteries import DataContext, DataLoaderConfig, DataPack, DatasetBundle
+from torch_batteries import (
+    DataContext,
+    DataLoaderBundle,
+    DataLoaderConfig,
+    DataPack,
+    DatasetBundle,
+    ResolvedData,
+)
 
 
 def test_dataset_bundle_selects_datasets_by_phase() -> None:
@@ -62,6 +69,79 @@ def test_dataset_bundle_rejects_invalid_dataset_names(name: object) -> None:
 def test_dataset_bundle_rejects_invalid_named_dataset_values() -> None:
     with pytest.raises(TypeError, match="must be a PyTorch Dataset"):
         DatasetBundle(predict={"invalid": object()})  # type: ignore[dict-item]
+
+
+def test_dataloader_bundle_selects_loaders_by_phase() -> None:
+    loader = DataLoader(TensorDataset(torch.arange(4)))
+    bundle = DataLoaderBundle(train=loader, test=loader)
+
+    assert bundle.for_phase("train") is loader
+    assert bundle.for_phase("validation") is None
+    assert bundle.for_phase("test") is loader
+
+
+def test_dataloader_bundle_normalizes_named_and_singular_loaders() -> None:
+    first = DataLoader(TensorDataset(torch.arange(2)))
+    second = DataLoader(TensorDataset(torch.arange(3)))
+    named = {"in_domain": first, "out_of_domain": second}
+    bundle = DataLoaderBundle(train=first, test=named, predict=second)
+
+    assert bundle.for_phase("test") is named
+    assert bundle.loaders_for_phase("train") == {"default": first}
+    assert bundle.loaders_for_phase("test") == named
+    assert bundle.loaders_for_phase("predict") == {"default": second}
+    assert bundle.loaders_for_phase("validation") == {}
+
+
+@pytest.mark.parametrize("phase", ["train", "validation"])
+def test_dataloader_bundle_rejects_named_training_loaders(phase: str) -> None:
+    loader = DataLoader(TensorDataset(torch.arange(2)))
+
+    with pytest.raises(TypeError, match=rf"{phase} loader must be a DataLoader"):
+        DataLoaderBundle(**{phase: {"named": loader}})  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("phase", ["train", "validation", "test", "predict"])
+def test_dataloader_bundle_rejects_unsupported_loader_objects(phase: str) -> None:
+    with pytest.raises(TypeError, match=rf"{phase} loader must be .*got object"):
+        DataLoaderBundle(**{phase: object()})  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("phase", ["test", "predict"])
+def test_dataloader_bundle_rejects_empty_named_loaders(phase: str) -> None:
+    with pytest.raises(ValueError, match=f"{phase} loader mapping cannot be empty"):
+        DataLoaderBundle(**{phase: {}})  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("name", ["", "   ", 1])
+def test_dataloader_bundle_rejects_invalid_loader_names(name: object) -> None:
+    loader = DataLoader(TensorDataset(torch.arange(2)))
+
+    with pytest.raises(ValueError, match="names must be non-blank strings"):
+        DataLoaderBundle(test={name: loader})  # type: ignore[dict-item]
+
+
+def test_dataloader_bundle_rejects_invalid_named_loader_values() -> None:
+    with pytest.raises(TypeError, match="must be a DataLoader"):
+        DataLoaderBundle(predict={"invalid": object()})  # type: ignore[dict-item]
+
+
+def test_resolved_data_retains_resolution_metadata() -> None:
+    dataset = TensorDataset(torch.arange(2))
+    loader = DataLoader(dataset)
+    datasets = DatasetBundle(train=dataset)
+    loaders = DataLoaderBundle(train=loader)
+    resolved = ResolvedData(
+        stage="fit",
+        device=torch.device("cpu"),
+        datasets=datasets,
+        loaders=loaders,
+    )
+
+    assert resolved.stage == "fit"
+    assert resolved.device == torch.device("cpu")
+    assert resolved.datasets is datasets
+    assert resolved.loaders is loaders
 
 
 def test_data_context_supports_public_fields() -> None:
