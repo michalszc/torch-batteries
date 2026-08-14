@@ -154,6 +154,211 @@ def test_existing_dataloader_is_returned_unchanged() -> None:
     assert actual is expected
 
 
+def test_data_pack_resolves_fit_without_a_battery() -> None:
+    data_pack = ExampleDataPack()
+
+    with data_pack.resolve("fit") as resolved:
+        assert resolved.stage == "fit"
+        assert resolved.device == torch.device("cpu")
+        assert resolved.datasets.train is data_pack.dataset
+        assert resolved.loaders.train is not None
+        assert len(resolved.loaders.train) == 3
+        assert resolved.loaders.validation is None
+        assert data_pack.calls == ["prepare", "setup", "loader:train"]
+
+    assert data_pack.calls == ["prepare", "setup", "loader:train", "teardown"]
+
+
+@pytest.mark.parametrize("stage", ["test", "predict"])
+def test_data_pack_preserves_named_loader_shape(stage: str) -> None:
+    first = TensorDataset(torch.arange(2))
+    second = TensorDataset(torch.arange(3))
+
+    class NamedDataPack(DataPack):
+        @charge(Event.SETUP_DATA)
+        def setup(self, context: DataContext) -> DatasetBundle:
+            named = {"first": first, "second": second}
+            if context["stage"] == "test":
+                return DatasetBundle(test=named)
+            return DatasetBundle(predict=named)
+
+    with NamedDataPack().resolve(stage) as resolved:  # type: ignore[arg-type]
+        phase_loaders = resolved.loaders.for_phase(stage)  # type: ignore[arg-type]
+        assert isinstance(phase_loaders, dict)
+        assert list(phase_loaders) == ["first", "second"]
+        assert resolved.loaders.loaders_for_phase(stage) == phase_loaders  # type: ignore[arg-type]
+
+
+def test_resolve_uses_default_loader_configuration_and_auto_device() -> None:
+    class DefaultDataPack(DataPack):
+        @charge(Event.SETUP_DATA)
+        def setup(self, _: DataContext) -> DatasetBundle:
+            return DatasetBundle(train=TensorDataset(torch.arange(2)))
+
+    with DefaultDataPack().resolve("fit", device="auto") as resolved:
+        loader = resolved.loaders.train
+        assert loader is not None
+        assert loader.batch_size == 1
+        assert isinstance(resolved.device, torch.device)
+
+
+def test_standalone_resolution_context_omits_battery_and_reuses_seed() -> None:
+    class ContextDataPack(DataPack):
+        seed = 7
+
+        def __init__(self) -> None:
+            self.contexts: list[DataContext] = []
+            self.dataset = TensorDataset(torch.arange(4))
+
+        @charge(Event.SETUP_DATA)
+        def setup(self, context: DataContext) -> DatasetBundle:
+            self.contexts.append(context.copy())
+            return DatasetBundle(train=self.dataset, validation=self.dataset)
+
+        @charge(Event.CONFIGURE_DATALOADER)
+        def configure(self, context: DataContext) -> DataLoaderConfig:
+            self.contexts.append(context.copy())
+            return DataLoaderConfig()
+
+        @charge(Event.TEARDOWN_DATA)
+        def teardown(self, context: DataContext) -> None:
+            self.contexts.append(context.copy())
+
+    data_pack = ContextDataPack()
+    with data_pack.resolve("fit"):
+        pass
+
+    assert all("battery" not in context for context in data_pack.contexts)
+    assert data_pack.contexts[0]["generator"].initial_seed() == 7
+    loader_contexts = [context for context in data_pack.contexts if "phase" in context]
+    assert [context["phase"] for context in loader_contexts] == [
+        "train",
+        "validation",
+    ]
+    assert [context["generator"].initial_seed() for context in loader_contexts] == [
+        7,
+        7,
+    ]
+    assert data_pack.contexts[-1]["datasets"].train is data_pack.dataset
+
+
+def test_reused_handler_prepares_once_but_public_resolve_prepares_per_call() -> None:
+    data_pack = ExampleDataPack()
+    handler = DataPackHandler(data_pack)
+
+    with handler.resolve("fit"):
+        pass
+    with handler.resolve("fit"):
+        pass
+    assert data_pack.calls.count("prepare") == 1
+
+    separate_data_pack = ExampleDataPack()
+    with separate_data_pack.resolve("fit"):
+        pass
+    with separate_data_pack.resolve("fit"):
+        pass
+    assert separate_data_pack.calls.count("prepare") == 2
+
+
+@pytest.mark.parametrize(
+    ("stage", "phase"),
+    [("fit", "train"), ("test", "test"), ("predict", "predict")],
+)
+def test_resolve_requires_the_primary_stage_dataset(stage: str, phase: str) -> None:
+    class EmptyDataPack(DataPack):
+        @charge(Event.SETUP_DATA)
+        def setup(self, _: DataContext) -> DatasetBundle:
+            return DatasetBundle()
+
+    with (
+        pytest.raises(ValueError, match=f"dataset for phase '{phase}'"),
+        EmptyDataPack().resolve(stage),  # type: ignore[arg-type]
+    ):
+        pass
+
+
+@pytest.mark.parametrize("seed", [True, -1, 1.5, "7"])
+def test_standalone_resolve_rejects_invalid_seed(seed: object) -> None:
+    class InvalidSeedDataPack(ExampleDataPack):
+        seed: object = None
+
+    data_pack = InvalidSeedDataPack()
+    data_pack.seed = seed
+
+    with (
+        pytest.raises(ValueError, match="non-negative integer"),
+        data_pack.resolve("fit"),
+    ):
+        pass
+
+
+def test_handler_resolve_supports_dataset_selection() -> None:
+    first = TensorDataset(torch.arange(2))
+    second = TensorDataset(torch.arange(3))
+
+    class NamedDataPack(DataPack):
+        @charge(Event.SETUP_DATA)
+        def setup(self, _: DataContext) -> DatasetBundle:
+            return DatasetBundle(predict={"first": first, "second": second})
+
+    handler = DataPackHandler(NamedDataPack())
+    with (
+        pytest.raises(ValueError, match="Unknown dataset 'missing'"),
+        handler.resolve("predict", dataset_name="missing"),
+    ):
+        pass
+
+    with handler.resolve("predict", dataset_name="second") as resolved:
+        loaders = resolved.loaders.loaders_for_phase("predict")
+        assert list(loaders) == ["second"]
+
+
+@pytest.mark.parametrize("failure", ["prepare", "setup", "configure", "body"])
+def test_resolve_tears_down_after_lifecycle_and_body_failures(failure: str) -> None:
+    class FailingDataPack(DataPack):
+        def __init__(self) -> None:
+            self.calls: list[str] = []
+
+        @charge(Event.PREPARE_DATA)
+        def prepare(self, _: DataContext) -> None:
+            self.calls.append("prepare")
+            if failure == "prepare":
+                msg = "prepare failed"
+                raise RuntimeError(msg)
+
+        @charge(Event.SETUP_DATA)
+        def setup(self, _: DataContext) -> DatasetBundle:
+            self.calls.append("setup")
+            if failure == "setup":
+                msg = "setup failed"
+                raise RuntimeError(msg)
+            return DatasetBundle(train=TensorDataset(torch.arange(2)))
+
+        @charge(Event.CONFIGURE_DATALOADER)
+        def configure(self, _: DataContext) -> DataLoaderConfig:
+            self.calls.append("configure")
+            if failure == "configure":
+                msg = "configure failed"
+                raise RuntimeError(msg)
+            return DataLoaderConfig()
+
+        @charge(Event.TEARDOWN_DATA)
+        def teardown(self, _: DataContext) -> None:
+            self.calls.append("teardown")
+
+    def run_resolution(data_pack: FailingDataPack) -> None:
+        with data_pack.resolve("fit"):
+            if failure == "body":
+                msg = "body failed"
+                raise RuntimeError(msg)
+
+    data_pack = FailingDataPack()
+    with pytest.raises(RuntimeError, match=f"{failure} failed"):
+        run_resolution(data_pack)
+
+    assert data_pack.calls[-1] == "teardown"
+
+
 def test_phase_defaults_shuffle_only_map_style_training_data() -> None:
     dataset = TensorDataset(torch.arange(8))
     generator = torch.Generator().manual_seed(3)

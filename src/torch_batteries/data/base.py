@@ -1,8 +1,17 @@
 """Base contract for event-driven data configuration."""
 
-from typing import Any
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any
 
 from torch_batteries.utils.logging import get_logger
+
+if TYPE_CHECKING:
+    from contextlib import AbstractContextManager
+
+    import torch
+
+    from .types import DataStage, ResolvedData
 
 logger = get_logger("data.base")
 
@@ -15,6 +24,17 @@ class DataPack:
     :meth:`state_dict` and :meth:`load_state_dict` when dataset construction relies
     on persistent values such as split indices or streaming positions.
     """
+
+    def resolve(
+        self,
+        stage: DataStage,
+        *,
+        device: str | torch.device = "cpu",
+    ) -> AbstractContextManager[ResolvedData]:
+        """Resolve datasets and DataLoaders without constructing a Battery."""
+        from .handler import DataPackHandler  # noqa: PLC0415
+
+        return DataPackHandler(self).resolve(stage, device=device)
 
     def state_dict(self) -> dict[str, Any]:
         """Return state that should be stored in a full training checkpoint."""
