@@ -17,7 +17,7 @@ battery = Battery(
 
 ```python
 early_stopping = EarlyStopping(
-    stage="val",
+    phase="val",
     metric="loss",
     mode="min",
     patience=5,
@@ -26,11 +26,14 @@ early_stopping = EarlyStopping(
 )
 ```
 
-`stage` is `"train"` or `"val"`. The monitored metric can be `"loss"` or a metric
+`phase` is `"train"` or `"val"`. The monitored metric can be `"loss"` or a metric
 produced by the phase. Patience counts consecutive completed monitored phases without
 the required improvement. Best weights are cloned to CPU-safe independent tensors
 and restored after training when requested. Full checkpoints preserve the best score,
 patience counter, and optional best weights.
+
+For compatibility, the callbacks still accept `stage=` as a deprecated keyword
+alias. New code should use `phase=`.
 
 ## Gradient accumulation
 
@@ -91,13 +94,13 @@ Advance an ordinary scheduler after each train epoch:
 callback = LearningRateScheduler(scheduler, interval="epoch")
 ```
 
-`ReduceLROnPlateau` requires an epoch interval, stage, and metric:
+`ReduceLROnPlateau` requires an epoch interval, phase, and metric:
 
 ```python
 callback = LearningRateScheduler(
     torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer),
     interval="epoch",
-    stage="val",
+    phase="val",
     metric="loss",
 )
 ```

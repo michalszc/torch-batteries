@@ -2,6 +2,9 @@
 
 ## 0.10.0 — 2026-08-11
 
+- Renamed callback metric-monitoring configuration from `stage` to `phase` in
+  `EarlyStopping`, `ModelCheckpoint`, and `LearningRateScheduler`. The deprecated
+  `stage=` keyword remains available as a compatibility alias.
 - Added event-driven `DataPack` workflows for reusable dataset and DataLoader
   construction across training, testing, and prediction while preserving the direct
   DataLoader API.

@@ -34,6 +34,7 @@ class EarlyStopping(Callback):
               when the metric stops increasing
         restore_best_weights: If True, restore model weights from the epoch with the
                              best value of the monitored metric
+        stage: Deprecated keyword alias for ``phase``.
     """  # noqa: E501
 
     def __init__(  # noqa: PLR0913

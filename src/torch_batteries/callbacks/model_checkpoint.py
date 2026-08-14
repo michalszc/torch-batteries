@@ -68,6 +68,7 @@ class ModelCheckpoint(Callback):
         save_path: Filename for the saved model. If None, defaults to
                    'epochs-metric=value.pth'
         save_top_k: Saves specified number of best models (defaults to 1)
+        stage: Deprecated keyword alias for ``phase``.
 
     Missing directories are created automatically. A `.pth` suffix is added only
     when `save_path` has no explicit suffix. Static templates gain an epoch field

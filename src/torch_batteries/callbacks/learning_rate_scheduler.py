@@ -19,7 +19,11 @@ SchedulerPhase = MonitorPhase
 
 
 class LearningRateScheduler(Callback):
-    """Advance a PyTorch learning-rate scheduler during Battery training."""
+    """Advance a PyTorch learning-rate scheduler during Battery training.
+
+    ``phase`` selects the monitored metrics for ``ReduceLROnPlateau``. The
+    deprecated ``stage`` keyword remains a compatibility alias.
+    """
 
     __slots__ = (
         "_interval",
