@@ -12,15 +12,14 @@ from torch import nn
 from torch.utils.data import DataLoader
 
 from torch_batteries.callbacks.base import Callback
-from torch_batteries.data import DataContext, DataPack, DatasetBundle
+from torch_batteries.data import DataPack, ResolvedData
 from torch_batteries.data.handler import DataPackHandler
-from torch_batteries.data.types import DataPhase, DataStage
+from torch_batteries.data.types import DataStage
 from torch_batteries.events import Event, EventContext, EventHandler, OptimizationStep
 from torch_batteries.trainer.context import (
     copy_history_context,
     dataset_identity_context,
 )
-from torch_batteries.trainer.data import ResolvedDataWorkflow
 from torch_batteries.trainer.types import (
     PredictResult,
     StepOutput,
@@ -74,7 +73,6 @@ class Battery:
         "_callbacks",
         "_data_pack",
         "_data_pack_handler",
-        "_data_prepared",
         "_device",
         "_event_handler",
         "_last_completed_epoch",
@@ -110,7 +108,6 @@ class Battery:
         self._data_pack_handler = (
             DataPackHandler(data_pack) if data_pack is not None else None
         )
-        self._data_prepared = False
         self._stop_training = False
         self._last_completed_epoch = 0
         self._optimizer_step_idx = 0
@@ -182,62 +179,13 @@ class Battery:
         """Set the stop_training flag."""
         self._stop_training = value
 
-    def _data_seed(self) -> int | None:
-        """Return an optional validated seed exposed by the configured DataPack."""
-        assert self._data_pack is not None
-        seed: object = getattr(self._data_pack, "seed", None)
-        if seed is None:
-            return None
-        if isinstance(seed, bool) or not isinstance(seed, int) or seed < 0:
-            msg = "DataPack seed must be a non-negative integer."
-            raise ValueError(msg)
-        return seed
-
-    def _data_context(
-        self,
-        stage: DataStage,
-        *,
-        phase: DataPhase | None = None,
-        datasets: DatasetBundle | None = None,
-        dataset_name: str | None = None,
-    ) -> DataContext:
-        """Build a deterministic context for one DataPack lifecycle event."""
-        assert self._data_pack is not None
-        seed = self._data_seed()
-        offsets: dict[DataPhase, int] = {
-            "train": 1,
-            "validation": 2,
-            "test": 3,
-            "predict": 4,
-        }
-        context: DataContext = {
-            "battery": self,
-            "data_pack": self._data_pack,
-            "stage": stage,
-            "device": self._device,
-        }
-        if seed is not None:
-            context["seed"] = seed
-            context["generator"] = torch.Generator().manual_seed(
-                seed if phase is None else seed + offsets[phase]
-            )
-        if phase is not None:
-            context["phase"] = phase
-        if datasets is not None:
-            context["datasets"] = datasets
-        if dataset_name is not None:
-            context["dataset_name"] = dataset_name
-        return context
-
     @contextmanager
     def _data_workflow(
         self,
         stage: DataStage,
-        phases: tuple[tuple[DataPhase, bool], ...],
         *,
         dataset_name: str | None = None,
-        require_dataset_name_for_multiple: bool = False,
-    ) -> Generator[ResolvedDataWorkflow]:
+    ) -> Generator[ResolvedData]:
         """Resolve implicit loaders and guarantee DataPack teardown."""
         if self._data_pack_handler is None or self._data_pack is None:
             msg = (
@@ -246,63 +194,13 @@ class Battery:
             )
             raise ValueError(msg)
 
-        handler = self._data_pack_handler
-        setup_context = self._data_context(stage)
-        datasets: DatasetBundle | None = None
-        try:
-            if not self._data_prepared:
-                handler.call(Event.PREPARE_DATA, setup_context)
-                self._data_prepared = True
-            datasets = handler.setup(setup_context)
-            loaders: dict[DataPhase, dict[str, DataLoader[Any]]] = {}
-            named_phases: set[DataPhase] = set()
-            for phase, required in phases:
-                if isinstance(datasets.for_phase(phase), Mapping):
-                    named_phases.add(phase)
-                phase_datasets = datasets.datasets_for_phase(phase)
-                if not phase_datasets:
-                    if required:
-                        msg = (
-                            f"DataPack '{type(self._data_pack).__name__}' did not "
-                            f"provide a dataset for phase '{phase}'."
-                        )
-                        raise ValueError(msg)
-                    continue
-                if (
-                    require_dataset_name_for_multiple
-                    and dataset_name is None
-                    and len(phase_datasets) > 1
-                ):
-                    available = ", ".join(repr(name) for name in phase_datasets)
-                    msg = (
-                        "predict_iter() requires dataset= when multiple prediction "
-                        f"datasets are configured. Available datasets: {available}."
-                    )
-                    raise ValueError(msg)
-                if dataset_name is not None:
-                    if dataset_name not in phase_datasets:
-                        available = ", ".join(repr(name) for name in phase_datasets)
-                        msg = (
-                            f"Unknown dataset {dataset_name!r} for phase '{phase}'. "
-                            f"Available datasets: {available}."
-                        )
-                        raise ValueError(msg)
-                    phase_datasets = {dataset_name: phase_datasets[dataset_name]}
-                phase_loaders: dict[str, DataLoader[Any]] = {}
-                for name, dataset in phase_datasets.items():
-                    context = self._data_context(
-                        stage,
-                        phase=phase,
-                        datasets=datasets,
-                        dataset_name=name,
-                    )
-                    context["dataset"] = dataset
-                    phase_loaders[name] = handler.build_loader(context, dataset)
-                loaders[phase] = phase_loaders
-            yield ResolvedDataWorkflow(loaders, frozenset(named_phases))
-        finally:
-            teardown_context = self._data_context(stage, datasets=datasets)
-            handler.call(Event.TEARDOWN_DATA, teardown_context)
+        with self._data_pack_handler.resolve(
+            stage,
+            device=self._device,
+            battery=self,
+            dataset_name=dataset_name,
+        ) as resolved:
+            yield resolved
 
     @staticmethod
     def _validate_loss(loss: Any, phase: str) -> torch.Tensor:
@@ -771,12 +669,9 @@ class Battery:
                 "DataPack training loader."
             )
             raise ValueError(msg)
-        with self._data_workflow(
-            "fit",
-            (("train", True), ("validation", False)),
-        ) as workflow:
-            train_loaders = workflow.loaders["train"]
-            validation_loaders = workflow.loaders.get("validation", {})
+        with self._data_workflow("fit") as workflow:
+            train_loaders = workflow.loaders.loaders_for_phase("train")
+            validation_loaders = workflow.loaders.loaders_for_phase("validation")
             return self._train_with_loaders(
                 next(iter(train_loaders.values())),
                 next(iter(validation_loaders.values()), None),
@@ -1341,10 +1236,8 @@ class Battery:
                 msg = "dataset cannot be combined with an explicit test loader."
                 raise ValueError(msg)
             return self._test_with_loader(test_loader, verbose)
-        with self._data_workflow(
-            "test", (("test", True),), dataset_name=dataset
-        ) as workflow:
-            test_loaders = workflow.loaders["test"]
+        with self._data_workflow("test", dataset_name=dataset) as workflow:
+            test_loaders = workflow.loaders.loaders_for_phase("test")
             results = {
                 name: self._test_with_loader(
                     loader,
@@ -1353,7 +1246,7 @@ class Battery:
                 )
                 for name, loader in test_loaders.items()
             }
-            if dataset is not None or "test" not in workflow.named_phases:
+            if dataset is not None or not isinstance(workflow.loaders.test, Mapping):
                 return next(iter(results.values()))
             return results
 
@@ -1622,10 +1515,8 @@ class Battery:
                 move_to_cpu=move_to_cpu,
                 concatenate=concatenate,
             )
-        with self._data_workflow(
-            "predict", (("predict", True),), dataset_name=dataset
-        ) as workflow:
-            prediction_loaders = workflow.loaders["predict"]
+        with self._data_workflow("predict", dataset_name=dataset) as workflow:
+            prediction_loaders = workflow.loaders.loaders_for_phase("predict")
             results = {
                 name: self._predict_with_loader(
                     loader,
@@ -1636,7 +1527,7 @@ class Battery:
                 )
                 for name, loader in prediction_loaders.items()
             }
-            if dataset is not None or "predict" not in workflow.named_phases:
+            if dataset is not None or not isinstance(workflow.loaders.predict, Mapping):
                 return next(iter(results.values()))
             return results
 
@@ -1808,11 +1699,16 @@ class Battery:
             return
         with self._data_workflow(
             "predict",
-            (("predict", True),),
             dataset_name=dataset,
-            require_dataset_name_for_multiple=True,
         ) as workflow:
-            prediction_loaders = workflow.loaders["predict"]
+            prediction_loaders = workflow.loaders.loaders_for_phase("predict")
+            if dataset is None and len(prediction_loaders) > 1:
+                available = ", ".join(repr(name) for name in prediction_loaders)
+                msg = (
+                    "predict_iter() requires dataset= when multiple prediction "
+                    f"datasets are configured. Available datasets: {available}."
+                )
+                raise ValueError(msg)
             name, loader = next(iter(prediction_loaders.items()))
             yield from self._predict_iter_with_loader(
                 loader,

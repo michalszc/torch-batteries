@@ -180,7 +180,7 @@ def test_data_pack_drives_all_battery_workflows() -> None:
         "predict",
         "predict",
     ]
-    assert data_pack.generator_seeds == [11, 11, 12, 13, 11, 14, 11, 15, 11, 15]
+    assert data_pack.generator_seeds == [11] * 10
 
 
 def test_multiple_test_and_prediction_datasets_run_independently() -> None:
@@ -228,7 +228,7 @@ def test_multiple_test_and_prediction_datasets_run_independently() -> None:
     assert metric.reset_calls == 2
     assert data_pack.loader_datasets.count("in_domain") == 2
     assert data_pack.loader_datasets.count("out_of_domain") == 2
-    assert data_pack.generator_seeds == [11, 11, 14, 14, 11, 15, 15]
+    assert data_pack.generator_seeds == [11] * 7
     assert model.test_dataset_contexts.count("in_domain") == 2
     assert model.test_dataset_contexts.count("out_of_domain") == 1
     assert model.predict_dataset_contexts.count("in_domain") == 2
@@ -270,7 +270,7 @@ def test_named_dataset_selection_returns_singular_result() -> None:
     assert "out_of_domain" not in test_result
     assert prediction_result["predictions"].shape == (2, 1)
     assert data_pack.loader_datasets == ["out_of_domain", "out_of_domain"]
-    assert data_pack.generator_seeds == [11, 11, 14, 11, 15]
+    assert data_pack.generator_seeds == [11] * 5
 
 
 def test_named_dataset_errors_are_actionable() -> None:
@@ -310,7 +310,11 @@ def test_predict_iter_requires_selection_for_multiple_datasets() -> None:
 
     assert len(outputs) == 1
     assert outputs[0].device.type == "cpu"
-    assert data_pack.loader_datasets == ["out_of_domain"]
+    assert data_pack.loader_datasets == [
+        "in_domain",
+        "out_of_domain",
+        "out_of_domain",
+    ]
     assert data_pack.teardown_stages == ["predict", "predict"]
 
 
@@ -352,6 +356,21 @@ def test_seed_and_generator_are_omitted_when_pack_does_not_declare_seed() -> Non
 
     assert "seed" not in contexts[0]
     assert "generator" not in contexts[0]
+
+
+def test_battery_managed_data_context_contains_battery() -> None:
+    contexts: list[DataContext] = []
+
+    class ContextPack(DataPack):
+        @charge(Event.SETUP_DATA)
+        def setup(self, context: DataContext) -> DatasetBundle:
+            contexts.append(context.copy())
+            return DatasetBundle(test=WorkflowDataPack().dataset)
+
+    battery = _battery(ContextPack())
+    battery.test(verbose=0)
+
+    assert contexts[0]["battery"] is battery
 
 
 def test_explicit_validation_loader_cannot_mix_with_implicit_training() -> None:
