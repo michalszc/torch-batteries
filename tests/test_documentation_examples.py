@@ -66,9 +66,11 @@ class _DocumentedDataPack(DataPack):
 
     def __init__(self) -> None:
         self.teardown_calls = 0
+        self.context_has_battery: list[bool] = []
 
     @charge(Event.SETUP_DATA)
     def setup(self, context: DataContext) -> DatasetBundle:
+        self.context_has_battery.append("battery" in context)
         inputs = torch.randn(16, 4, generator=context["generator"])
         targets = inputs.sum(dim=1, keepdim=True)
         dataset = TensorDataset(inputs, targets)
@@ -184,3 +186,35 @@ def test_documented_stage_aware_data_pack_builds_only_active_stage() -> None:
     battery.predict(verbose=0)
 
     assert data_pack.built_stages == ["fit", "test", "predict"]
+
+
+def test_documented_standalone_data_pack_resolution() -> None:
+    """The standalone example exposes data and guarantees teardown."""
+    data_pack = _DocumentedDataPack()
+
+    with data_pack.resolve("fit", device="cpu") as resolved:
+        assert resolved.stage == "fit"
+        assert resolved.device == torch.device("cpu")
+        assert resolved.datasets.train is not None
+        assert resolved.loaders.train is not None
+        assert len(resolved.loaders.train) == 2
+        assert data_pack.teardown_calls == 0
+
+    assert data_pack.context_has_battery == [False]
+    assert data_pack.teardown_calls == 1
+
+
+def test_documented_standalone_named_prediction_resolution() -> None:
+    """Named prediction datasets retain their mapping shape after resolution."""
+
+    class NamedPredictionData(DataPack):
+        @charge(Event.SETUP_DATA)
+        def setup(self, _: DataContext) -> DatasetBundle:
+            first = TensorDataset(torch.arange(2))
+            second = TensorDataset(torch.arange(3))
+            return DatasetBundle(predict={"first": first, "second": second})
+
+    with NamedPredictionData().resolve("predict") as resolved:
+        loaders = resolved.loaders.predict
+        assert isinstance(loaders, dict)
+        assert list(loaders) == ["first", "second"]

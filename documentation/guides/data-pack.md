@@ -29,7 +29,7 @@ class RegressionData(DataPack):
 
     @charge(Event.PREPARE_DATA)
     def prepare(self, context: DataContext) -> None:
-        # Download or populate a cache here. This runs once per Battery.
+        # Download or populate an idempotent cache here.
         pass
 
     @charge(Event.SETUP_DATA)
@@ -69,6 +69,37 @@ battery.test()
 battery.predict(move_to_cpu=True, concatenate=True)
 ```
 
+## Resolve data without a Battery
+
+Use `resolve()` when application code needs the configured datasets or DataLoaders
+without constructing a model or `Battery`:
+
+```python
+data_pack = RegressionData()
+
+with data_pack.resolve("fit", device="cpu") as resolved:
+    train_dataset = resolved.datasets.train
+    train_loader = resolved.loaders.train
+    for batch in train_loader:
+        consume(batch)
+```
+
+`resolve()` accepts the stages `"fit"`, `"test"`, and `"predict"`. Its default
+device is CPU; pass an explicit PyTorch device or `"auto"` when loader policy such as
+automatic memory pinning should follow another device.
+
+The result is a `ResolvedData` containing the normalized device, the original
+`DatasetBundle`, and a matching `DataLoaderBundle`. Test and prediction loaders retain
+their original shape: a bare dataset produces a bare loader, while a named dataset
+mapping produces a loader mapping with the same names.
+
+Resolution is context-managed because datasets and loaders may depend on open files,
+connections, worker processes, or streaming resources. They remain valid inside the
+`with` block, and `TEARDOWN_DATA` is guaranteed when the block exits normally or with
+an exception. Returning the loaders after teardown would make this guarantee unsafe.
+
+## Use named evaluation datasets
+
 Test and prediction phases can expose several named datasets:
 
 ```python
@@ -99,12 +130,15 @@ internal workflow code can handle singular and named datasets uniformly. Therefo
 the selector has the same result. Named mappings should use meaningful domain names
 instead of relying on `"default"`.
 
+## Understand lifecycle timing
+
 `PREPARE_DATA` is for idempotent downloads and cache population. It runs at most once
-for an attached DataPack, and Battery guarantees it runs before the first implicit
-`SETUP_DATA` call. Setup runs once for each `train`, `test`, or `predict` call.
+per Battery and once for each standalone `resolve()` call. Battery and standalone
+resolution guarantee it runs before the first corresponding `SETUP_DATA` call. Setup
+runs once for each `train`, `test`, `predict`, or standalone resolution call.
 `CONFIGURE_DATALOADER` runs for every dataset used by that call. `TEARDOWN_DATA`
-always runs after an implicit workflow, including when setup, loader construction, or
-model execution raises.
+always runs after a managed workflow, including when setup, loader construction,
+model execution, or code inside the standalone resolution block raises.
 
 ## Set up only the active stage
 
@@ -129,18 +163,20 @@ The stage is `"fit"`, `"test"`, or `"predict"`.
 
 ## Understand the context
 
-`DataContext` contains `battery`, `data_pack`, `stage`, and `device`. Setup also gets
-an optional `seed` and `generator`; loader configuration additionally gets `phase`,
-`datasets`, the current `dataset`, and its `dataset_name`. Test and prediction event
-contexts expose the same identity field. Teardown receives `datasets` when setup
+`DataContext` always contains `data_pack`, `stage`, and `device`. Battery-managed
+workflows additionally contain `battery`; standalone `resolve()` calls do not. Setup
+also gets an optional `seed` and `generator`; loader configuration additionally gets
+`phase`, `datasets`, the current `dataset`, and its `dataset_name`. Test and prediction
+event contexts expose the same identity field. Teardown receives `datasets` when setup
 completed.
 
 `dataset_name` is the stable identifier intended for logging and branching.
 
 There is no framework default seed. Define a non-negative integer `seed` attribute on
-the DataPack only when its construction needs deterministic generators. Each phase
-gets a separate generator derived from that seed. All datasets in the same phase
-receive the same phase seed. A `DataLoaderConfig.generator` overrides the context
+the DataPack only when its construction needs deterministic generators. Every event
+receives a fresh generator initialized with the same configured seed. Branch on
+`context["phase"]` and derive another seed explicitly when an application requires
+independent phase streams. A `DataLoaderConfig.generator` overrides the context
 generator.
 
 ## Configure DataLoaders

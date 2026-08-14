@@ -4,23 +4,24 @@ Handlers receive an `EventContext`; keys vary by event. Epoch values are one-bas
 Broadcast handlers run model-first and then in callback order. Provider/executor
 events are exclusive and reject multiple handlers.
 
-Data lifecycle events are owned only by an attached `DataPack`; placing them on a
-model or callback fails during discovery.
+Data lifecycle events are owned only by a `DataPack`; placing them on a model or
+callback fails during discovery. They may run through an attached `Battery` or a
+standalone `DataPack.resolve()` call.
 
 ## DataPack events
 
 These handlers receive `DataContext`, documented in the [Data API](data.md), rather
-than the model-step `EventContext`. Every data event receives `battery`, `data_pack`,
-`stage`, and `device`. The stage is `"fit"`, `"test"`, or `"predict"`. When the
-DataPack defines a non-negative `seed`, the context also contains `seed` and a
-deterministic `generator`.
+than the model-step `EventContext`. Every data event receives `data_pack`, `stage`,
+and `device`; Battery-managed calls also receive `battery`. The stage is `"fit"`,
+`"test"`, or `"predict"`. When the DataPack defines a non-negative `seed`, the context
+also contains `seed` and a fresh generator initialized with that seed.
 
 | Event | Dispatch and timing | Additional context | Return or default |
 | --- | --- | --- | --- |
-| `PREPARE_DATA` | Idempotent download/cache preparation, at most once per Battery | None | `None`; defaults to no operation |
-| `SETUP_DATA` | Once per implicit workflow; branch on `stage` | None | One `DatasetBundle`; no implicit-workflow default |
-| `CONFIGURE_DATALOADER` | Once for every selected dataset | `phase`, `datasets`, `dataset`, `dataset_name`; phase-specific `generator` | `DataLoaderConfig` or custom `DataLoader`; defaults to `DataLoaderConfig()` |
-| `TEARDOWN_DATA` | On every implicit-workflow exit, including failures | `datasets` when setup succeeded | `None`; defaults to no operation |
+| `PREPARE_DATA` | Idempotent preparation, at most once per Battery or standalone resolution | None | `None`; defaults to no operation |
+| `SETUP_DATA` | Once per managed workflow; branch on `stage` | None | One `DatasetBundle`; no default |
+| `CONFIGURE_DATALOADER` | Once for every selected dataset | `phase`, `datasets`, `dataset`, `dataset_name` | `DataLoaderConfig` or custom `DataLoader`; defaults to `DataLoaderConfig()` |
+| `TEARDOWN_DATA` | On every managed-workflow exit, including failures | `datasets` when setup succeeded | `None`; defaults to no operation |
 
 ## Workflow events
 

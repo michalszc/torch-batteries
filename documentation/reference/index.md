@@ -10,7 +10,7 @@ explanations, start with the [Guides](../guides/index.md).
 | Area | Page | Main public objects |
 | --- | --- | --- |
 | Workflows | [Trainer API](trainer.md) | `Battery`, `StepOutput`, `TrainResult`, `TestResult`, and `PredictResult` |
-| Data construction | [Data API](data.md) | `DataPack`, `DatasetBundle`, `DataLoaderConfig`, and `DataContext` |
+| Data construction | [Data API](data.md) | `DataPack`, `ResolvedData`, dataset/loader bundles, configuration, and context |
 | Lifecycle | [Events API](events.md) | `Event`, `EventContext`, `OptimizationStep`, and `charge` |
 | Extensions | [Callbacks API](callbacks.md) | `Callback`, early stopping, checkpoints, optimization callbacks, and experiment tracking |
 | Measurement | [Metrics API](metrics.md) | `StatefulMetric` and `CollectedMetric` |

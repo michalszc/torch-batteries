@@ -31,7 +31,20 @@ class DataPack:
         *,
         device: str | torch.device = "cpu",
     ) -> AbstractContextManager[ResolvedData]:
-        """Resolve datasets and DataLoaders without constructing a Battery."""
+        """Resolve datasets and DataLoaders without constructing a Battery.
+
+        Args:
+            stage: Complete workflow stage to resolve: ``"fit"``, ``"test"``, or
+                ``"predict"``.
+            device: PyTorch device used for device-aware loader defaults. Standalone
+                resolution defaults to CPU and also accepts ``"auto"``.
+
+        Returns:
+            A context manager yielding ``ResolvedData`` and guaranteeing teardown.
+
+        Note:
+            Preparation runs once per standalone call. Keep preparation idempotent.
+        """
         from .handler import DataPackHandler  # noqa: PLC0415
 
         return DataPackHandler(self).resolve(stage, device=device)
