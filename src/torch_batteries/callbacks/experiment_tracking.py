@@ -40,7 +40,7 @@ class ExperimentTrackingCallback(Callback):
 
     # Use with Battery
     battery = Battery(model, optimizer=optimizer, callbacks=[callback])
-    battery.train(train_loader, val_loader, epochs=10)
+    battery.fit(train_loader, val_loader, epochs=10)
     ```
     """
 

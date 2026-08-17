@@ -1,19 +1,27 @@
 # Release Notes
 
-## 0.10.1 — 2026-08-17
+## 0.11.0 — 2026-08-17
 
+- Added `Battery.fit()` for training with optional per-epoch validation and
+  `Battery.validate()` for a required, optimizer-free standalone validation pass.
+  Added the public `FitResult` and `ValidationResult` contracts.
+- Retained validation through `Battery.train()` for compatibility while deprecating
+  its `val_loader` parameter and `TrainResult.val_loss`/`val_metrics` fields. The
+  compatibility path now logs and emits a deprecation warning only when validation
+  actually runs.
+- Unified charged-method discovery and dispatch behind shared handler infrastructure
+  while keeping the full public `EventHandler` and `DataPackHandler` APIs documented.
+- Split production classes, protocols, enums, and helper functions into focused
+  modules and natural data-types, event-core, trainer-types, progress-types, W&B,
+  logging, and metrics packages without changing existing public import paths.
 - Split Battery checkpointing, training, evaluation, prediction, and shared workflow
-  state into focused private modules while retaining the complete public `Battery`
-  method reference and checkpoint compatibility.
-- Made `@charge` stackable for distinct events, with deterministic duplicate and
-  competing-handler validation across models, callbacks, and DataPacks.
-- Canonicalized callback monitoring on `phase="validation"`; deprecated `"val"` and
-  `stage=` inputs continue to load and emit compatibility warnings.
-- Aligned exception ownership and built-in error types, standardized module-qualified
-  logging and lifecycle diagnostics, and completed enforceable API docstring coverage.
-- Isolated notebook validation from library CI so notebook-only pull requests avoid
-  the full matrix and version check while source and release changes still validate
-  saved examples.
+  state into focused private modules while retaining checkpoint compatibility; made
+  `@charge` stackable with deterministic duplicate and competing-handler validation.
+- Updated guides, API references, executable documentation examples, and all seven
+  notebooks for `fit()`, standalone validation, result contracts, canonical
+  `phase="validation"`, and the reorganized public API.
+- Aligned exception ownership, built-in error types, module-qualified logging,
+  lifecycle diagnostics, docstring coverage, and notebook-focused CI validation.
 
 ## 0.10.0 — 2026-08-11
 

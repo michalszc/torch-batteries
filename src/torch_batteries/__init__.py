@@ -38,11 +38,11 @@ class MyModel(nn.Module):
         )
 
 battery = Battery(model, optimizer=optimizer) # Auto-detects device
-battery.train(train_loader, val_loader, epochs=10)
+battery.fit(train_loader, val_loader, epochs=10)
 ```
 """
 
-__version__ = "0.10.1"
+__version__ = "0.11.0"
 __author__ = ["Michal Szczygiel", "Arkadiusz Paterak", "Antoni Zięciak"]
 
 # Import main components
