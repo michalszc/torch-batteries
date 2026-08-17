@@ -1,0 +1,48 @@
+name: Notebooks
+
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - "notebooks/**"
+      - "src/**"
+      - "pyproject.toml"
+      - "Makefile"
+      - "scripts/validate_notebooks.sh"
+      - "scripts/ci/run_check.sh"
+      - ".github/workflows/notebooks.yml"
+  pull_request:
+    branches:
+      - master
+    paths:
+      - "notebooks/**"
+      - "src/**"
+      - "pyproject.toml"
+      - "Makefile"
+      - "scripts/validate_notebooks.sh"
+      - "scripts/ci/run_check.sh"
+      - ".github/workflows/notebooks.yml"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: "pyproject.toml"
+
+      - name: Install validation dependencies
+        run: pip install -e . --group docs
+
+      - name: Validate saved notebooks
+        run: ./scripts/ci/run_check.sh notebooks-check

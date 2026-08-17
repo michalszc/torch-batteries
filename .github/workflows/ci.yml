@@ -7,10 +7,8 @@ on:
     paths:
       - "src/**"
       - "tests/**"
-      - "notebooks/**"
       - "pyproject.toml"
       - "Makefile"
-      - "scripts/validate_notebooks.sh"
       - "scripts/ci/run_check.sh"
       - ".github/workflows/ci.yml"
   pull_request:
@@ -19,10 +17,8 @@ on:
     paths:
       - "src/**"
       - "tests/**"
-      - "notebooks/**"
       - "pyproject.toml"
       - "Makefile"
-      - "scripts/validate_notebooks.sh"
       - "scripts/ci/run_check.sh"
       - ".github/workflows/ci.yml"
 
@@ -36,7 +32,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        check: [lint, format-check, type-check, test, notebooks-check, validate-version]
+        check: [lint, format-check, type-check, test, validate-version]
 
     steps:
     - uses: actions/checkout@v7
@@ -55,7 +51,7 @@ jobs:
       if: matrix.check != 'validate-version' || github.event_name == 'pull_request'
       run: |
         case "${{ matrix.check }}" in
-          lint|format-check|type-check|test|notebooks-check|validate-version)
+          lint|format-check|type-check|test|validate-version)
             ./scripts/ci/run_check.sh "${{ matrix.check }}"
             ;;
           *)
