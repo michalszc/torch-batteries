@@ -36,6 +36,19 @@ class TestChargeDecorator:
         assert decorated(nn.Module(), context) == "original_result"
         assert decorated._torch_batteries_event == Event.VALIDATION_STEP  # type: ignore[attr-defined] # noqa: SLF001
 
+    def test_charge_decorators_accumulate_events(self) -> None:
+        """Stacked decorators retain every event in application order."""
+
+        @charge(Event.TRAIN_STEP)
+        @charge(Event.VALIDATION_STEP)
+        def shared_step(_: EventContext) -> torch.Tensor:
+            return torch.tensor(1.0)
+
+        assert shared_step._torch_batteries_events == (  # type: ignore[attr-defined] # noqa: SLF001
+            Event.VALIDATION_STEP,
+            Event.TRAIN_STEP,
+        )
+
     def test_charge_decorator_with_different_events(self) -> None:
         """Test charge decorator works with different events."""
 
@@ -194,8 +207,8 @@ class TestEventHandler:
         assert not handler.has_handler(Event.TEST_STEP)
         assert not handler.has_handler(Event.PREDICT_STEP)
 
-    def test_multiple_methods_same_event(self) -> None:
-        """Test that only last method is registered for same event."""
+    def test_multiple_methods_same_event_are_rejected(self) -> None:
+        """Competing model step handlers fail instead of overwriting silently."""
 
         class MultipleMethodsModel(nn.Module):
             def __init__(self) -> None:
@@ -209,12 +222,66 @@ class TestEventHandler:
             def second_training_step(self, batch: str) -> torch.Tensor:
                 return torch.tensor(2.0)
 
-        model = MultipleMethodsModel()
-        handler = EventHandler(model)
+        with pytest.raises(ValueError, match="exactly one model handler"):
+            EventHandler(MultipleMethodsModel())
 
-        result = handler.call(Event.TRAIN_STEP, "batch")
-        # Should call the last registered method
-        assert torch.equal(result, torch.tensor(2.0))
+    def test_stacked_model_step_handles_each_event(self) -> None:
+        """One model method may own multiple distinct step events."""
+
+        class SharedStepModel(nn.Module):
+            @charge(Event.TRAIN_STEP)
+            @charge(Event.VALIDATION_STEP)
+            @charge(Event.TEST_STEP)
+            def step(self, context: EventContext) -> str:
+                return context["phase"]
+
+        handler = EventHandler(SharedStepModel())
+
+        assert handler.call(Event.TRAIN_STEP, {"phase": "train"}) == "train"
+        assert (
+            handler.call(Event.VALIDATION_STEP, {"phase": "validation"}) == "validation"
+        )
+        assert handler.call(Event.TEST_STEP, {"phase": "test"}) == "test"
+
+    def test_duplicate_stacked_event_is_rejected(self) -> None:
+        """Repeating the same charge is a deterministic configuration error."""
+
+        class DuplicateModel(nn.Module):
+            @charge(Event.TRAIN_STEP)
+            @charge(Event.TRAIN_STEP)
+            def step(self, _: EventContext) -> torch.Tensor:
+                return torch.tensor(0.0)
+
+        with pytest.raises(ValueError, match="charged repeatedly"):
+            EventHandler(DuplicateModel())
+
+    def test_stacked_callback_handles_distinct_lifecycle_events(self) -> None:
+        """One callback method may observe multiple lifecycle events."""
+        calls: list[str] = []
+
+        class SharedCallback:
+            @charge(Event.BEFORE_TRAIN)
+            @charge(Event.AFTER_TRAIN)
+            def lifecycle(self, context: EventContext) -> None:
+                calls.append(context["phase"])
+
+        handler = EventHandler(DummyModel(), callbacks=[SharedCallback()])
+        handler.call(Event.BEFORE_TRAIN, {"phase": "train"})
+        handler.call(Event.AFTER_TRAIN, {"phase": "validation"})
+
+        assert calls == ["train", "validation"]
+
+    def test_duplicate_stacked_callback_event_is_rejected(self) -> None:
+        """Repeated callback charges fail during callback discovery."""
+
+        class DuplicateCallback:
+            @charge(Event.BEFORE_TRAIN)
+            @charge(Event.BEFORE_TRAIN)
+            def lifecycle(self, _: EventContext) -> None:
+                pass
+
+        with pytest.raises(ValueError, match="charged repeatedly"):
+            EventHandler(DummyModel(), callbacks=[DuplicateCallback()])
 
     def test_handler_works_with_inheritance(self) -> None:
         """Test that event handler works with inherited methods."""

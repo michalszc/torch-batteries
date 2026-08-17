@@ -10,6 +10,7 @@ import torch
 from torch.utils.data import DataLoader
 
 from torch_batteries.events import Event
+from torch_batteries.events._metadata import get_charged_events
 from torch_batteries.utils.device import get_device
 from torch_batteries.utils.logging import get_logger
 
@@ -67,19 +68,26 @@ class DataPackHandler:
         """Discover charged DataPack methods and reject unrelated events."""
         for name in dir(self.data_pack):
             method = getattr(self.data_pack, name)
-            if not callable(method) or not hasattr(method, "_torch_batteries_event"):
+            if not callable(method):
                 continue
-            event = method._torch_batteries_event  # noqa: SLF001
-            if event not in self.DATA_EVENTS:
+            events = get_charged_events(method)
+            if len(events) != len(set(events)):
                 msg = (
                     f"DataPack '{type(self.data_pack).__name__}' method '{name}' "
-                    f"cannot handle non-data event '{event.value}'."
+                    "is charged repeatedly for one event."
                 )
                 raise ValueError(msg)
-            self._handlers.setdefault(event, []).append(method)
-            self._labels.setdefault(event, []).append(
-                f"{type(self.data_pack).__name__}.{name}"
-            )
+            for event in events:
+                if event not in self.DATA_EVENTS:
+                    msg = (
+                        f"DataPack '{type(self.data_pack).__name__}' method '{name}' "
+                        f"cannot handle non-data event '{event.value}'."
+                    )
+                    raise ValueError(msg)
+                self._handlers.setdefault(event, []).append(method)
+                self._labels.setdefault(event, []).append(
+                    f"{type(self.data_pack).__name__}.{name}"
+                )
 
     def _validate_providers(self) -> None:
         """Require at most one owner for each data provider event."""

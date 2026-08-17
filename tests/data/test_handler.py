@@ -450,6 +450,33 @@ def test_multiple_provider_methods_are_rejected() -> None:
         DataPackHandler(ConflictingPack())
 
 
+def test_stacked_data_pack_handler_serves_distinct_events() -> None:
+    calls: list[str] = []
+
+    class SharedLifecyclePack(DataPack):
+        @charge(Event.PREPARE_DATA)
+        @charge(Event.TEARDOWN_DATA)
+        def lifecycle(self, context: DataContext) -> None:
+            calls.append("teardown" if "datasets" in context else "prepare")
+
+    handler = DataPackHandler(SharedLifecyclePack())
+    handler.call(Event.PREPARE_DATA, {})
+    handler.call(Event.TEARDOWN_DATA, {"datasets": DatasetBundle()})
+
+    assert calls == ["prepare", "teardown"]
+
+
+def test_duplicate_stacked_data_event_is_rejected() -> None:
+    class DuplicatePack(DataPack):
+        @charge(Event.PREPARE_DATA)
+        @charge(Event.PREPARE_DATA)
+        def prepare(self, _: DataContext) -> None:
+            pass
+
+    with pytest.raises(ValueError, match="charged repeatedly"):
+        DataPackHandler(DuplicatePack())
+
+
 def test_data_pack_rejects_non_data_events() -> None:
     class InvalidPack(DataPack):
         @charge(Event.BEFORE_TRAIN)

@@ -8,6 +8,7 @@ from torch import nn
 
 from torch_batteries.utils.logging import get_logger
 
+from ._metadata import get_charged_events
 from .core import Event
 
 logger = get_logger("events.handler")
@@ -85,8 +86,11 @@ class EventHandler:
 
         for name in dir(self.model):
             method = getattr(self.model, name)
-            if callable(method) and hasattr(method, "_torch_batteries_event"):
-                event = method._torch_batteries_event  # noqa: SLF001
+            events = get_charged_events(method) if callable(method) else ()
+            if len(events) != len(set(events)):
+                msg = f"Model method '{name}' is charged repeatedly for one event."
+                raise ValueError(msg)
+            for event in events:
                 if event in self.DATA_SPECIFIC_EVENTS:
                     msg = (
                         f"Model method '{name}' cannot handle DataPack event "
@@ -94,6 +98,14 @@ class EventHandler:
                     )
                     raise ValueError(msg)
                 if event in self.MODEL_SPECIFIC_CALLBACKS:
+                    existing = self._event_handlers.get(event)
+                    if existing is not None:
+                        existing_name = getattr(existing, "__name__", repr(existing))
+                        msg = (
+                            f"Event '{event.value}' accepts exactly one model handler; "
+                            f"found: {existing_name}, {name}."
+                        )
+                        raise ValueError(msg)
                     self._event_handlers[event] = method
                 else:
                     self._append_handler(event, method, f"model.{name}")
@@ -119,8 +131,14 @@ class EventHandler:
         for callback_idx, callback in enumerate(self._callbacks):
             for name in dir(callback):
                 method = getattr(callback, name)
-                if callable(method) and hasattr(method, "_torch_batteries_event"):
-                    event = method._torch_batteries_event  # noqa: SLF001
+                events = get_charged_events(method) if callable(method) else ()
+                if len(events) != len(set(events)):
+                    msg = (
+                        f"Callback '{type(callback).__name__}' method '{name}' "
+                        "is charged repeatedly for one event."
+                    )
+                    raise ValueError(msg)
+                for event in events:
                     if event in self.DATA_SPECIFIC_EVENTS:
                         msg = (
                             f"Callback '{type(callback).__name__}' cannot handle "
