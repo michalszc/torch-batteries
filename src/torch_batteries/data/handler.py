@@ -172,7 +172,10 @@ class DataPackHandler:
         seed: object = getattr(self.data_pack, "seed", None)
         if seed is None:
             return None
-        if isinstance(seed, bool) or not isinstance(seed, int) or seed < 0:
+        if isinstance(seed, bool) or not isinstance(seed, int):
+            msg = "DataPack seed must be an integer or None."
+            raise TypeError(msg)
+        if seed < 0:
             msg = "DataPack seed must be a non-negative integer."
             raise ValueError(msg)
         return seed

@@ -1,6 +1,5 @@
 """Tests for torch_batteries.trainer module."""
 
-from collections.abc import Iterator
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -203,6 +202,12 @@ class TestBattery:
             battery.test(empty_loader)
         with pytest.raises(ValueError, match="Prediction loader must not be empty"):
             battery.predict(empty_loader)
+
+    def test_loader_validation_rejects_non_dataloader(self) -> None:
+        """Workflow loader validation reports an input type error."""
+        message = r"must be a torch\.utils\.data\.DataLoader"
+        with pytest.raises(TypeError, match=message):
+            Battery._validate_loader([], "Training")  # noqa: SLF001
 
     def test_train_resets_stop_training_flag(self) -> None:
         """A Battery remains reusable after a previous stop request."""
@@ -986,14 +991,15 @@ class TestBattery:
     def test_unsized_loader_is_rejected(self) -> None:
         """Workflow loaders must expose their number of batches."""
 
-        class UnsizedLoader:
-            def __iter__(self) -> Iterator[object]:
-                return iter(())
+        class UnsizedLoader(DataLoader[object]):
+            def __len__(self) -> int:
+                raise TypeError
 
         battery = Battery(SimpleModel())
+        loader = UnsizedLoader(TensorDataset(torch.arange(1)))
 
         with pytest.raises(ValueError, match="must define its number of batches"):
-            battery.test(UnsizedLoader())  # type: ignore[call-overload]
+            battery.test(loader)
 
     def test_before_backward_must_preserve_tensor_loss(self) -> None:
         """Callbacks cannot replace the backward loss with a non-tensor."""

@@ -183,7 +183,7 @@ class EarlyStopping(Callback):
         """
 
         if self._metric not in metrics:
-            msg = f"Metric '{self._metric}' not found in training metrics."
+            msg = f"Metric '{self._metric}' not found in {self._phase} metrics."
             raise ValueError(msg)
 
         current_score = metrics[self._metric]

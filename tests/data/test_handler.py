@@ -277,8 +277,8 @@ def test_resolve_requires_the_primary_stage_dataset(stage: str, phase: str) -> N
         pass
 
 
-@pytest.mark.parametrize("seed", [True, -1, 1.5, "7"])
-def test_standalone_resolve_rejects_invalid_seed(seed: object) -> None:
+@pytest.mark.parametrize("seed", [True, 1.5, "7"])
+def test_standalone_resolve_rejects_invalid_seed_type(seed: object) -> None:
     class InvalidSeedDataPack(ExampleDataPack):
         seed: object = None
 
@@ -286,8 +286,19 @@ def test_standalone_resolve_rejects_invalid_seed(seed: object) -> None:
     data_pack.seed = seed
 
     with (
-        pytest.raises(ValueError, match="non-negative integer"),
+        pytest.raises(TypeError, match="integer or None"),
         data_pack.resolve("fit"),
+    ):
+        pass
+
+
+def test_standalone_resolve_rejects_negative_seed() -> None:
+    class InvalidSeedPack(ExampleDataPack):
+        seed = -1
+
+    with (
+        pytest.raises(ValueError, match="non-negative integer"),
+        InvalidSeedPack().resolve("fit"),
     ):
         pass
 

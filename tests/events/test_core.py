@@ -97,11 +97,14 @@ class TestOptimizationStep:
         assert plan.optimizer_step
         assert plan.loss_divisor == 1
 
-    @pytest.mark.parametrize("loss_divisor", [0, -1, 1.5, True])
-    def test_loss_divisor_must_be_a_positive_integer(
-        self, loss_divisor: object
-    ) -> None:
+    @pytest.mark.parametrize("loss_divisor", [0, -1])
+    def test_loss_divisor_must_be_positive(self, loss_divisor: object) -> None:
         with pytest.raises(ValueError, match="positive integer"):
+            OptimizationStep(loss_divisor=loss_divisor)  # type: ignore[arg-type]
+
+    @pytest.mark.parametrize("loss_divisor", [1.5, True, "2"])
+    def test_loss_divisor_must_be_an_integer(self, loss_divisor: object) -> None:
+        with pytest.raises(TypeError, match="must be an integer"):
             OptimizationStep(loss_divisor=loss_divisor)  # type: ignore[arg-type]
 
 

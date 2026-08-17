@@ -454,8 +454,11 @@ class Battery(CheckpointMixin, TrainingMixin, EvaluationMixin, PredictionMixin):
         return self._validate_loss(result, phase), {}, None, None
 
     @staticmethod
-    def _validate_loader(dataloader: DataLoader, name: str) -> None:
+    def _validate_loader(dataloader: object, name: str) -> None:
         """Require a sized, non-empty data loader."""
+        if not isinstance(dataloader, DataLoader):
+            msg = f"{name} loader must be a torch.utils.data.DataLoader."
+            raise TypeError(msg)
         try:
             number_of_batches = len(dataloader)
         except TypeError as error:

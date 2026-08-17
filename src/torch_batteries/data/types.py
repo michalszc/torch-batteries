@@ -2,7 +2,7 @@
 
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Literal, TypedDict
+from typing import TYPE_CHECKING, Any, Literal, TypedDict, cast
 
 import torch
 from torch.utils.data import DataLoader, Dataset, IterableDataset, Sampler
@@ -208,14 +208,41 @@ class DataLoaderConfig:
     prefetch_factor: int | None = None
     persistent_workers: bool = False
 
-    def __post_init__(self) -> None:
-        """Reject combinations that PyTorch cannot materialize safely."""
+    def __post_init__(self) -> None:  # noqa: PLR0912, PLR0915
+        """Reject types and combinations PyTorch cannot materialize safely."""
         if self.batch_size is not None and (
-            isinstance(self.batch_size, bool) or self.batch_size < 1
+            isinstance(self.batch_size, bool) or not isinstance(self.batch_size, int)
         ):
+            msg = "DataLoaderConfig batch_size must be an integer or None."
+            raise TypeError(msg)
+        if isinstance(self.num_workers, bool) or not isinstance(self.num_workers, int):
+            msg = "DataLoaderConfig num_workers must be an integer."
+            raise TypeError(msg)
+        if isinstance(self.timeout, bool) or not isinstance(self.timeout, int | float):
+            msg = "DataLoaderConfig timeout must be numeric."
+            raise TypeError(msg)
+        if self.prefetch_factor is not None and (
+            isinstance(self.prefetch_factor, bool)
+            or not isinstance(self.prefetch_factor, int)
+        ):
+            msg = "DataLoaderConfig prefetch_factor must be an integer or None."
+            raise TypeError(msg)
+        if type(cast("object", self.shuffle)) not in {bool, type(None)}:
+            msg = "DataLoaderConfig shuffle must be a boolean or None."
+            raise TypeError(msg)
+        if type(cast("object", self.drop_last)) is not bool:
+            msg = "DataLoaderConfig drop_last must be a boolean."
+            raise TypeError(msg)
+        if type(cast("object", self.pin_memory)) not in {bool, str}:
+            msg = "DataLoaderConfig pin_memory must be a boolean or 'auto'."
+            raise TypeError(msg)
+        if type(cast("object", self.persistent_workers)) is not bool:
+            msg = "DataLoaderConfig persistent_workers must be a boolean."
+            raise TypeError(msg)
+        if self.batch_size is not None and self.batch_size < 1:
             msg = "DataLoaderConfig batch_size must be positive or None."
             raise ValueError(msg)
-        if isinstance(self.num_workers, bool) or self.num_workers < 0:
+        if self.num_workers < 0:
             msg = "DataLoaderConfig num_workers must be a non-negative integer."
             raise ValueError(msg)
         if self.timeout < 0:
@@ -223,6 +250,9 @@ class DataLoaderConfig:
             raise ValueError(msg)
         if self.prefetch_factor is not None and self.prefetch_factor < 1:
             msg = "DataLoaderConfig prefetch_factor must be positive when provided."
+            raise ValueError(msg)
+        if self.pin_memory not in {True, False, "auto"}:
+            msg = "DataLoaderConfig pin_memory must be a boolean or 'auto'."
             raise ValueError(msg)
         if self.persistent_workers and self.num_workers == 0:
             msg = "persistent_workers requires num_workers greater than zero."

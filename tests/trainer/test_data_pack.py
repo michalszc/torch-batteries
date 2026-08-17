@@ -410,10 +410,18 @@ def test_training_failure_still_tears_down() -> None:
     assert data_pack.teardown_stages == ["fit"]
 
 
-@pytest.mark.parametrize("seed", [-1, True, 1.5])
-def test_invalid_data_pack_seed_is_rejected(seed: object) -> None:
+def test_negative_data_pack_seed_is_rejected() -> None:
+    data_pack = WorkflowDataPack()
+    data_pack.seed = -1
+
+    with pytest.raises(ValueError, match="seed must be a non-negative integer"):
+        _battery(data_pack).test(verbose=0)
+
+
+@pytest.mark.parametrize("seed", [True, 1.5])
+def test_invalid_data_pack_seed_type_is_rejected(seed: object) -> None:
     data_pack = WorkflowDataPack()
     data_pack.seed = seed  # type: ignore[assignment]
 
-    with pytest.raises(ValueError, match="seed must be a non-negative integer"):
+    with pytest.raises(TypeError, match="seed must be an integer or None"):
         _battery(data_pack).test(verbose=0)

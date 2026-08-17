@@ -40,11 +40,15 @@ class OptimizationStep:
 
     def __post_init__(self) -> None:
         """Validate loss normalization before the plan reaches the trainer."""
-        if (
-            isinstance(self.loss_divisor, bool)
-            or not isinstance(self.loss_divisor, int)
-            or self.loss_divisor < 1
+        if isinstance(self.loss_divisor, bool) or not isinstance(
+            self.loss_divisor, int
         ):
+            logger.error(
+                "Invalid optimization-step loss divisor: %r", self.loss_divisor
+            )
+            msg = "OptimizationStep loss_divisor must be an integer."
+            raise TypeError(msg)
+        if self.loss_divisor < 1:
             logger.error(
                 "Invalid optimization-step loss divisor: %r", self.loss_divisor
             )

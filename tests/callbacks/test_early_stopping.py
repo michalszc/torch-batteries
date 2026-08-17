@@ -509,7 +509,9 @@ class TestEarlyStopping:
         model = torch.nn.Linear(1, 1)
         callback = EarlyStopping(phase="validation", metric="accuracy")
 
-        with pytest.raises(ValueError, match="Metric 'accuracy' not found"):
+        with pytest.raises(
+            ValueError, match="Metric 'accuracy' not found in validation metrics"
+        ):
             callback.run_on_validation_end(
                 {
                     "model": model,
