@@ -50,13 +50,17 @@ class LearningRateScheduler(Callback):
             raise ValueError(msg)
         self._is_plateau = isinstance(scheduler, ReduceLROnPlateau)
         if self._is_plateau:
-            if interval != "epoch" or phase not in {"train", "val"} or not metric:
+            if (
+                interval != "epoch"
+                or phase not in {"train", "validation"}
+                or not metric
+            ):
                 logger.error(
                     "ReduceLROnPlateau requires epoch interval, phase, and metric."
                 )
                 msg = (
                     "ReduceLROnPlateau requires interval='epoch', "
-                    "phase='train' or 'val', and a metric name."
+                    "phase='train' or 'validation', and a metric name."
                 )
                 raise ValueError(msg)
         elif phase is not None or metric is not None:
@@ -157,7 +161,7 @@ class LearningRateScheduler(Callback):
     @charge(Event.AFTER_VALIDATION)
     def on_validation_end(self, context: EventContext) -> None:
         """Advance validation-monitored plateau schedulers."""
-        if not self._is_plateau or self._phase != "val":
+        if not self._is_plateau or self._phase != "validation":
             return
         self._step_plateau(context, "val_metrics")
         self._stepped_epochs.add(context.get("epoch", 0))
@@ -167,7 +171,7 @@ class LearningRateScheduler(Callback):
         """Validate that a requested validation metric was observed."""
         if (
             self._is_plateau
-            and self._phase == "val"
+            and self._phase == "validation"
             and context.get("epoch", -1) not in self._stepped_epochs
         ):
             logger.error(
@@ -203,7 +207,18 @@ class LearningRateScheduler(Callback):
                 "of 'phase' or legacy 'stage'."
             )
             raise ValueError(msg)
-        checkpoint_phase = state_dict["phase"] if has_phase else state_dict["stage"]
+        if has_phase:
+            checkpoint_phase = resolve_monitor_phase(
+                cast("MonitorPhase | None", state_dict["phase"]),
+                stage=None,
+                required=False,
+            )
+        else:
+            checkpoint_phase = resolve_monitor_phase(
+                None,
+                stage=cast("MonitorPhase | None", state_dict["stage"]),
+                required=False,
+            )
         if (
             state_dict.get("interval") != self._interval
             or checkpoint_phase != self._phase

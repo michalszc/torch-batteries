@@ -59,7 +59,7 @@ class ModelCheckpoint(Callback):
     """Saves the model when a monitored metric improves.
 
     Args:
-        phase: One of 'train' or 'val' to indicate which phase's metric to monitor
+        phase: ``"train"`` or ``"validation"``. ``"val"`` is deprecated.
         metric: The name of the metric to monitor
         mode: One of 'min' or 'max'. In 'min' mode, the model is saved when the
               monitored metric decreases. In 'max' mode, it is saved when the
@@ -79,7 +79,7 @@ class ModelCheckpoint(Callback):
     Examples:
         ```python
         checkpoint = ModelCheckpoint(
-            phase="val",
+            phase="validation",
             metric="accuracy",
             mode="max",
             save_path="best_model.pth"
@@ -211,7 +211,7 @@ class ModelCheckpoint(Callback):
         Args:
             context: Event context containing validation metrics and model.
         """
-        if self._phase != "val":
+        if self._phase != "validation":
             return
 
         metrics = {**context["val_metrics"], "epoch": context["epoch"]}

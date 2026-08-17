@@ -68,7 +68,7 @@ affect the loaders used by the resumed workflow.
 
 ```python
 checkpoint = ModelCheckpoint(
-    phase="val",
+    phase="validation",
     metric="accuracy",
     mode="max",
     save_dir="checkpoints",

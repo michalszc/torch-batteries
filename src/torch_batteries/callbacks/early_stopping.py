@@ -25,7 +25,7 @@ class EarlyStopping(Callback):
     """Early stops the training if selected metric doesn't improve after a given patience.
 
     Args:
-        phase: One of 'train' or 'val' to indicate which phase's metric to monitor
+        phase: ``"train"`` or ``"validation"``. ``"val"`` is deprecated.
         metric: The name of the metric to monitor
         min_delta: Minimum change in the monitored metric to qualify as an improvement
         patience: Number of epochs with no improvement after which training will be stopped
@@ -163,7 +163,7 @@ class EarlyStopping(Callback):
         Args:
             context: Event context containing validation metrics.
         """
-        if self._phase != "val":
+        if self._phase != "validation":
             return
 
         metrics = context["val_metrics"]
