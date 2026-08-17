@@ -208,13 +208,13 @@ class Battery(CheckpointMixin, TrainingMixin, EvaluationMixin, PredictionMixin):
     ) -> TrainResult:
         """Train with explicit loaders or the attached DataPack.
 
-        Validation through this method is deprecated. Use :meth:`fit` for combined
+        Validation through this method is deprecated. Use ``fit`` for combined
         training and validation. Calls without validation data do not warn.
 
         Args:
             train_loader: Optional sized, non-empty training loader.
             val_loader: Deprecated. Optional validation loader for direct-loader
-                compatibility. Use :meth:`fit` for validated training.
+                compatibility. Use ``fit`` for validated training.
             epochs: Positive epoch count or resume target.
             verbose: ``0`` for silent, ``1`` for bars, or ``2`` for summaries.
             resume_from: Optional full checkpoint restored before data setup.

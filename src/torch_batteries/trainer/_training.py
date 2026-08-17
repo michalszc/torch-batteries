@@ -82,7 +82,7 @@ class TrainingMixin(BatteryStateMixin):
         Args:
             train_loader: Optional sized, non-empty training loader.
             val_loader: Deprecated. Optional validation loader used only with an
-                explicit train loader. Use :meth:`fit` for validated training.
+                explicit train loader. Use ``fit`` for validated training.
                 Implicit validation compatibility comes from the DataPack.
             epochs: Positive epoch count or resume target.
             verbose: ``0`` for silent, ``1`` for progress bars, or ``2`` for summaries.
@@ -182,7 +182,7 @@ class TrainingMixin(BatteryStateMixin):
             verbose: ``0`` for silent, ``1`` for progress bars, or ``2`` for summaries.
             resume_epochs_mode: ``"total"`` or ``"additional"``.
             warn_for_validation: Whether to warn when the compatibility validation
-                behavior of :meth:`train` actually runs.
+                behavior of ``train`` actually runs.
 
         Returns:
             Per-epoch loss histories and named metric histories. Validation entries

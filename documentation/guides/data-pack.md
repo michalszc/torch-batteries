@@ -64,7 +64,8 @@ Attach it once and omit loaders from data-backed workflows:
 
 ```python
 battery = Battery(model, optimizer=optimizer, data_pack=RegressionData())
-battery.train(epochs=10)
+battery.fit(epochs=10)
+battery.validate()
 battery.test()
 battery.predict(move_to_cpu=True, concatenate=True)
 ```
@@ -135,7 +136,9 @@ instead of relying on `"default"`.
 `PREPARE_DATA` is for idempotent downloads and cache population. It runs at most once
 per Battery and once for each standalone `resolve()` call. Battery and standalone
 resolution guarantee it runs before the first corresponding `SETUP_DATA` call. Setup
-runs once for each `train`, `test`, `predict`, or standalone resolution call.
+runs once for each `fit`, `train`, `validate`, `test`, `predict`, or standalone
+resolution call. DataPack-backed `fit`, `train`, and `validate` all resolve the
+existing `"fit"` stage; `validate` requires that stage to provide validation data.
 `CONFIGURE_DATALOADER` runs for every dataset used by that call. `TEARDOWN_DATA`
 always runs after a managed workflow, including when setup, loader construction,
 model execution, or code inside the standalone resolution block raises.
@@ -204,7 +207,7 @@ sized and non-empty because Battery's progress and aggregation contracts require
 An explicit primary loader selects direct-loader mode for the whole invocation:
 
 ```python
-battery.train(custom_train_loader, custom_validation_loader)
+battery.fit(custom_train_loader, custom_validation_loader)
 ```
 
 Battery does not silently combine that train loader with validation data from the
@@ -212,8 +215,9 @@ DataPack. Passing only an explicit validation loader is therefore invalid. The s
 rule keeps testing and prediction unambiguous: either pass their primary loader or
 omit it and use the DataPack.
 
-Validation data is optional during implicit training. Train, test, and prediction
-datasets become required only when their corresponding implicit workflow is called.
+Validation data is optional during implicit fitting, but standalone `validate()`
+requires it. Train, test, and prediction datasets become required only when their
+corresponding implicit workflow is called.
 
 ## Preserve data construction state
 
@@ -230,7 +234,8 @@ class SplitData(DataPack):
 ```
 
 Full checkpoints store this dictionary and the DataPack's qualified type. During
-`train(resume_from=...)`, it is restored before `SETUP_DATA`. Datasets, DataLoaders,
+`fit(resume_from=...)` or `train(resume_from=...)`, it is restored before
+`SETUP_DATA`. Datasets, DataLoaders,
 worker processes, and open resources are never serialized. A resume requires the
 same DataPack type to be attached; checkpoints created before DataPack state was
 introduced remain readable.

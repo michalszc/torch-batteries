@@ -31,13 +31,13 @@ model = Model()
 optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
 battery = Battery(model, optimizer=optimizer, callbacks=callbacks, metrics=metrics)
 battery.load_checkpoint("checkpoints/latest.pt")
-battery.train(train_loader, val_loader, epochs=20)
+battery.fit(train_loader, val_loader, epochs=20)
 ```
 
 Or load immediately before training:
 
 ```python
-battery.train(
+battery.fit(
     train_loader,
     val_loader,
     epochs=20,
@@ -61,8 +61,8 @@ battery.train(
 Optimizer tensors are mapped to the battery's current device. Model loading is strict.
 Callback types and order and resumable metric names must match the saved state.
 If the checkpoint contains DataPack state, the same qualified DataPack type must be
-attached. `train(resume_from=...)` restores it before `SETUP_DATA`, so saved splits
-affect the loaders used by the resumed workflow.
+attached. `fit(resume_from=...)` and `train(resume_from=...)` restore it before
+`SETUP_DATA`, so saved splits affect the loaders used by the resumed workflow.
 
 ## Keep the best checkpoints
 

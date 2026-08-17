@@ -2,6 +2,7 @@
 
 from typing import cast
 
+import pytest
 import torch
 from torch import nn
 from torch.nn import functional as F  # noqa: N812
@@ -130,7 +131,8 @@ def test_getting_started_workflow() -> None:
         metrics={"mae": F.l1_loss},
     )
 
-    history = battery.train(loader, loader, epochs=2, verbose=0)
+    history = battery.fit(loader, loader, epochs=2, verbose=0)
+    validation_result = battery.validate(loader, verbose=0)
     test_result = battery.test(loader, verbose=0)
     prediction_result = battery.predict(
         loader,
@@ -141,9 +143,28 @@ def test_getting_started_workflow() -> None:
 
     assert len(history["train_loss"]) == 2
     assert len(history["val_metrics"]["mae"]) == 2
+    assert "mae" in validation_result["val_metrics"]
     assert "mae" in test_result["test_metrics"]
     assert prediction_result["predictions"].shape == (16, 1)
     assert prediction_result["predictions"].device.type == "cpu"
+
+
+def test_documented_train_validation_compatibility_is_deprecated() -> None:
+    """The migration note matches train's temporary validation behavior."""
+    inputs = torch.randn(8, 4)
+    targets = inputs.sum(dim=1, keepdim=True)
+    loader = DataLoader(TensorDataset(inputs, targets), batch_size=8)
+    model = _DocumentedRegressor()
+    battery = Battery(
+        model,
+        device="cpu",
+        optimizer=torch.optim.Adam(model.parameters(), lr=0.05),
+    )
+
+    with pytest.warns(DeprecationWarning, match=r"Battery\.fit\(\)"):
+        history = battery.train(loader, val_loader=loader, verbose=0)
+
+    assert len(history["val_loss"]) == 1
 
 
 def test_documented_data_pack_workflow() -> None:
@@ -157,7 +178,7 @@ def test_documented_data_pack_workflow() -> None:
         data_pack=data_pack,
     )
 
-    history = battery.train(epochs=1, verbose=0)
+    history = battery.fit(epochs=1, verbose=0)
     test_result = cast("BatteryTestResult", battery.test(verbose=0))
     predictions = cast(
         "BatteryPredictResult",
@@ -181,7 +202,7 @@ def test_documented_stage_aware_data_pack_builds_only_active_stage() -> None:
         data_pack=data_pack,
     )
 
-    battery.train(epochs=1, verbose=0)
+    battery.fit(epochs=1, verbose=0)
     battery.test(verbose=0)
     battery.predict(verbose=0)
 

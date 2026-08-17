@@ -9,10 +9,10 @@ class TrainResult(TypedDict, total=False):
     Attributes:
         train_loss: Average training loss for every completed epoch.
         val_loss: Deprecated validation loss history retained while ``train()``
-            temporarily supports validation. Use :class:`FitResult` instead.
+            temporarily supports validation. Use ``FitResult`` instead.
         train_metrics: Named training metric histories.
         val_metrics: Deprecated validation metric histories retained while
-            ``train()`` temporarily supports validation. Use :class:`FitResult`
+            ``train()`` temporarily supports validation. Use ``FitResult``
             instead.
     """
 
