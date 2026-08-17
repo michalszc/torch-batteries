@@ -21,6 +21,7 @@ theme:
 plugins:
   - search
   - mkdocstrings:
+      custom_templates: documentation/templates
       handlers:
         python:
           options:
