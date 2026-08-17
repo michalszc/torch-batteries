@@ -63,6 +63,11 @@ class DataPackHandler:
         self._discover_handlers()
         self._validate_providers()
         self._prepared = False
+        logger.debug(
+            "DataPack handler initialized: data_pack=%s, events=%s",
+            type(data_pack).__name__,
+            sorted(event.value for event in self._handlers),
+        )
 
     def _discover_handlers(self) -> None:
         """Discover charged DataPack methods and reject unrelated events."""
@@ -221,6 +226,12 @@ class DataPackHandler:
     ) -> Generator[ResolvedData]:
         """Resolve one DataPack stage and guarantee workflow teardown."""
         resolved_device = get_device(device)
+        logger.debug(
+            "DataPack resolution started: data_pack=%s, stage=%s, device=%s",
+            type(self.data_pack).__name__,
+            stage,
+            resolved_device,
+        )
         setup_context = self._context(stage, resolved_device, battery=battery)
         datasets: DatasetBundle | None = None
         try:
@@ -307,3 +318,8 @@ class DataPackHandler:
                 datasets=datasets,
             )
             self.call(Event.TEARDOWN_DATA, teardown_context)
+            logger.debug(
+                "DataPack teardown completed: data_pack=%s, stage=%s",
+                type(self.data_pack).__name__,
+                stage,
+            )

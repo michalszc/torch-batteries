@@ -8,7 +8,7 @@ from torch_batteries.tracking.base import ExperimentTracker
 from torch_batteries.tracking.types import Run
 from torch_batteries.utils.logging import get_logger
 
-logger = get_logger("experiment_tracking")
+logger = get_logger("callbacks.experiment_tracking")
 
 
 class ExperimentTrackingCallback(Callback):

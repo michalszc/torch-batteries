@@ -19,7 +19,7 @@ from ._state import BatteryStateMixin, as_battery
 if TYPE_CHECKING:
     from torch_batteries.utils.progress.types import ProgressMetrics
 
-logger = get_logger("trainer.evaluation")
+logger = get_logger("trainer._evaluation")
 
 
 class EvaluationMixin(BatteryStateMixin):

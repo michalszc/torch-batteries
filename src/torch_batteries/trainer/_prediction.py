@@ -16,7 +16,7 @@ from torch_batteries.utils.progress import Phase, Progress, ProgressFactory
 
 from ._state import BatteryStateMixin, as_battery
 
-logger = get_logger("trainer.prediction")
+logger = get_logger("trainer._prediction")
 
 
 class PredictionMixin(BatteryStateMixin):

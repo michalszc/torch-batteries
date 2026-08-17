@@ -17,7 +17,7 @@ from ._state import BatteryStateMixin
 if TYPE_CHECKING:
     from torch_batteries.trainer.types import TrainResult
 
-logger = get_logger("trainer.checkpoint")
+logger = get_logger("trainer._checkpoint")
 
 _CHECKPOINT_SCHEMA_VERSION = 2
 _SUPPORTED_CHECKPOINT_SCHEMAS = {1, _CHECKPOINT_SCHEMA_VERSION}

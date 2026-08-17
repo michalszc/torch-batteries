@@ -10,7 +10,7 @@ from torch_batteries.callbacks.base import Callback
 from torch_batteries.events import Event, EventContext, charge
 from torch_batteries.utils.logging import get_logger
 
-logger = get_logger("GradientClip")
+logger = get_logger("callbacks.gradient_clip")
 
 ClipAlgorithm = Literal["norm", "value"]
 

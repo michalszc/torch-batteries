@@ -6,7 +6,7 @@ from torch_batteries.callbacks.base import Callback
 from torch_batteries.events import Event, EventContext, OptimizationStep, charge
 from torch_batteries.utils.logging import get_logger
 
-logger = get_logger("GradientAccumulation")
+logger = get_logger("callbacks.gradient_accumulation")
 
 
 class GradientAccumulation(Callback):

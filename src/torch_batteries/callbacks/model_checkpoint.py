@@ -21,7 +21,7 @@ from torch_batteries.utils.logging import get_logger
 if TYPE_CHECKING:
     from torch_batteries.trainer import Battery
 
-logger = get_logger("ModelCheckpoint")
+logger = get_logger("callbacks.model_checkpoint")
 
 
 def _optional_string(value: object) -> str | None:

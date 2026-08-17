@@ -7,7 +7,7 @@ import torch
 
 from torch_batteries.utils.logging import get_logger
 
-logger = get_logger("metrics")
+logger = get_logger("utils.metrics")
 
 type MetricCallable = Callable[[torch.Tensor, torch.Tensor], float | torch.Tensor]
 

@@ -16,7 +16,7 @@ from torch_batteries.utils.logging import get_logger
 P = ParamSpec("P")
 R = TypeVar("R")
 
-logger = get_logger("events")
+logger = get_logger("events.core")
 
 
 @dataclass(frozen=True, slots=True)

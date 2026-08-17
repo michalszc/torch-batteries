@@ -10,7 +10,7 @@ from torch_batteries.utils.logging import get_logger
 type MonitorPhase = Literal["train", "validation", "val"]
 type CanonicalMonitorPhase = Literal["train", "validation"]
 
-logger = get_logger("Callbacks")
+logger = get_logger("callbacks._monitor")
 
 
 def resolve_monitor_phase(

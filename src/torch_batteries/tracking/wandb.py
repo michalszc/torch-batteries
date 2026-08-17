@@ -15,7 +15,7 @@ from torch_batteries.tracking.types import (
 )
 from torch_batteries.utils.logging import get_logger
 
-logger = get_logger("wandb_tracker")
+logger = get_logger("tracking.wandb")
 
 
 class _WandbRun(Protocol):

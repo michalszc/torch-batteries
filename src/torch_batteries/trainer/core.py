@@ -28,7 +28,7 @@ from ._evaluation import EvaluationMixin
 from ._prediction import PredictionMixin
 from ._training import TrainingMixin
 
-logger = get_logger("trainer")
+logger = get_logger("trainer.core")
 
 
 class Battery(CheckpointMixin, TrainingMixin, EvaluationMixin, PredictionMixin):

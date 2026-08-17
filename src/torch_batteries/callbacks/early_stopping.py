@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 
     from torch_batteries.trainer import Battery
 
-logger = get_logger("EarlyStopping")
+logger = get_logger("callbacks.early_stopping")
 
 
 class EarlyStopping(Callback):

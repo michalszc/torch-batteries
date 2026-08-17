@@ -1,5 +1,6 @@
 """Tests for charged DataPack dispatch and DataLoader construction."""
 
+import logging
 from typing import Any
 
 import pytest
@@ -167,6 +168,19 @@ def test_data_pack_resolves_fit_without_a_battery() -> None:
         assert data_pack.calls == ["prepare", "setup", "loader:train"]
 
     assert data_pack.calls == ["prepare", "setup", "loader:train", "teardown"]
+
+
+def test_data_pack_resolution_logs_lifecycle(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    data_pack = ExampleDataPack()
+    caplog.set_level(logging.DEBUG, logger="torch_batteries.data.handler")
+
+    with data_pack.resolve("fit"):
+        pass
+
+    assert "DataPack resolution started" in caplog.text
+    assert "DataPack teardown completed" in caplog.text
 
 
 @pytest.mark.parametrize("stage", ["test", "predict"])
@@ -370,9 +384,12 @@ def test_resolve_tears_down_after_lifecycle_and_body_failures(failure: str) -> N
     assert data_pack.calls[-1] == "teardown"
 
 
-def test_phase_defaults_shuffle_only_map_style_training_data() -> None:
+def test_phase_defaults_shuffle_only_map_style_training_data(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     dataset = TensorDataset(torch.arange(8))
     generator = torch.Generator().manual_seed(3)
+    caplog.set_level(logging.DEBUG, logger="torch_batteries.data.loader")
 
     train_loader = materialize_dataloader(
         dataset,
@@ -392,6 +409,7 @@ def test_phase_defaults_shuffle_only_map_style_training_data() -> None:
     assert type(validation_loader.sampler).__name__ == "SequentialSampler"
     assert train_loader.generator is generator
     assert train_loader.pin_memory is False
+    assert "DataLoader materialized: phase=train" in caplog.text
 
 
 def test_cuda_device_enables_automatic_pin_memory() -> None:
@@ -437,7 +455,11 @@ class NumberStream(IterableDataset[int]):
         yield from range(4)
 
 
-def test_iterable_dataset_rejects_explicit_shuffle() -> None:
+def test_iterable_dataset_rejects_explicit_shuffle(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.ERROR, logger="torch_batteries.data.loader")
+
     with pytest.raises(ValueError, match="IterableDataset"):
         materialize_dataloader(
             NumberStream(),
@@ -445,6 +467,8 @@ def test_iterable_dataset_rejects_explicit_shuffle() -> None:
             phase="train",
             device=torch.device("cpu"),
         )
+
+    assert "Cannot enable shuffling for an IterableDataset" in caplog.text
 
 
 def test_multiple_provider_methods_are_rejected() -> None:
