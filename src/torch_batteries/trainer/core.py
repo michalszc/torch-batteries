@@ -14,10 +14,12 @@ from torch_batteries.data.handler import DataPackHandler
 from torch_batteries.data.types import DataStage
 from torch_batteries.events import Event, EventContext, EventHandler
 from torch_batteries.trainer.types import (
+    FitResult,
     PredictResult,
     StepOutput,
     TestResult,
     TrainResult,
+    ValidationResult,
 )
 from torch_batteries.utils.device import get_device
 from torch_batteries.utils.logging import get_logger
@@ -196,6 +198,7 @@ class Battery(CheckpointMixin, TrainingMixin, EvaluationMixin, PredictionMixin):
     def train(  # noqa: PLR0913
         self,
         train_loader: DataLoader | None = None,
+        # Deprecated compatibility parameter; use fit(..., val_loader=...).
         val_loader: DataLoader | None = None,
         epochs: int = 1,
         verbose: int = 1,
@@ -205,9 +208,13 @@ class Battery(CheckpointMixin, TrainingMixin, EvaluationMixin, PredictionMixin):
     ) -> TrainResult:
         """Train with explicit loaders or the attached DataPack.
 
+        Validation through this method is deprecated. Use :meth:`fit` for combined
+        training and validation. Calls without validation data do not warn.
+
         Args:
             train_loader: Optional sized, non-empty training loader.
-            val_loader: Optional validation loader for direct-loader mode.
+            val_loader: Deprecated. Optional validation loader for direct-loader
+                compatibility. Use :meth:`fit` for validated training.
             epochs: Positive epoch count or resume target.
             verbose: ``0`` for silent, ``1`` for bars, or ``2`` for summaries.
             resume_from: Optional full checkpoint restored before data setup.
@@ -225,6 +232,57 @@ class Battery(CheckpointMixin, TrainingMixin, EvaluationMixin, PredictionMixin):
             resume_from=resume_from,
             resume_epochs_mode=resume_epochs_mode,
         )
+
+    def fit(  # noqa: PLR0913
+        self,
+        train_loader: DataLoader | None = None,
+        val_loader: DataLoader | None = None,
+        epochs: int = 1,
+        verbose: int = 1,
+        *,
+        resume_from: str | Path | None = None,
+        resume_epochs_mode: str = "total",
+    ) -> FitResult:
+        """Train with optional per-epoch validation.
+
+        Args:
+            train_loader: Optional sized, non-empty training loader.
+            val_loader: Optional validation loader for direct-loader mode.
+            epochs: Positive epoch count or resume target.
+            verbose: ``0`` for silent, ``1`` for bars, or ``2`` for summaries.
+            resume_from: Optional full checkpoint restored before data setup.
+            resume_epochs_mode: ``"total"`` or ``"additional"``.
+
+        Returns:
+            Per-epoch training histories and optional validation histories. Validation
+            histories are empty when validation data is unavailable.
+        """
+        return TrainingMixin.fit(
+            self,
+            train_loader,
+            val_loader,
+            epochs,
+            verbose,
+            resume_from=resume_from,
+            resume_epochs_mode=resume_epochs_mode,
+        )
+
+    def validate(
+        self,
+        val_loader: DataLoader | None = None,
+        verbose: int = 1,
+    ) -> ValidationResult:
+        """Run one standalone validation pass.
+
+        Args:
+            val_loader: Optional sized, non-empty validation loader. When omitted,
+                the attached DataPack must provide validation data.
+            verbose: ``0`` for silent, ``1`` for a bar, or ``2`` for a summary.
+
+        Returns:
+            Aggregate validation loss and optional named validation metrics.
+        """
+        return EvaluationMixin._validate(self, val_loader, verbose)  # noqa: SLF001
 
     @overload
     def test(

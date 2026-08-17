@@ -33,9 +33,11 @@ def test_historical_type_facades_retain_exports() -> None:
     assert event_core.OptimizationStep is events.OptimizationStep
     assert event_core.charge is events.charge
     assert trainer_types.PredictResult is trainer.PredictResult
+    assert trainer_types.FitResult is trainer.FitResult
     assert trainer_types.StepOutput is trainer.StepOutput
     assert trainer_types.TestResult is trainer.TestResult
     assert trainer_types.TrainResult is trainer.TrainResult
+    assert trainer_types.ValidationResult is trainer.ValidationResult
 
 
 def test_utility_and_integration_facades_retain_exports() -> None:

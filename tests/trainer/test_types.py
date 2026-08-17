@@ -2,6 +2,9 @@
 
 import torch
 
+from torch_batteries import FitResult, ValidationResult
+from torch_batteries.trainer import FitResult as TrainerFitResult
+from torch_batteries.trainer import ValidationResult as TrainerValidationResult
 from torch_batteries.trainer import types as trainer_types
 from torch_batteries.trainer.types import PredictResult, TrainResult
 
@@ -150,3 +153,18 @@ class TestTrainerTypes:
         assert "train_loss" in train_result
         assert "test_loss" in test_result
         assert "predictions" in predict_result
+
+    def test_new_result_types_are_publicly_exported(self) -> None:
+        """Fit and validation contracts retain root and trainer import paths."""
+        fit_result: FitResult = {
+            "train_loss": [0.5],
+            "val_loss": [],
+            "train_metrics": {},
+            "val_metrics": {},
+        }
+        validation_result: ValidationResult = {"val_loss": 0.25}
+
+        assert TrainerFitResult is FitResult
+        assert TrainerValidationResult is ValidationResult
+        assert fit_result["val_loss"] == []
+        assert validation_result["val_loss"] == 0.25

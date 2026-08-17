@@ -1,6 +1,7 @@
 """Training workflows for ``torch_batteries.Battery``."""
 
 import copy
+import warnings
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
@@ -9,7 +10,7 @@ from torch.utils.data import DataLoader
 
 from torch_batteries.events import Event, EventContext, OptimizationStep
 from torch_batteries.trainer.context import copy_history_context
-from torch_batteries.trainer.types import TrainResult
+from torch_batteries.trainer.types import FitResult, TrainResult
 from torch_batteries.utils.batch import get_batch_size
 from torch_batteries.utils.device import move_to_device
 from torch_batteries.utils.logging import get_logger
@@ -28,9 +29,43 @@ class TrainingMixin(BatteryStateMixin):
 
     __slots__ = ()
 
+    def fit(  # noqa: PLR0913
+        self,
+        train_loader: DataLoader | None = None,
+        val_loader: DataLoader | None = None,
+        epochs: int = 1,
+        verbose: int = 1,
+        *,
+        resume_from: str | Path | None = None,
+        resume_epochs_mode: str = "total",
+    ) -> FitResult:
+        """Fit the model with optional per-epoch validation.
+
+        Args:
+            train_loader: Optional sized, non-empty training loader.
+            val_loader: Optional validation loader for direct-loader mode.
+            epochs: Positive epoch count or resume target.
+            verbose: ``0`` for silent, ``1`` for bars, or ``2`` for summaries.
+            resume_from: Optional full checkpoint restored before data setup.
+            resume_epochs_mode: ``"total"`` or ``"additional"``.
+
+        Returns:
+            Per-epoch training and optional validation histories.
+        """
+        return self._run_training_workflow(
+            train_loader,
+            val_loader,
+            epochs,
+            verbose,
+            resume_from=resume_from,
+            resume_epochs_mode=resume_epochs_mode,
+            warn_for_validation=False,
+        )
+
     def train(  # noqa: PLR0913
         self,
         train_loader: DataLoader | None = None,
+        # Deprecated compatibility parameter; use fit(..., val_loader=...).
         val_loader: DataLoader | None = None,
         epochs: int = 1,
         verbose: int = 1,
@@ -46,8 +81,9 @@ class TrainingMixin(BatteryStateMixin):
 
         Args:
             train_loader: Optional sized, non-empty training loader.
-            val_loader: Optional validation loader used only with an explicit train
-                loader. Implicit validation comes from the DataPack.
+            val_loader: Deprecated. Optional validation loader used only with an
+                explicit train loader. Use :meth:`fit` for validated training.
+                Implicit validation compatibility comes from the DataPack.
             epochs: Positive epoch count or resume target.
             verbose: ``0`` for silent, ``1`` for progress bars, or ``2`` for summaries.
             resume_from: Optional full checkpoint restored before data resolution.
@@ -61,6 +97,28 @@ class TrainingMixin(BatteryStateMixin):
             ValueError: If loaders, DataPack datasets, handlers, optimizer, resume
                 mode, or checkpoint state are incompatible.
         """
+        return self._run_training_workflow(
+            train_loader,
+            val_loader,
+            epochs,
+            verbose,
+            resume_from=resume_from,
+            resume_epochs_mode=resume_epochs_mode,
+            warn_for_validation=True,
+        )
+
+    def _run_training_workflow(  # noqa: PLR0913
+        self,
+        train_loader: DataLoader | None,
+        val_loader: DataLoader | None,
+        epochs: int,
+        verbose: int,
+        *,
+        resume_from: str | Path | None,
+        resume_epochs_mode: str,
+        warn_for_validation: bool,
+    ) -> FitResult:
+        """Resolve loaders and run the shared training engine."""
         if epochs <= 0:
             msg = "epochs must be greater than zero."
             raise ValueError(msg)
@@ -78,6 +136,7 @@ class TrainingMixin(BatteryStateMixin):
                 epochs,
                 verbose,
                 resume_epochs_mode=resume_epochs_mode,
+                warn_for_validation=warn_for_validation,
             )
         if val_loader is not None:
             msg = (
@@ -94,9 +153,10 @@ class TrainingMixin(BatteryStateMixin):
                 epochs,
                 verbose,
                 resume_epochs_mode=resume_epochs_mode,
+                warn_for_validation=warn_for_validation,
             )
 
-    def _train_with_loaders(  # noqa: PLR0912, PLR0915
+    def _train_with_loaders(  # noqa: PLR0912, PLR0913, PLR0915
         self,
         train_loader: DataLoader,
         val_loader: DataLoader | None = None,
@@ -104,7 +164,8 @@ class TrainingMixin(BatteryStateMixin):
         verbose: int = 1,
         *,
         resume_epochs_mode: str = "total",
-    ) -> TrainResult:
+        warn_for_validation: bool = False,
+    ) -> FitResult:
         """Train the model for one or more epochs.
 
         A fresh call resets history and optimizer-step counters. A checkpoint loaded
@@ -120,6 +181,8 @@ class TrainingMixin(BatteryStateMixin):
                 ``resume_epochs_mode``.
             verbose: ``0`` for silent, ``1`` for progress bars, or ``2`` for summaries.
             resume_epochs_mode: ``"total"`` or ``"additional"``.
+            warn_for_validation: Whether to warn when the compatibility validation
+                behavior of :meth:`train` actually runs.
 
         Returns:
             Per-epoch loss histories and named metric histories. Validation entries
@@ -213,6 +276,21 @@ class TrainingMixin(BatteryStateMixin):
             self._event_handler.call(Event.AFTER_TRAIN_EPOCH, after_epoch_context)
 
             if val_loader:
+                if warn_for_validation:
+                    # A future version will make train() training-only and will no
+                    # longer run validation.
+                    warning_message = (
+                        "Validation through Battery.train() is deprecated and will "
+                        "be removed from train() in a future version. Use "
+                        "Battery.fit() for combined training and validation."
+                    )
+                    logger.warning(warning_message)
+                    warnings.warn(
+                        warning_message,
+                        DeprecationWarning,
+                        stacklevel=3,
+                    )
+                    warn_for_validation = False
                 logger.debug("Validation phase started: epoch=%d", epoch)
                 before_val_context: EventContext = {
                     "battery": as_battery(self),

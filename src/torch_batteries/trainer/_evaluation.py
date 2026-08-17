@@ -8,7 +8,7 @@ from torch.utils.data import DataLoader
 
 from torch_batteries.events import Event, EventContext
 from torch_batteries.trainer.context import dataset_identity_context
-from torch_batteries.trainer.types import TestResult
+from torch_batteries.trainer.types import TestResult, ValidationResult
 from torch_batteries.utils.batch import get_batch_size
 from torch_batteries.utils.device import move_to_device
 from torch_batteries.utils.logging import get_logger
@@ -26,6 +26,68 @@ class EvaluationMixin(BatteryStateMixin):
     """Implement validation and test workflows."""
 
     __slots__ = ()
+
+    def _validate(
+        self,
+        val_loader: DataLoader | None = None,
+        verbose: int = 1,
+    ) -> ValidationResult:
+        """Validate once with an explicit or DataPack-provided loader."""
+        if val_loader is not None:
+            return self._validate_with_loader(val_loader, verbose)
+        with self._data_workflow("fit") as workflow:
+            validation_loaders = workflow.loaders.loaders_for_phase("validation")
+            validation_loader = next(iter(validation_loaders.values()), None)
+            if validation_loader is None:
+                msg = "The DataPack fit stage did not provide validation data."
+                raise ValueError(msg)
+            return self._validate_with_loader(validation_loader, verbose)
+
+    def _validate_with_loader(
+        self,
+        val_loader: DataLoader,
+        verbose: int = 1,
+    ) -> ValidationResult:
+        """Run one evaluation-only validation pass at epoch one."""
+        self._validate_loader(val_loader, "Validation")
+        logger.info("Validation started: batches=%d", len(val_loader))
+
+        before_validation_context: EventContext = {
+            "battery": as_battery(self),
+            "model": self._model,
+            "optimizer": self._optimizer,
+            "epoch": 1,
+        }
+        self._event_handler.call(Event.BEFORE_VALIDATION, before_validation_context)
+
+        progress = ProgressFactory.create(verbose=verbose, total_epochs=1)
+        progress.start_epoch(1)
+        try:
+            val_metrics = self._validate_epoch(val_loader, progress, 1)
+        except BaseException:
+            progress.abort()
+            raise
+        progress.end_epoch()
+        progress.end_training()
+
+        after_validation_context: EventContext = {
+            "battery": as_battery(self),
+            "model": self._model,
+            "optimizer": self._optimizer,
+            "epoch": 1,
+            "loss": val_metrics["loss"],
+            "val_loss": val_metrics["loss"],
+            "val_metrics": val_metrics,
+        }
+        self._event_handler.call(Event.AFTER_VALIDATION, after_validation_context)
+
+        result: ValidationResult = {"val_loss": val_metrics["loss"]}
+        if len(val_metrics) > 1:
+            result["val_metrics"] = {
+                name: value for name, value in val_metrics.items() if name != "loss"
+            }
+        logger.info("Validation completed")
+        return result
 
     def _test(
         self,
@@ -382,6 +444,8 @@ class EvaluationMixin(BatteryStateMixin):
             "battery": as_battery(self),
             "model": self._model,
             "epoch": epoch,
+            "loss": val_metrics["loss"],
+            "val_loss": val_metrics["loss"],
             "val_metrics": val_metrics,
         }
         self._event_handler.call(Event.AFTER_VALIDATION_EPOCH, after_val_epoch_context)

@@ -59,7 +59,15 @@ from .events import Event, EventContext, OptimizationStep, charge
 from .tracking import (
     Run,
 )
-from .trainer import Battery, PredictResult, StepOutput, TestResult, TrainResult
+from .trainer import (
+    Battery,
+    FitResult,
+    PredictResult,
+    StepOutput,
+    TestResult,
+    TrainResult,
+    ValidationResult,
+)
 from .utils.metrics import CollectedMetric, StatefulMetric
 
 __all__ = [
@@ -73,6 +81,7 @@ __all__ = [
     "DatasetBundle",
     "Event",
     "EventContext",
+    "FitResult",
     "OptimizationStep",
     "PredictResult",
     "ResolvedData",
@@ -81,6 +90,7 @@ __all__ = [
     "StepOutput",
     "TestResult",
     "TrainResult",
+    "ValidationResult",
     "callbacks",
     "charge",
     "events",
