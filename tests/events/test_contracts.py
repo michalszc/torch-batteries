@@ -154,13 +154,20 @@ MODEL_STEP_EVENTS = {
     Event.PREDICT_STEP,
 }
 
+DATA_EVENTS = {
+    Event.PREPARE_DATA,
+    Event.SETUP_DATA,
+    Event.CONFIGURE_DATALOADER,
+    Event.TEARDOWN_DATA,
+}
+
 
 class EventRecorder:
     """Dynamically register a recorder for every callback-compatible event."""
 
     def __init__(self, records: dict[Event, list[EventContext]]) -> None:
         for event in Event:
-            if event in MODEL_STEP_EVENTS:
+            if event in MODEL_STEP_EVENTS | DATA_EVENTS:
                 continue
 
             def record(context: EventContext, event: Event = event) -> object:
@@ -254,11 +261,13 @@ def test_all_documented_event_context_contracts() -> None:  # noqa: PLR0915
     battery.test(loader, verbose=0)
     prediction_result = battery.predict(loader, verbose=0)
 
-    assert len(Event) == 39
-    assert set(EXPECTED_FIELDS) == set(Event)
-    assert all(records[event] for event in Event)
+    assert len(Event) == 43
+    assert set(EXPECTED_FIELDS) == set(Event) - DATA_EVENTS
+    assert all(records[event] for event in set(Event) - DATA_EVENTS)
 
     for event, event_records in records.items():
+        if event in DATA_EVENTS:
+            continue
         for context in event_records:
             assert EXPECTED_FIELDS[event] <= context.keys()
             assert context["battery"] is battery

@@ -4,6 +4,11 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Literal
 
+from torch_batteries.callbacks._monitor import (
+    MonitorPhase,
+    require_metric,
+    resolve_monitor_phase,
+)
 from torch_batteries.callbacks.base import Callback
 from torch_batteries.events import Event, EventContext, charge
 from torch_batteries.utils.logging import get_logger
@@ -20,7 +25,7 @@ class EarlyStopping(Callback):
     """Early stops the training if selected metric doesn't improve after a given patience.
 
     Args:
-        stage: One of 'train' or 'val' to indicate which stage's metric to monitor
+        phase: One of 'train' or 'val' to indicate which phase's metric to monitor
         metric: The name of the metric to monitor
         min_delta: Minimum change in the monitored metric to qualify as an improvement
         patience: Number of epochs with no improvement after which training will be stopped
@@ -29,21 +34,23 @@ class EarlyStopping(Callback):
               when the metric stops increasing
         restore_best_weights: If True, restore model weights from the epoch with the
                              best value of the monitored metric
+        stage: Deprecated keyword alias for ``phase``.
     """  # noqa: E501
 
     def __init__(  # noqa: PLR0913
         self,
-        stage: Literal["train", "val"],
-        metric: str,
+        phase: MonitorPhase | None = None,
+        metric: str | None = None,
         *,
         min_delta: float = 0.0,
         patience: int = 5,
         mode: Literal["min", "max"] = "min",
         restore_best_weights: bool = False,
+        stage: MonitorPhase | None = None,
     ) -> None:
-        if stage not in {"train", "val"}:
-            msg = "stage must be one of 'train' or 'val'"
-            raise ValueError(msg)
+        phase = resolve_monitor_phase(phase, stage=stage, required=True)
+        assert phase is not None
+        metric = require_metric(metric)
         if min_delta < 0:
             msg = "min_delta must be greater than or equal to zero"
             raise ValueError(msg)
@@ -51,7 +58,7 @@ class EarlyStopping(Callback):
             msg = "patience must be greater than or equal to zero"
             raise ValueError(msg)
 
-        self._stage = stage
+        self._phase = phase
         self._metric = metric
         self._min_delta = min_delta
         self._patience = patience
@@ -141,7 +148,7 @@ class EarlyStopping(Callback):
         Args:
             context: Event context containing training metrics.
         """
-        if self._stage != "train":
+        if self._phase != "train":
             return
 
         metrics = context["train_metrics"]
@@ -156,7 +163,7 @@ class EarlyStopping(Callback):
         Args:
             context: Event context containing validation metrics.
         """
-        if self._stage != "val":
+        if self._phase != "val":
             return
 
         metrics = context["val_metrics"]

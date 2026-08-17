@@ -69,7 +69,7 @@ def test_plateau_scheduler_uses_selected_validation_metric() -> None:
     scheduler = ReduceLROnPlateau(optimizer, mode="min", patience=0, factor=0.5)
     callback = LearningRateScheduler(
         scheduler,
-        stage="val",
+        phase="val",
         metric="loss",
     )
 
@@ -79,6 +79,35 @@ def test_plateau_scheduler_uses_selected_validation_metric() -> None:
     assert optimizer.param_groups[0]["lr"] == pytest.approx(0.05)
 
 
+def test_deprecated_stage_alias(caplog: pytest.LogCaptureFixture) -> None:
+    """The deprecated stage keyword resolves to the monitoring phase."""
+    model = _Model()
+    optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
+
+    callback = LearningRateScheduler(
+        ReduceLROnPlateau(optimizer),
+        stage="val",
+        metric="loss",
+    )
+
+    assert callback._phase == "val"  # noqa: SLF001
+    assert "'stage' is deprecated; use 'phase' instead" in caplog.text
+
+
+def test_rejects_phase_and_stage() -> None:
+    """Canonical and deprecated monitoring keywords are mutually exclusive."""
+    model = _Model()
+    optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
+
+    with pytest.raises(TypeError, match="cannot both be provided"):
+        LearningRateScheduler(
+            ReduceLROnPlateau(optimizer),
+            phase="train",
+            stage="val",
+            metric="loss",
+        )
+
+
 def test_validates_plateau_and_ordinary_scheduler_configuration() -> None:
     model = _Model()
     optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
@@ -86,7 +115,7 @@ def test_validates_plateau_and_ordinary_scheduler_configuration() -> None:
     with pytest.raises(ValueError, match="requires interval='epoch'"):
         LearningRateScheduler(ReduceLROnPlateau(optimizer), interval="step")
     with pytest.raises(ValueError, match="only supported"):
-        LearningRateScheduler(StepLR(optimizer, 1), stage="val", metric="loss")
+        LearningRateScheduler(StepLR(optimizer, 1), phase="val", metric="loss")
 
 
 def test_scheduler_state_round_trip() -> None:
@@ -102,7 +131,62 @@ def test_scheduler_state_round_trip() -> None:
     restored = LearningRateScheduler(StepLR(restored_optimizer, 1))
     restored.load_state_dict(state)
 
+    assert "phase" in state
+    assert "stage" not in state
     assert restored.scheduler.last_epoch == callback.scheduler.last_epoch
+
+
+def test_loads_legacy_scheduler_stage_state() -> None:
+    """Scheduler state from before the phase rename remains loadable."""
+    model = _Model()
+    optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
+    callback = LearningRateScheduler(
+        ReduceLROnPlateau(optimizer),
+        phase="val",
+        metric="loss",
+    )
+    state = callback.state_dict()
+    state["stage"] = state.pop("phase")
+
+    callback.load_state_dict(state)
+
+
+@pytest.mark.parametrize(
+    "phase_keys",
+    [
+        {},
+        {"phase": None, "stage": None},
+    ],
+)
+def test_rejects_ambiguous_scheduler_phase_state(
+    phase_keys: dict[str, object],
+) -> None:
+    """Checkpoint state identifies its monitoring phase with exactly one key."""
+    model = _Model()
+    optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
+    callback = LearningRateScheduler(StepLR(optimizer, 1))
+    state = callback.state_dict()
+    state.pop("phase")
+    state.update(phase_keys)
+
+    with pytest.raises(ValueError, match="exactly one"):
+        callback.load_state_dict(state)
+
+
+def test_rejects_mismatched_scheduler_phase_state() -> None:
+    """The restored monitoring phase must match callback configuration."""
+    model = _Model()
+    optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
+    callback = LearningRateScheduler(
+        ReduceLROnPlateau(optimizer),
+        phase="train",
+        metric="loss",
+    )
+    state = callback.state_dict()
+    state["phase"] = "val"
+
+    with pytest.raises(ValueError, match="does not match"):
+        callback.load_state_dict(state)
 
 
 def test_rejects_invalid_interval_and_missing_plateau_metric() -> None:
@@ -116,7 +200,7 @@ def test_rejects_invalid_interval_and_missing_plateau_metric() -> None:
 
     callback = LearningRateScheduler(
         ReduceLROnPlateau(optimizer),
-        stage="train",
+        phase="train",
         metric="loss",
     )
     with pytest.raises(ValueError, match="is unavailable"):
@@ -128,7 +212,7 @@ def test_validation_plateau_requires_validation_and_metric() -> None:
     optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
     callback = LearningRateScheduler(
         ReduceLROnPlateau(optimizer),
-        stage="val",
+        phase="val",
         metric="loss",
     )
 
@@ -171,7 +255,7 @@ def test_scheduler_ignores_events_for_other_routes() -> None:
     ordinary = LearningRateScheduler(StepLR(optimizer, 1))
     validation_plateau = LearningRateScheduler(
         ReduceLROnPlateau(optimizer),
-        stage="val",
+        phase="val",
         metric="loss",
     )
 

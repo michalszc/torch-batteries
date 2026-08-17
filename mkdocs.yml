@@ -55,6 +55,7 @@ nav:
       - Overview: guides/index.md
       - Training and Evaluation: guides/training.md
       - Metrics: guides/metrics.md
+      - DataPack Workflows: guides/data-pack.md
       - Batches and Devices: guides/batches-and-devices.md
       - Callbacks and Optimization: guides/callbacks.md
       - Checkpoints and Resume: guides/checkpoints.md
@@ -63,6 +64,7 @@ nav:
   - API Reference:
       - Overview: reference/index.md
       - Trainer: reference/trainer.md
+      - Data: reference/data.md
       - Events: reference/events.md
       - Callbacks: reference/callbacks.md
       - Metrics: reference/metrics.md

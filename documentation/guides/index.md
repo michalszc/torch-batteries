@@ -11,6 +11,7 @@ exact signature or event context.
 | --- | --- | --- |
 | Define phase behavior | [Training and Evaluation](training.md) | `StepOutput`, train/validation/test contracts, manual metrics, empty loaders, and result histories |
 | Calculate metrics correctly | [Metrics](metrics.md) | Callable metrics, `StatefulMetric`, `CollectedMetric`, weighting, state, and memory cost |
+| Reuse data construction | [DataPack Workflows](data-pack.md) | Charged data lifecycle, datasets, loader policy, deterministic setup, and state |
 | Use structured inputs | [Batches and Devices](batches-and-devices.md) | Tensor, tuple, dictionary, nested batches, multiple inputs, and automatic device transfer |
 | Control optimization | [Callbacks and Optimization](callbacks.md) | Callback order, early stopping, accumulation, clipping, mixed precision, and schedulers |
 | Preserve or resume work | [Checkpoints and Resume](checkpoints.md) | Manual saves, Top-K selection, weights-only files, full state, and resume modes |
@@ -21,14 +22,16 @@ exact signature or event context.
 
 ### First supervised project
 
-Read Training and Evaluation, Metrics, and Batches and Devices. Add callbacks only
+Read Training and Evaluation, Metrics, and Batches and Devices. Add DataPack when
+dataset and loader construction should be reusable. Add callbacks only
 after the basic train/validation/test workflow returns the results you expect.
 
 ### Long-running or resumable training
 
 Read Callbacks and Optimization before Checkpoints and Resume. Full checkpoints
-restore optimizer, callback, metric, epoch, and history state, so callback ordering
-and configuration are part of the experiment contract.
+restore optimizer, callback, metric, DataPack, epoch, and history state, so callback
+ordering, configuration, and data construction state are part of the experiment
+contract.
 
 ### Memory-sensitive inference
 

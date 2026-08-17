@@ -72,6 +72,7 @@ class EventContext(TypedDict, total=False):
     - `device`: Device selected by Battery.
     - `phase`: Active workflow phase: `train`, `validation`, `test`, or
       `predict`.
+    - `dataset_name`: Name of the active implicit DataPack dataset.
 
     Optimization keys:
 
@@ -114,6 +115,7 @@ class EventContext(TypedDict, total=False):
     optimizer: torch.optim.Optimizer | None
     device: torch.device
     phase: Literal["train", "validation", "test", "predict"]
+    dataset_name: str
     batch: Any
     batch_idx: int
     total_batches: int
@@ -143,9 +145,46 @@ class Event(Enum):
     """Events that can be used with the @charge decorator.
 
     Events are triggered at different points during training/testing/prediction.
-    Each event receives an `EventContext` with different available fields.
-    Whenever an event lists `epoch` in its context, the value follows the
-    one-based public convention documented by `EventContext`.
+    Model and callback events receive an `EventContext`; DataPack lifecycle events
+    receive a `DataContext`. Whenever an event lists `epoch` in its context, the
+    value follows the one-based public convention documented by `EventContext`.
+
+    ## DataPack Lifecycle Events
+
+    These events may be handled only by the DataPack attached to a Battery. The
+    `stage` field is `"fit"`, `"test"`, or `"predict"`. A DataPack that defines a
+    non-negative `seed` also receives `seed` and a deterministic `generator`.
+
+    - `PREPARE_DATA`: Broadcast side-effect event for idempotent downloads and
+      cache population. It runs at most once per Battery, before the first implicit
+      setup.
+        - **Context**: `battery`, `data_pack`, `stage`, `device`; optional `seed`,
+          `generator`
+        - **Return**: `None`
+        - **Default**: no operation
+
+    - `SETUP_DATA`: Exclusive provider called once for every implicit fit, test, or
+      prediction workflow. Use `stage` to construct and return only the datasets
+      required by the active workflow.
+        - **Context**: same as `PREPARE_DATA`
+        - **Return**: `DatasetBundle`
+        - **Default**: none; an implicit workflow requires exactly one valid bundle
+
+    - `CONFIGURE_DATALOADER`: Exclusive provider called for every dataset selected
+      from the setup bundle. The phase-specific `generator` uses a deterministic
+      offset from the DataPack seed.
+        - **Context**: `battery`, `data_pack`, `stage`, `device`, `phase`,
+          `datasets`, `dataset`, `dataset_name`; optional `seed`, `generator`
+        - **Return**: `DataLoaderConfig` or `torch.utils.data.DataLoader`
+        - **Default**: `DataLoaderConfig()`
+
+    - `TEARDOWN_DATA`: Broadcast side-effect event that always runs when an implicit
+      workflow exits, including after setup, loader, or model failures. `datasets`
+      is present only when setup completed successfully.
+        - **Context**: `battery`, `data_pack`, `stage`, `device`; optional `seed`,
+          `generator`, `datasets`
+        - **Return**: `None`
+        - **Default**: no operation
 
     ## Optimization Extension Events
 
@@ -357,6 +396,12 @@ class Event(Enum):
         - **Context**: `optimizer`, `batch`, `batch_idx`, `epoch`, `predictions`
     """
 
+    # DataPack lifecycle events
+    PREPARE_DATA = "prepare_data"
+    SETUP_DATA = "setup_data"
+    CONFIGURE_DATALOADER = "configure_dataloader"
+    TEARDOWN_DATA = "teardown_data"
+
     # Optimization extension events
     SETUP = "setup"
     STEP_EXECUTION_CONTEXT = "step_execution_context"
@@ -410,8 +455,8 @@ class Event(Enum):
 def charge(event: Event) -> Callable[[Callable[P, R]], Callable[P, R]]:
     """Decorator to mark methods for specific training events.
 
-    All event handlers should accept a single `EventContext` parameter containing
-    relevant context for the event. Different events populate different fields.
+    Handlers accept the context associated with the selected event. Model and callback
+    events receive `EventContext`; DataPack events receive `DataContext`.
 
     Args:
         event: The event type from the Event enum

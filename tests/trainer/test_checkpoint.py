@@ -10,7 +10,16 @@ from torch import nn
 from torch.optim.lr_scheduler import StepLR
 from torch.utils.data import DataLoader, TensorDataset
 
-from torch_batteries import Battery, Event, EventContext, charge
+from torch_batteries import (
+    Battery,
+    DataContext,
+    DataLoaderConfig,
+    DataPack,
+    DatasetBundle,
+    Event,
+    EventContext,
+    charge,
+)
 from torch_batteries.callbacks import (
     GradientAccumulation,
     LearningRateScheduler,
@@ -131,11 +140,11 @@ def test_rejects_unsupported_full_checkpoint_schema(tmp_path: Path) -> None:
     path = tmp_path / "unsupported-schema.pth"
     source.save_checkpoint(path)
     payload = torch.load(path, weights_only=True)
-    payload["__torch_batteries_checkpoint__"] = 2
+    payload["__torch_batteries_checkpoint__"] = 3
     torch.save(payload, path)
     target, _ = _battery()
 
-    with pytest.raises(ValueError, match="schema 2 is unsupported"):
+    with pytest.raises(ValueError, match="schema 3 is unsupported"):
         target.load_checkpoint(path)
 
 
@@ -243,7 +252,7 @@ def test_model_checkpoint_saves_full_training_state_by_default(
 ) -> None:
     model = _Model()
     callback = ModelCheckpoint(
-        stage="train",
+        phase="train",
         metric="loss",
         mode="min",
         save_dir=str(tmp_path),
@@ -259,13 +268,13 @@ def test_model_checkpoint_saves_full_training_state_by_default(
     battery.train(_loader(), verbose=0)
 
     payload = torch.load(tmp_path / "full.pth", weights_only=True)
-    assert payload["__torch_batteries_checkpoint__"] == 1
+    assert payload["__torch_batteries_checkpoint__"] == 2
 
 
 def test_model_checkpoint_can_save_raw_weights(tmp_path: Path) -> None:
     model = _Model()
     callback = ModelCheckpoint(
-        stage="train",
+        phase="train",
         metric="loss",
         mode="min",
         save_dir=str(tmp_path),
@@ -346,3 +355,130 @@ def test_optimizer_state_movement_preserves_nested_containers() -> None:
     assert torch.equal(moved["tuple"][0], tensor)
     assert torch.equal(moved["tuple"][1]["value"], tensor)
     assert moved["scalar"] == 3
+
+
+class _StatefulDataPack(DataPack):
+    def __init__(self, split_index: int) -> None:
+        self.split_index = split_index
+        self.setup_values: list[int] = []
+        self.dataset = TensorDataset(torch.ones(4, 1), torch.zeros(4, 1))
+
+    def state_dict(self) -> dict[str, int]:
+        return {"split_index": self.split_index}
+
+    def load_state_dict(self, state_dict: dict[str, object]) -> None:
+        self.split_index = cast("int", state_dict["split_index"])
+
+    @charge(Event.SETUP_DATA)
+    def setup(self, _: DataContext) -> DatasetBundle:
+        self.setup_values.append(self.split_index)
+        return DatasetBundle(train=self.dataset)
+
+    @charge(Event.CONFIGURE_DATALOADER)
+    def configure(self, _: DataContext) -> DataLoaderConfig:
+        return DataLoaderConfig(batch_size=1)
+
+
+def _battery_with_data_pack(data_pack: DataPack) -> Battery:
+    model = _Model()
+    return Battery(
+        model,
+        device="cpu",
+        optimizer=torch.optim.SGD(model.parameters(), lr=0.1),
+        data_pack=data_pack,
+    )
+
+
+def test_checkpoint_restores_data_pack_before_setup(tmp_path: Path) -> None:
+    source_pack = _StatefulDataPack(split_index=3)
+    source = _battery_with_data_pack(source_pack)
+    checkpoint = tmp_path / "data-pack.pth"
+    source.save_checkpoint(checkpoint)
+    target_pack = _StatefulDataPack(split_index=99)
+    target = _battery_with_data_pack(target_pack)
+
+    target.train(epochs=1, verbose=0, resume_from=checkpoint)
+
+    assert target_pack.split_index == 3
+    assert target_pack.setup_values == [3]
+    payload = torch.load(checkpoint, weights_only=True)
+    assert payload["data_pack"]["state"] == {"split_index": 3}
+    assert "dataset" not in payload["data_pack"]
+
+
+def test_schema_one_checkpoint_remains_loadable(tmp_path: Path) -> None:
+    source, _ = _battery()
+    checkpoint = tmp_path / "schema-one.pth"
+    source.save_checkpoint(checkpoint)
+    payload = torch.load(checkpoint, weights_only=True)
+    payload["__torch_batteries_checkpoint__"] = 1
+    del payload["data_pack"]
+    torch.save(payload, checkpoint)
+
+    target, _ = _battery()
+    target.load_checkpoint(checkpoint)
+
+
+def test_schema_two_checkpoint_requires_data_pack_field(tmp_path: Path) -> None:
+    checkpoint = tmp_path / "missing-data-pack-field.pth"
+    _battery()[0].save_checkpoint(checkpoint)
+    payload = torch.load(checkpoint, weights_only=True)
+    del payload["data_pack"]
+    torch.save(payload, checkpoint)
+
+    with pytest.raises(ValueError, match="missing fields: \\['data_pack'\\]"):
+        _battery()[0].load_checkpoint(checkpoint)
+
+
+def test_checkpoint_requires_matching_data_pack(tmp_path: Path) -> None:
+    checkpoint = tmp_path / "required-data-pack.pth"
+    _battery_with_data_pack(_StatefulDataPack(2)).save_checkpoint(checkpoint)
+
+    with pytest.raises(ValueError, match="requires a configured DataPack"):
+        _battery()[0].load_checkpoint(checkpoint)
+
+
+def test_checkpoint_rejects_different_data_pack_type(tmp_path: Path) -> None:
+    class DifferentDataPack(DataPack):
+        pass
+
+    checkpoint = tmp_path / "mismatch.pth"
+    _battery_with_data_pack(_StatefulDataPack(2)).save_checkpoint(checkpoint)
+
+    with pytest.raises(ValueError, match="does not match checkpoint state"):
+        _battery_with_data_pack(DifferentDataPack()).load_checkpoint(checkpoint)
+
+
+def test_checkpoint_rejects_data_pack_when_saved_state_has_none(tmp_path: Path) -> None:
+    checkpoint = tmp_path / "no-data-pack.pth"
+    _battery()[0].save_checkpoint(checkpoint)
+
+    with pytest.raises(ValueError, match="does not match checkpoint state"):
+        _battery_with_data_pack(_StatefulDataPack(2)).load_checkpoint(checkpoint)
+
+
+@pytest.mark.parametrize(
+    "replacement", [[], {"type": 3, "state": {}}, {"type": "x", "state": []}]
+)
+def test_checkpoint_rejects_invalid_data_pack_state(
+    tmp_path: Path, replacement: object
+) -> None:
+    checkpoint = tmp_path / "invalid-data-pack.pth"
+    _battery()[0].save_checkpoint(checkpoint)
+    payload = torch.load(checkpoint, weights_only=True)
+    payload["data_pack"] = replacement
+    torch.save(payload, checkpoint)
+
+    with pytest.raises(TypeError, match="Invalid DataPack state"):
+        _battery()[0].load_checkpoint(checkpoint)
+
+
+def test_checkpoint_rejects_non_mapping_data_pack_state_dict(tmp_path: Path) -> None:
+    class InvalidStatePack(DataPack):
+        def state_dict(self) -> dict[str, object]:
+            return []  # type: ignore[return-value]
+
+    with pytest.raises(TypeError, match=r"state_dict\(\) must return a dictionary"):
+        _battery_with_data_pack(InvalidStatePack()).save_checkpoint(
+            tmp_path / "invalid-state.pth"
+        )

@@ -42,10 +42,18 @@ battery.train(train_loader, val_loader, epochs=10)
 ```
 """
 
-__version__ = "0.9.0"
+__version__ = "0.10.0"
 __author__ = ["Michal Szczygiel", "Arkadiusz Paterak", "Antoni Zięciak"]
 
 # Import main components
+from .data import (
+    DataContext,
+    DataLoaderBundle,
+    DataLoaderConfig,
+    DataPack,
+    DatasetBundle,
+    ResolvedData,
+)
 from .events import Event, EventContext, OptimizationStep, charge
 from .tracking import (
     Run,
@@ -56,10 +64,16 @@ from .utils.metrics import CollectedMetric, StatefulMetric
 __all__ = [
     "Battery",
     "CollectedMetric",
+    "DataContext",
+    "DataLoaderBundle",
+    "DataLoaderConfig",
+    "DataPack",
+    "DatasetBundle",
     "Event",
     "EventContext",
     "OptimizationStep",
     "PredictResult",
+    "ResolvedData",
     "Run",
     "StatefulMetric",
     "StepOutput",

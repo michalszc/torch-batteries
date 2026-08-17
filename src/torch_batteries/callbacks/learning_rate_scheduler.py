@@ -4,6 +4,10 @@ from typing import Any, Literal, cast
 
 from torch.optim.lr_scheduler import LRScheduler, ReduceLROnPlateau
 
+from torch_batteries.callbacks._monitor import (
+    MonitorPhase,
+    resolve_monitor_phase,
+)
 from torch_batteries.callbacks.base import Callback
 from torch_batteries.events import Event, EventContext, charge
 from torch_batteries.utils.logging import get_logger
@@ -11,18 +15,22 @@ from torch_batteries.utils.logging import get_logger
 logger = get_logger("LearningRateScheduler")
 
 SchedulerInterval = Literal["step", "epoch"]
-SchedulerStage = Literal["train", "val"]
+SchedulerPhase = MonitorPhase
 
 
 class LearningRateScheduler(Callback):
-    """Advance a PyTorch learning-rate scheduler during Battery training."""
+    """Advance a PyTorch learning-rate scheduler during Battery training.
+
+    ``phase`` selects the monitored metrics for ``ReduceLROnPlateau``. The
+    deprecated ``stage`` keyword remains a compatibility alias.
+    """
 
     __slots__ = (
         "_interval",
         "_is_plateau",
         "_metric",
+        "_phase",
         "_scheduler",
-        "_stage",
         "_stepped_epochs",
     )
 
@@ -30,42 +38,45 @@ class LearningRateScheduler(Callback):
         self,
         scheduler: LRScheduler,
         interval: SchedulerInterval = "epoch",
-        stage: SchedulerStage | None = None,
+        phase: SchedulerPhase | None = None,
         metric: str | None = None,
+        *,
+        stage: SchedulerPhase | None = None,
     ) -> None:
+        phase = resolve_monitor_phase(phase, stage=stage, required=False)
         if interval not in {"step", "epoch"}:
             logger.error("Unsupported scheduler interval: %s", interval)
             msg = "LearningRateScheduler interval must be 'step' or 'epoch'."
             raise ValueError(msg)
         self._is_plateau = isinstance(scheduler, ReduceLROnPlateau)
         if self._is_plateau:
-            if interval != "epoch" or stage not in {"train", "val"} or not metric:
+            if interval != "epoch" or phase not in {"train", "val"} or not metric:
                 logger.error(
-                    "ReduceLROnPlateau requires epoch interval, stage, and metric."
+                    "ReduceLROnPlateau requires epoch interval, phase, and metric."
                 )
                 msg = (
                     "ReduceLROnPlateau requires interval='epoch', "
-                    "stage='train' or 'val', and a metric name."
+                    "phase='train' or 'val', and a metric name."
                 )
                 raise ValueError(msg)
-        elif stage is not None or metric is not None:
+        elif phase is not None or metric is not None:
             logger.error(
-                "stage/metric were configured for a scheduler that ignores metrics."
+                "phase/metric were configured for a scheduler that ignores metrics."
             )
-            msg = "stage and metric are only supported for ReduceLROnPlateau."
+            msg = "phase and metric are only supported for ReduceLROnPlateau."
             raise ValueError(msg)
 
         self._scheduler = scheduler
         self._interval = interval
-        self._stage = stage
+        self._phase = phase
         self._metric = metric
         self._stepped_epochs: set[int] = set()
         logger.info(
             "Learning-rate scheduler configured: "
-            "type=%s, interval=%s, stage=%s, metric=%s",
+            "type=%s, interval=%s, phase=%s, metric=%s",
             type(scheduler).__name__,
             interval,
-            stage,
+            phase,
             metric,
         )
 
@@ -99,13 +110,13 @@ class LearningRateScheduler(Callback):
         )
         if not isinstance(metrics, dict) or self._metric not in metrics:
             logger.error(
-                "Scheduler metric is unavailable: stage=%s, metric=%s",
-                self._stage,
+                "Scheduler metric is unavailable: phase=%s, metric=%s",
+                self._phase,
                 self._metric,
             )
             msg = (
                 f"LearningRateScheduler metric '{self._metric}' is unavailable "
-                f"for stage '{self._stage}'."
+                f"for phase '{self._phase}'."
             )
             raise ValueError(msg)
         value = float(metrics[self._metric])
@@ -136,7 +147,7 @@ class LearningRateScheduler(Callback):
             return
         epoch = context.get("epoch", 0)
         if self._is_plateau:
-            if self._stage != "train":
+            if self._phase != "train":
                 return
             self._step_plateau(context, "train_metrics")
         else:
@@ -146,7 +157,7 @@ class LearningRateScheduler(Callback):
     @charge(Event.AFTER_VALIDATION)
     def on_validation_end(self, context: EventContext) -> None:
         """Advance validation-monitored plateau schedulers."""
-        if not self._is_plateau or self._stage != "val":
+        if not self._is_plateau or self._phase != "val":
             return
         self._step_plateau(context, "val_metrics")
         self._stepped_epochs.add(context.get("epoch", 0))
@@ -156,7 +167,7 @@ class LearningRateScheduler(Callback):
         """Validate that a requested validation metric was observed."""
         if (
             self._is_plateau
-            and self._stage == "val"
+            and self._phase == "val"
             and context.get("epoch", -1) not in self._stepped_epochs
         ):
             logger.error(
@@ -172,7 +183,7 @@ class LearningRateScheduler(Callback):
         """Return scheduler and advancement state."""
         return {
             "interval": self._interval,
-            "stage": self._stage,
+            "phase": self._phase,
             "metric": self._metric,
             "scheduler": self._scheduler.state_dict(),
             "stepped_epochs": sorted(self._stepped_epochs),
@@ -180,9 +191,22 @@ class LearningRateScheduler(Callback):
 
     def load_state_dict(self, state_dict: dict[str, Any]) -> None:
         """Restore scheduler state after validating its configuration."""
+        has_phase = "phase" in state_dict
+        has_stage = "stage" in state_dict
+        if has_phase == has_stage:
+            logger.error(
+                "Learning-rate scheduler checkpoint must contain exactly one "
+                "monitoring phase key."
+            )
+            msg = (
+                "LearningRateScheduler checkpoint state must contain exactly one "
+                "of 'phase' or legacy 'stage'."
+            )
+            raise ValueError(msg)
+        checkpoint_phase = state_dict["phase"] if has_phase else state_dict["stage"]
         if (
             state_dict.get("interval") != self._interval
-            or state_dict.get("stage") != self._stage
+            or checkpoint_phase != self._phase
             or state_dict.get("metric") != self._metric
         ):
             logger.error("Learning-rate scheduler checkpoint configuration mismatch.")

@@ -1,5 +1,23 @@
 # Release Notes
 
+## 0.10.0 — 2026-08-11
+
+- Renamed callback metric-monitoring configuration from `stage` to `phase` in
+  `EarlyStopping`, `ModelCheckpoint`, and `LearningRateScheduler`. The deprecated
+  `stage=` keyword remains available as a compatibility alias.
+- Added event-driven `DataPack` workflows for reusable dataset and DataLoader
+  construction across training, testing, and prediction while preserving the direct
+  DataLoader API.
+- Added validated phase-aware `DataLoaderConfig` materialization, deterministic
+  opt-in generators, guaranteed teardown, and DataPack state in schema-version-2
+  checkpoints with schema-version-1 compatibility.
+- Added context-managed `DataPack.resolve()` for constructing and inspecting datasets
+  and DataLoaders without a `Battery`, backed by the same lifecycle resolver used by
+  implicit Battery workflows.
+- Added the DataPack guide and API reference, converted the MNIST notebook to the
+  implicit DataPack workflow, and retained direct DataLoader coverage in the
+  function-fitting notebook.
+
 ## 0.9.0 — 2026-08-08
 
 - Replaced pdoc with a structured MkDocs Material site, clarified public contracts,

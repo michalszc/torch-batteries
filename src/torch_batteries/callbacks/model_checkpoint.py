@@ -9,6 +9,11 @@ from typing import TYPE_CHECKING, Literal
 import torch
 from torch import nn
 
+from torch_batteries.callbacks._monitor import (
+    MonitorPhase,
+    require_metric,
+    resolve_monitor_phase,
+)
 from torch_batteries.callbacks.base import Callback
 from torch_batteries.events import Event, EventContext, charge
 from torch_batteries.utils.logging import get_logger
@@ -54,7 +59,7 @@ class ModelCheckpoint(Callback):
     """Saves the model when a monitored metric improves.
 
     Args:
-        stage: One of 'train' or 'val' to indicate which stage's metric to monitor
+        phase: One of 'train' or 'val' to indicate which phase's metric to monitor
         metric: The name of the metric to monitor
         mode: One of 'min' or 'max'. In 'min' mode, the model is saved when the
               monitored metric decreases. In 'max' mode, it is saved when the
@@ -63,6 +68,7 @@ class ModelCheckpoint(Callback):
         save_path: Filename for the saved model. If None, defaults to
                    'epochs-metric=value.pth'
         save_top_k: Saves specified number of best models (defaults to 1)
+        stage: Deprecated keyword alias for ``phase``.
 
     Missing directories are created automatically. A `.pth` suffix is added only
     when `save_path` has no explicit suffix. Static templates gain an epoch field
@@ -73,7 +79,7 @@ class ModelCheckpoint(Callback):
     Examples:
         ```python
         checkpoint = ModelCheckpoint(
-            stage="val",
+            phase="val",
             metric="accuracy",
             mode="max",
             save_path="best_model.pth"
@@ -84,23 +90,24 @@ class ModelCheckpoint(Callback):
 
     def __init__(  # noqa: PLR0913
         self,
-        stage: Literal["train", "val"],
-        metric: str,
+        phase: MonitorPhase | None = None,
+        metric: str | None = None,
         mode: Literal["min", "max"] = "max",
         save_dir: str = ".",
         save_path: str | None = None,
         *,
         save_top_k: int = 1,
         save_weights_only: bool = False,
+        stage: MonitorPhase | None = None,
     ) -> None:
-        if stage not in {"train", "val"}:
-            msg = "stage must be one of 'train' or 'val'"
-            raise ValueError(msg)
+        phase = resolve_monitor_phase(phase, stage=stage, required=True)
+        assert phase is not None
+        metric = require_metric(metric)
         if save_top_k < 1:
             msg = "save_top_k must be greater than or equal to one"
             raise ValueError(msg)
 
-        self._stage = stage
+        self._phase = phase
         self._metric = metric
         self._save_dir = save_dir
         self._save_path = save_path
@@ -189,7 +196,7 @@ class ModelCheckpoint(Callback):
         Args:
             context: Event context containing training metrics and model.
         """
-        if self._stage != "train":
+        if self._phase != "train":
             return
 
         metrics = {**context["train_metrics"], "epoch": context["epoch"]}
@@ -204,7 +211,7 @@ class ModelCheckpoint(Callback):
         Args:
             context: Event context containing validation metrics and model.
         """
-        if self._stage != "val":
+        if self._phase != "val":
             return
 
         metrics = {**context["val_metrics"], "epoch": context["epoch"]}
