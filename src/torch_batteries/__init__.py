@@ -51,6 +51,7 @@ from .data import (
     DataLoaderBundle,
     DataLoaderConfig,
     DataPack,
+    DataPackHandler,
     DatasetBundle,
     ResolvedData,
 )
@@ -68,6 +69,7 @@ __all__ = [
     "DataLoaderBundle",
     "DataLoaderConfig",
     "DataPack",
+    "DataPackHandler",
     "DatasetBundle",
     "Event",
     "EventContext",
