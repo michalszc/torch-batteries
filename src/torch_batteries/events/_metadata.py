@@ -7,7 +7,11 @@ from .core import Event
 
 
 def get_charged_events(fn: Callable[..., Any]) -> tuple[Event, ...]:
-    """Return all events attached to a callable in decorator application order."""
+    """Return all events attached to a callable in decorator application order.
+
+    Args:
+        fn: Callable inspected for charge metadata.
+    """
     events = getattr(fn, "_torch_batteries_events", None)
     if events is not None:
         return tuple(events)

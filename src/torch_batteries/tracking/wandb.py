@@ -278,6 +278,7 @@ class WandbTracker(ExperimentTracker):
         return None
 
     def _require_run(self) -> _WandbRun:
+        """Return the active W&B run or reject an uninitialized operation."""
         if not self.is_initialized or self._run is None:
             msg = "WandbTracker is not initialized. Call init()."
             raise RuntimeError(msg)

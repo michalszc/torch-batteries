@@ -76,7 +76,11 @@ class DatasetBundle:
                     raise TypeError(msg)
 
     def for_phase(self, phase: DataPhase) -> DatasetCollection | None:
-        """Return the dataset or named datasets configured for a workflow phase."""
+        """Return the dataset or named datasets configured for a workflow phase.
+
+        Args:
+            phase: ``"train"``, ``"validation"``, ``"test"``, or ``"predict"``.
+        """
         match phase:
             case "train":
                 return self.train
@@ -88,7 +92,11 @@ class DatasetBundle:
                 return self.predict
 
     def datasets_for_phase(self, phase: DataPhase) -> dict[str, DatasetType]:
-        """Return phase datasets normalized to a mapping."""
+        """Return phase datasets normalized to a mapping.
+
+        Args:
+            phase: Workflow phase to normalize.
+        """
         configured = self.for_phase(phase)
         if configured is None:
             return {}
@@ -154,7 +162,11 @@ class DataLoaderBundle:
                     raise TypeError(msg)
 
     def for_phase(self, phase: DataPhase) -> DataLoaderCollection | None:
-        """Return the loader or named loaders configured for a workflow phase."""
+        """Return the loader or named loaders configured for a workflow phase.
+
+        Args:
+            phase: ``"train"``, ``"validation"``, ``"test"``, or ``"predict"``.
+        """
         match phase:
             case "train":
                 return self.train
@@ -166,7 +178,11 @@ class DataLoaderBundle:
                 return self.predict
 
     def loaders_for_phase(self, phase: DataPhase) -> dict[str, DataLoader[Any]]:
-        """Return phase loaders normalized to a mapping."""
+        """Return phase loaders normalized to a mapping.
+
+        Args:
+            phase: Workflow phase to normalize.
+        """
         configured = self.for_phase(phase)
         if configured is None:
             return {}

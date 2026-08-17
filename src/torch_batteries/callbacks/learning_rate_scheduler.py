@@ -23,6 +23,13 @@ class LearningRateScheduler(Callback):
 
     ``phase`` selects the monitored metrics for ``ReduceLROnPlateau``. The
     deprecated ``stage`` keyword remains a compatibility alias.
+
+    Args:
+        scheduler: PyTorch scheduler to advance.
+        interval: ``"step"`` after optimizer steps or ``"epoch"`` after epochs.
+        phase: Metrics phase for ``ReduceLROnPlateau``.
+        metric: Metric name for ``ReduceLROnPlateau``.
+        stage: Deprecated alias for ``phase``.
     """
 
     __slots__ = (
@@ -95,9 +102,11 @@ class LearningRateScheduler(Callback):
         return self._interval
 
     def _learning_rates(self) -> list[float]:
+        """Return current learning rates for diagnostic logging."""
         return [float(group["lr"]) for group in self._scheduler.optimizer.param_groups]
 
     def _step_without_metric(self) -> None:
+        """Advance a scheduler that does not consume a monitored metric."""
         before = self._learning_rates()
         self._scheduler.step()
         logger.debug(
@@ -107,6 +116,7 @@ class LearningRateScheduler(Callback):
         )
 
     def _step_plateau(self, context: EventContext, metrics_key: str) -> None:
+        """Advance a plateau scheduler using one metrics context mapping."""
         metrics = (
             context.get("train_metrics")
             if metrics_key == "train_metrics"
@@ -136,7 +146,11 @@ class LearningRateScheduler(Callback):
 
     @charge(Event.AFTER_OPTIMIZER_STEP)
     def on_optimizer_step_end(self, context: EventContext) -> None:
-        """Advance step schedulers after actual optimizer steps."""
+        """Advance step schedulers after actual optimizer steps.
+
+        Args:
+            context: Optimizer-step event context.
+        """
         if (
             self._interval == "step"
             and not self._is_plateau
@@ -146,7 +160,11 @@ class LearningRateScheduler(Callback):
 
     @charge(Event.AFTER_TRAIN_EPOCH)
     def on_train_epoch_end(self, context: EventContext) -> None:
-        """Advance ordinary epoch schedulers or train-monitored plateau schedulers."""
+        """Advance ordinary epoch schedulers or train-monitored plateau schedulers.
+
+        Args:
+            context: Completed training-epoch context and metrics.
+        """
         if self._interval != "epoch":
             return
         epoch = context.get("epoch", 0)
@@ -160,7 +178,11 @@ class LearningRateScheduler(Callback):
 
     @charge(Event.AFTER_VALIDATION)
     def on_validation_end(self, context: EventContext) -> None:
-        """Advance validation-monitored plateau schedulers."""
+        """Advance validation-monitored plateau schedulers.
+
+        Args:
+            context: Completed validation context and metrics.
+        """
         if not self._is_plateau or self._phase != "validation":
             return
         self._step_plateau(context, "val_metrics")
@@ -168,7 +190,11 @@ class LearningRateScheduler(Callback):
 
     @charge(Event.AFTER_TRAIN)
     def on_train_end(self, context: EventContext) -> None:
-        """Validate that a requested validation metric was observed."""
+        """Validate that a requested validation metric was observed.
+
+        Args:
+            context: Training-end context containing the final epoch.
+        """
         if (
             self._is_plateau
             and self._phase == "validation"
@@ -194,7 +220,12 @@ class LearningRateScheduler(Callback):
         }
 
     def load_state_dict(self, state_dict: dict[str, Any]) -> None:
-        """Restore scheduler state after validating its configuration."""
+        """Restore scheduler state after validating its configuration.
+
+        Args:
+            state_dict: State returned by :meth:`state_dict`, including legacy
+                ``stage`` state.
+        """
         has_phase = "phase" in state_dict
         has_stage = "stage" in state_dict
         if has_phase == has_stage:

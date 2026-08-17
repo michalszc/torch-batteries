@@ -28,6 +28,9 @@ class Callback:
 
         ``Battery`` matches callback state strictly by callback type and configured
         order before invoking this method.
+
+        Args:
+            state_dict: State previously returned by :meth:`state_dict`.
         """
         if state_dict:
             logger.warning(

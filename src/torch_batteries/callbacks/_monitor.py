@@ -19,7 +19,13 @@ def resolve_monitor_phase(
     stage: MonitorPhase | None,
     required: bool,
 ) -> CanonicalMonitorPhase | None:
-    """Resolve the canonical phase and its deprecated stage alias."""
+    """Resolve the canonical phase and its deprecated stage alias.
+
+    Args:
+        phase: Requested monitoring phase, including deprecated ``"val"``.
+        stage: Deprecated alias for ``phase``.
+        required: Whether omitting both phase inputs is invalid.
+    """
     if phase is not None and stage is not None:
         msg = "phase and deprecated stage cannot both be provided"
         raise TypeError(msg)
@@ -54,7 +60,11 @@ def resolve_monitor_phase(
 
 
 def require_metric(metric: str | None) -> str:
-    """Raise a stable error when compatibility syntax omitted the metric."""
+    """Raise a stable error when compatibility syntax omitted the metric.
+
+    Args:
+        metric: Optional metric name supplied by a callback constructor.
+    """
     if metric is None:
         msg = "missing required argument: 'metric'"
         raise TypeError(msg)

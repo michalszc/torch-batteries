@@ -83,5 +83,9 @@ else:
 
 
 def as_battery(value: BatteryStateMixin) -> Battery:
-    """Narrow an internal workflow mixin to the complete public Battery type."""
+    """Narrow an internal workflow mixin to the complete public Battery type.
+
+    Args:
+        value: Mixin instance owned by a complete Battery object.
+    """
     return cast("Battery", value)

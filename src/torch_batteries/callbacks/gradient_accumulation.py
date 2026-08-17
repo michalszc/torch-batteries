@@ -43,15 +43,29 @@ class GradientAccumulation(Callback):
         logger.debug("Gradient accumulation state reset.")
 
     def is_group_start(self, batch_idx: int) -> bool:
-        """Return whether this batch begins an accumulation group."""
+        """Return whether this batch begins an accumulation group.
+
+        Args:
+            batch_idx: Zero-based batch index in the current epoch.
+        """
         return batch_idx % self._steps == 0
 
     def is_group_end(self, batch_idx: int, total_batches: int) -> bool:
-        """Return whether this batch completes an accumulation group."""
+        """Return whether this batch completes an accumulation group.
+
+        Args:
+            batch_idx: Zero-based batch index in the current epoch.
+            total_batches: Number of batches in the current epoch.
+        """
         return (batch_idx + 1) % self._steps == 0 or batch_idx + 1 == total_batches
 
     def group_size(self, batch_idx: int, total_batches: int) -> int:
-        """Return the actual size of the current accumulation group."""
+        """Return the actual size of the current accumulation group.
+
+        Args:
+            batch_idx: Zero-based batch index in the current epoch.
+            total_batches: Number of batches in the current epoch.
+        """
         group_start = batch_idx - (batch_idx % self._steps)
         return min(self._steps, total_batches - group_start)
 
@@ -66,13 +80,21 @@ class GradientAccumulation(Callback):
 
     @charge(Event.BEFORE_TRAIN)
     def on_train_start(self, context: EventContext) -> None:
-        """Reset progress when training is not resuming from a checkpoint."""
+        """Reset progress when training is not resuming from a checkpoint.
+
+        Args:
+            context: Training-start event context containing the resume flag.
+        """
         if not context.get("resumed", False):
             self.reset()
 
     @charge(Event.CONFIGURE_TRAIN_STEP)
     def configure_train_step(self, context: EventContext) -> OptimizationStep:
-        """Return zeroing, scaling, and step decisions for the current batch."""
+        """Return zeroing, scaling, and step decisions for the current batch.
+
+        Args:
+            context: Train-step context with the batch index and batch count.
+        """
         batch_idx = context["batch_idx"]
         total_batches = context["total_batches"]
         plan = OptimizationStep(
@@ -92,7 +114,11 @@ class GradientAccumulation(Callback):
 
     @charge(Event.AFTER_OPTIMIZER_STEP)
     def on_optimizer_step_end(self, context: EventContext) -> None:
-        """Synchronize callback state with Battery's completed-step counter."""
+        """Synchronize callback state with Battery's completed-step counter.
+
+        Args:
+            context: Optimizer event context containing ``optimizer_step_idx``.
+        """
         self._optimizer_step_idx = context["optimizer_step_idx"]
         logger.debug(
             "Gradient accumulation synchronized at optimizer step %d.",
@@ -107,7 +133,11 @@ class GradientAccumulation(Callback):
         }
 
     def load_state_dict(self, state_dict: dict[str, Any]) -> None:
-        """Restore accumulation state."""
+        """Restore accumulation state.
+
+        Args:
+            state_dict: State returned by :meth:`state_dict`.
+        """
         try:
             saved_steps = int(state_dict["steps"])
             optimizer_step_idx = int(state_dict["optimizer_step_idx"])

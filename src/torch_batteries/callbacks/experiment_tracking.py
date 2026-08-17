@@ -111,7 +111,11 @@ class ExperimentTrackingCallback(Callback):
         }
 
     def load_state_dict(self, state_dict: dict[str, Any]) -> None:
-        """Restore experiment progress counters."""
+        """Restore experiment progress counters.
+
+        Args:
+            state_dict: State returned by :meth:`state_dict`.
+        """
         try:
             self._current_epoch = int(state_dict["current_epoch"])
             self._global_step = int(state_dict["global_step"])

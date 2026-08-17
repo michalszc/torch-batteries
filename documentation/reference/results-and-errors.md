@@ -37,3 +37,10 @@ recursively concatenated tensor/dictionary/tuple/list structure instead.
 
 Checkpoint schema, callback-order, and metric-state mismatches intentionally fail
 strict restoration rather than silently resuming a different experiment.
+
+Incorrect runtime argument types raise `TypeError`; unsupported values and conflicting
+configuration raise `ValueError`; invalid workflow state raises `RuntimeError`.
+Filesystem failures retain their underlying `OSError` cause. Error messages identify
+the component that owns the contract—Battery, DataPack, event dispatch, callback,
+tracking backend, or utility—so callers do not need to infer the source from an
+unrelated subsystem.

@@ -68,6 +68,7 @@ class ModelCheckpoint(Callback):
         save_path: Filename for the saved model. If None, defaults to
                    'epochs-metric=value.pth'
         save_top_k: Saves specified number of best models (defaults to 1)
+        save_weights_only: Save only model weights instead of full Battery state.
         stage: Deprecated keyword alias for ``phase``.
 
     Missing directories are created automatically. A `.pth` suffix is added only
@@ -166,7 +167,11 @@ class ModelCheckpoint(Callback):
         return state
 
     def load_state_dict(self, state_dict: dict[str, object]) -> None:
-        """Restore checkpoint ranking state."""
+        """Restore checkpoint ranking state.
+
+        Args:
+            state_dict: State returned by :meth:`state_dict`.
+        """
         try:
             self._best_k_models = _string_float_dict(state_dict["best_k_models"])
             self._best_model_path = _optional_string(state_dict["best_model_path"])

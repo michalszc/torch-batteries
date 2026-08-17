@@ -102,7 +102,11 @@ class EarlyStopping(Callback):
         return state
 
     def load_state_dict(self, state_dict: dict[str, Any]) -> None:
-        """Restore early-stopping state from a checkpoint."""
+        """Restore early-stopping state from a checkpoint.
+
+        Args:
+            state_dict: State returned by :meth:`state_dict`.
+        """
         try:
             self._best_score = state_dict["best_score"]
             self._epochs_no_improve = int(state_dict["epochs_no_improve"])

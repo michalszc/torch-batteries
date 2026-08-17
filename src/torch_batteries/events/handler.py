@@ -240,7 +240,14 @@ class EventHandler:
         default: Any,
         **kwargs: Any,
     ) -> Any:
-        """Return an exclusive provider result or a caller-supplied default."""
+        """Return an exclusive provider result or a caller-supplied default.
+
+        Args:
+            event: Exclusive provider event to dispatch.
+            *args: Positional arguments passed to the provider.
+            default: Value returned when no provider is registered.
+            **kwargs: Keyword arguments passed to the provider.
+        """
         handler = self.get_handler(event)
         if handler is None:
             logger.debug(
@@ -255,7 +262,13 @@ class EventHandler:
         return handler[0](*args, **kwargs)
 
     def execute(self, event: Event, *args: Any, **kwargs: Any) -> bool:
-        """Run one exclusive executor and report whether it handled the event."""
+        """Run one exclusive executor and report whether it handled the event.
+
+        Args:
+            event: Exclusive executor event to dispatch.
+            *args: Positional arguments passed to the executor.
+            **kwargs: Keyword arguments passed to the executor.
+        """
         handler = self.get_handler(event)
         if handler is None:
             logger.debug("No executor found for event '%s'.", event.value)
@@ -283,7 +296,13 @@ class EventHandler:
         *args: Any,
         **kwargs: Any,
     ) -> Generator[None]:
-        """Enter every ordered context manager returned for an event."""
+        """Enter every ordered context manager returned for an event.
+
+        Args:
+            event: Context-provider event to dispatch.
+            *args: Positional arguments passed to each provider.
+            **kwargs: Keyword arguments passed to each provider.
+        """
         handler = self.get_handler(event)
         handlers = (
             handler

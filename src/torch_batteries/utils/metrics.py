@@ -25,7 +25,12 @@ class StatefulMetric(Protocol):
         """Reset metric state before a phase."""
 
     def update(self, predictions: torch.Tensor, targets: torch.Tensor) -> None:
-        """Update metric state with one batch."""
+        """Update metric state with one batch.
+
+        Args:
+            predictions: Detached model predictions for the batch.
+            targets: Detached targets for the batch.
+        """
 
     def compute(self) -> float | torch.Tensor:
         """Compute a scalar metric from accumulated state."""
@@ -37,6 +42,9 @@ class CollectedMetric(StatefulMetric):
     This convenience adapter retains detached CPU predictions and targets, so its
     memory use grows with the dataset. Prefer an incremental ``StatefulMetric``
     implementation for large datasets.
+
+    Args:
+        metric: Callable evaluated once with concatenated phase tensors.
     """
 
     __slots__ = ("_metric", "_predictions", "_targets")
@@ -53,7 +61,12 @@ class CollectedMetric(StatefulMetric):
         logger.debug("Collected metric state reset.")
 
     def update(self, predictions: torch.Tensor, targets: torch.Tensor) -> None:
-        """Retain one detached CPU batch."""
+        """Retain one detached CPU batch.
+
+        Args:
+            predictions: Model predictions for the batch.
+            targets: Targets for the batch.
+        """
         self._predictions.append(predictions.detach().cpu())
         self._targets.append(targets.detach().cpu())
         logger.debug(
@@ -76,7 +89,12 @@ class CollectedMetric(StatefulMetric):
     def compute_collected(
         self, predictions: torch.Tensor, targets: torch.Tensor
     ) -> float | torch.Tensor:
-        """Evaluate the wrapped callable over shared collected tensors."""
+        """Evaluate the wrapped callable over shared collected tensors.
+
+        Args:
+            predictions: Concatenated phase predictions.
+            targets: Concatenated phase targets.
+        """
         return self._metric(predictions, targets)
 
 
@@ -84,6 +102,7 @@ type Metric = MetricCallable | StatefulMetric
 
 
 def _tensor_samples(tensor: torch.Tensor) -> int:
+    """Return the sample count represented by a metric tensor."""
     return tensor.shape[0] if tensor.ndim > 0 else 1
 
 
@@ -110,6 +129,9 @@ class PhaseMetricManager:
     tracking. Stateful metrics own their exact aggregation. ``CollectedMetric``
     instances share detached CPU collections. A metric that raises is skipped for
     the remainder of the current phase.
+
+    Args:
+        metrics: Named callable, stateful, or collected metrics.
     """
 
     __slots__ = (
@@ -146,7 +168,12 @@ class PhaseMetricManager:
     def update(
         self, predictions: torch.Tensor, targets: torch.Tensor
     ) -> dict[str, float]:
-        """Update phase metrics and return per-batch callable values."""
+        """Update phase metrics and return per-batch callable values.
+
+        Args:
+            predictions: Model predictions for the batch.
+            targets: Targets for the batch.
+        """
         batch_values: dict[str, float] = {}
         metric_predictions = predictions.detach()
         metric_targets = targets.detach()
@@ -224,7 +251,11 @@ class PhaseMetricManager:
         return states
 
     def load_state_dict(self, state_dict: dict[str, Any]) -> None:
-        """Restore optional configured metric states strictly by name."""
+        """Restore optional configured metric states strictly by name.
+
+        Args:
+            state_dict: Serialized state keyed by configured metric name.
+        """
         expected = {
             name
             for name, metric in self._metrics.items()

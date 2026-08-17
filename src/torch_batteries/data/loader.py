@@ -20,7 +20,16 @@ def materialize_dataloader(
     device: torch.device,
     default_generator: torch.Generator | None = None,
 ) -> DataLoader[Any]:
-    """Construct a PyTorch DataLoader from validated high-level configuration."""
+    """Construct a PyTorch DataLoader from validated high-level configuration.
+
+    Args:
+        dataset: Map-style or iterable dataset to load.
+        config: Validated DataLoader options.
+        phase: Workflow phase used to choose the default shuffle behavior.
+        device: Device used to resolve automatic pinned memory.
+        default_generator: Seeded workflow generator used when ``config`` does not
+            provide one.
+    """
     iterable = isinstance(dataset, IterableDataset)
     shuffle = config.shuffle
     if shuffle is None:

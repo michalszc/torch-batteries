@@ -38,7 +38,11 @@ logger = get_logger("data.handler")
 
 
 class DataPackHandler:
-    """Discover and dispatch lifecycle methods charged on one DataPack."""
+    """Discover and dispatch lifecycle methods charged on one DataPack.
+
+    Args:
+        data_pack: DataPack whose charged lifecycle methods are discovered.
+    """
 
     DATA_EVENTS: ClassVar[set[Event]] = {
         Event.PREPARE_DATA,
@@ -107,11 +111,20 @@ class DataPackHandler:
                 raise ValueError(msg)
 
     def has_handler(self, event: Event) -> bool:
-        """Return whether the DataPack handles an event."""
+        """Return whether the DataPack handles an event.
+
+        Args:
+            event: Data lifecycle event to inspect.
+        """
         return bool(self._handlers.get(event))
 
     def call(self, event: Event, context: DataContext) -> None:
-        """Call all ordered handlers for a side-effect data event."""
+        """Call all ordered handlers for a side-effect data event.
+
+        Args:
+            event: Side-effect event to dispatch.
+            context: Data lifecycle context passed to handlers.
+        """
         if event not in self.DATA_EVENTS - self.PROVIDER_EVENTS:
             msg = f"Event '{event.value}' is not a DataPack side-effect event."
             raise ValueError(msg)
@@ -128,7 +141,13 @@ class DataPackHandler:
         *,
         default: Any,
     ) -> Any:
-        """Return a provider result or the supplied default."""
+        """Return a provider result or the supplied default.
+
+        Args:
+            event: Provider event to dispatch.
+            context: Data lifecycle context passed to the provider.
+            default: Value returned when no provider is registered.
+        """
         if event not in self.PROVIDER_EVENTS:
             msg = f"Event '{event.value}' is not a DataPack provider event."
             raise ValueError(msg)
@@ -136,7 +155,11 @@ class DataPackHandler:
         return default if not handlers else handlers[0](context)
 
     def setup(self, context: DataContext) -> DatasetBundle:
-        """Construct and validate the datasets for one workflow invocation."""
+        """Construct and validate datasets for one workflow invocation.
+
+        Args:
+            context: Setup context passed to the dataset provider.
+        """
         result = self.provide(Event.SETUP_DATA, context, default=None)
         if not isinstance(result, DatasetBundle):
             returned = type(result).__name__
@@ -149,7 +172,12 @@ class DataPackHandler:
         context: DataContext,
         dataset: DatasetType,
     ) -> DataLoader[Any]:
-        """Resolve a custom loader or materialize a DataLoaderConfig."""
+        """Resolve a custom loader or materialize a DataLoaderConfig.
+
+        Args:
+            context: Loader configuration context.
+            dataset: Dataset for which a loader is required.
+        """
         result = self.provide(
             Event.CONFIGURE_DATALOADER,
             context,
@@ -224,7 +252,17 @@ class DataPackHandler:
         battery: torch_batteries.Battery | None = None,
         dataset_name: str | None = None,
     ) -> Generator[ResolvedData]:
-        """Resolve one DataPack stage and guarantee workflow teardown."""
+        """Resolve one DataPack stage and guarantee workflow teardown.
+
+        Args:
+            stage: ``"fit"``, ``"test"``, or ``"predict"``.
+            device: Device used for loader configuration.
+            battery: Optional owning Battery included in event contexts.
+            dataset_name: Optional named test or prediction dataset selection.
+
+        Yields:
+            Resolved datasets and loaders for the requested stage.
+        """
         resolved_device = get_device(device)
         logger.debug(
             "DataPack resolution started: data_pack=%s, stage=%s, device=%s",

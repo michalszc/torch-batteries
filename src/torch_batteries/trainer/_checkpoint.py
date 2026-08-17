@@ -36,6 +36,7 @@ class CheckpointMixin(BatteryStateMixin):
 
     @staticmethod
     def _callback_identifier(callback: Callback) -> str:
+        """Return a stable module-qualified callback identifier."""
         callback_type = type(callback)
         return f"{callback_type.__module__}.{callback_type.__qualname__}"
 
@@ -160,6 +161,7 @@ class CheckpointMixin(BatteryStateMixin):
 
     @staticmethod
     def _is_raw_model_state(payload: object) -> bool:
+        """Return whether a mapping resembles a raw model state dictionary."""
         return (
             isinstance(payload, dict)
             and bool(payload)
@@ -198,6 +200,7 @@ class CheckpointMixin(BatteryStateMixin):
 
     @staticmethod
     def _move_optimizer_state(value: Any, device: torch.device) -> Any:
+        """Move nested optimizer state through the shared device utility."""
         return move_to_device(value, device)
 
     def load_checkpoint(  # noqa: PLR0915

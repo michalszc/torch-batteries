@@ -81,3 +81,11 @@ Install `torch-batteries[wandb]` in the environment running the process. Use
 Training progress is controlled by `verbose`. Package diagnostics use Python logging
 and default to warnings. Set `TORCH_BATTERIES_LOG_LEVEL` to `DEBUG`, `INFO`,
 `WARNING`, or `ERROR` before importing the package.
+
+Logger names follow the source module below the `torch_batteries` hierarchy, such as
+`torch_batteries.trainer.core`, `torch_batteries.data.loader`, and
+`torch_batteries.callbacks.early_stopping`. Applications can therefore filter one
+component with ordinary Python logging configuration. Debug output describes detailed
+workflow transitions and resolved configuration; info output reports user-relevant
+lifecycle operations; warnings identify deprecations and recoverable fallbacks; errors
+identify operations that are about to raise.
