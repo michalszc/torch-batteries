@@ -1,5 +1,20 @@
 # Release Notes
 
+## 0.10.1 — 2026-08-17
+
+- Split Battery checkpointing, training, evaluation, prediction, and shared workflow
+  state into focused private modules while retaining the complete public `Battery`
+  method reference and checkpoint compatibility.
+- Made `@charge` stackable for distinct events, with deterministic duplicate and
+  competing-handler validation across models, callbacks, and DataPacks.
+- Canonicalized callback monitoring on `phase="validation"`; deprecated `"val"` and
+  `stage=` inputs continue to load and emit compatibility warnings.
+- Aligned exception ownership and built-in error types, standardized module-qualified
+  logging and lifecycle diagnostics, and completed enforceable API docstring coverage.
+- Isolated notebook validation from library CI so notebook-only pull requests avoid
+  the full matrix and version check while source and release changes still validate
+  saved examples.
+
 ## 0.10.0 — 2026-08-11
 
 - Renamed callback metric-monitoring configuration from `stage` to `phase` in
