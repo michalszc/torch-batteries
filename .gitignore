@@ -215,7 +215,7 @@ notebooks/**/*.pt
 notebooks/**/*.pth
 
 # Weights & Biases
-wandb/
+/wandb/
 
 # uv
 # Ignored because uv is not the primary package manager used in this project
