@@ -125,7 +125,7 @@ class TestWandbTracker:
     def test_init_run_missing_wandb(self, mocker: Any) -> None:
         """Test that missing wandb raises ImportError."""
         mocker.patch(
-            "torch_batteries.tracking.wandb.importlib.import_module",
+            "torch_batteries.tracking.wandb.tracker.importlib.import_module",
             side_effect=ImportError("No module named 'wandb'"),
         )
 

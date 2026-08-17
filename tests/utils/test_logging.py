@@ -120,7 +120,7 @@ class TestGetLogger:
         assert isinstance(logger, logging.Logger)
         assert logger.name == f"torch_batteries.{module_name}"
 
-    @patch("torch_batteries.utils.logging.logging.getLogger")
+    @patch("torch_batteries.utils.logging._manager.logging.getLogger")
     def test_get_logger_calls_logging_module(self, mock_get_logger: MagicMock) -> None:
         """Test that get_logger properly calls logging.getLogger."""
         mock_root_logger = MagicMock()
