@@ -33,5 +33,5 @@ def test_module_defines_at_most_one_class_and_no_peer_functions(path: Path) -> N
         f"{path} mixes class {classes[0]} with functions: {functions}"
     )
     if path.name == "__init__.py":
-        assert not classes, f"Package facade {path} must contain exports only."
-        assert not functions, f"Package facade {path} must contain exports only."
+        assert not classes, f"Package initializer {path} must contain exports only."
+        assert not functions, f"Package initializer {path} must contain exports only."
