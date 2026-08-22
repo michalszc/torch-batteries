@@ -1,4 +1,4 @@
-"""Utilities for calculating and managing metrics."""
+"""Protocol for metrics that accumulate state across a phase."""
 
 from typing import Protocol, runtime_checkable
 

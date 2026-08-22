@@ -43,7 +43,6 @@ LOGGER_MODULES = (
     "trainer._training",
     "trainer.core",
     "utils.device",
-    "utils.metrics",
     "utils.prediction",
     "utils.progress.factory",
 )

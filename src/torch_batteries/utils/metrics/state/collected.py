@@ -1,13 +1,13 @@
-"""Utilities for calculating and managing metrics."""
+"""Stateful adapter for metrics that consume a complete phase."""
 
 from collections.abc import Callable
 
 import torch
 
 from torch_batteries.utils.logging import get_logger
+from torch_batteries.utils.metrics._helpers import _tensor_samples
 
-from ._helpers import _tensor_samples
-from .stateful import StatefulMetric
+from .base import StatefulMetric
 
 logger = get_logger("utils.metrics")
 

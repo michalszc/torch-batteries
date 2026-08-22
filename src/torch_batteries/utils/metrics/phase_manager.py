@@ -1,6 +1,5 @@
 """Utilities for calculating and managing metrics."""
 
-from collections.abc import Callable
 from typing import Any, cast
 
 import torch
@@ -8,14 +7,10 @@ import torch
 from torch_batteries.utils.logging import get_logger
 
 from ._helpers import _metric_float, _tensor_samples
-from .collected import CollectedMetric
-from .stateful import StatefulMetric
+from .metric_types import Metric
+from .state import CollectedMetric, StatefulMetric
 
 logger = get_logger("utils.metrics")
-
-type Metric = MetricCallable | StatefulMetric
-
-type MetricCallable = Callable[[torch.Tensor, torch.Tensor], float | torch.Tensor]
 
 
 class PhaseMetricManager:
