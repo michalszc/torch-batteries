@@ -37,6 +37,7 @@ def test_core_classes_import() -> None:
     assert charge is not None
     assert Battery is not None
     assert torch_batteries.DataPack is not None
+    assert torch_batteries.DataPackHandler is not None
     assert torch_batteries.DatasetBundle is not None
     assert torch_batteries.DataLoaderConfig is not None
     assert torch_batteries.DataContext is not None

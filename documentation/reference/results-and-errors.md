@@ -1,8 +1,8 @@
 # Results and Exceptions
 
-## Training result
+## Fit result
 
-`Battery.train` always returns these four keys:
+`Battery.fit` returns `FitResult` with these four keys:
 
 | Key | Value |
 | --- | --- |
@@ -13,6 +13,19 @@
 
 Validation collections are empty when no validation loader is supplied. Early
 stopping returns the histories completed before the stop flag was observed.
+
+## Training result
+
+`Battery.train` returns `TrainResult`. Its `train_loss` and `train_metrics` fields are
+the supported training histories. For 0.11.0 compatibility, validation may still run
+and populate deprecated `val_loss` and `val_metrics` fields. Use `fit()` instead of
+depending on those fields.
+
+## Validation result
+
+`Battery.validate` returns `ValidationResult`. `val_loss` is always present and
+`val_metrics` is included when at least one metric beyond loss was produced. Unlike
+`fit()`, standalone validation requires validation data.
 
 ## Test result
 
@@ -28,7 +41,7 @@ recursively concatenated tensor/dictionary/tuple/list structure instead.
 
 | Error | Meaning |
 | --- | --- |
-| `Optimizer is required for training` | Construct or assign an optimizer before `train` |
+| `Optimizer is required for training` | Construct or assign an optimizer before `fit` or `train` |
 | `... loader must not be empty` | The selected loader reports zero batches |
 | `No method decorated with ... found` | Add the charged step required by the workflow |
 | `... loss must be a scalar tensor` | Reduce the batch loss before returning it |
@@ -37,3 +50,10 @@ recursively concatenated tensor/dictionary/tuple/list structure instead.
 
 Checkpoint schema, callback-order, and metric-state mismatches intentionally fail
 strict restoration rather than silently resuming a different experiment.
+
+Incorrect runtime argument types raise `TypeError`; unsupported values and conflicting
+configuration raise `ValueError`; invalid workflow state raises `RuntimeError`.
+Filesystem failures retain their underlying `OSError` cause. Error messages identify
+the component that owns the contract—Battery, DataPack, event dispatch, callback,
+tracking backend, or utility—so callers do not need to infer the source from an
+unrelated subsystem.

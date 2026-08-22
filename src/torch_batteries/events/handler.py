@@ -8,12 +8,13 @@ from torch import nn
 
 from torch_batteries.utils.logging import get_logger
 
+from ._handler_base import _ChargedHandlerBase
 from .core import Event
 
 logger = get_logger("events.handler")
 
 
-class EventHandler:
+class EventHandler(_ChargedHandlerBase):
     """Handles discovery and execution of methods decorated with `@charge`.
 
     This class discovers methods on a model that are decorated with `@charge`
@@ -50,9 +51,14 @@ class EventHandler:
     }
 
     def __init__(self, model: nn.Module, callbacks: list | None = None):
+        super().__init__(logger)
+        # Retain the private alias used by older integrations while the shared base
+        # owns the canonical storage.
+        self._event_handlers: dict[Event, list[Callable] | Callable] = cast(
+            "dict[Event, list[Callable] | Callable]",
+            self._handlers,
+        )
         self.model = model
-        self._event_handlers: dict[Event, list[Callable] | Callable] = {}
-        self._handler_labels: dict[Event, list[str]] = {}
         self._callbacks = callbacks
         self._discover_event_handlers()
 
@@ -62,45 +68,34 @@ class EventHandler:
         self._discover_callback_event_handlers()
         self._validate_exclusive_handlers()
 
-    def _append_handler(
-        self,
-        event: Event,
-        handler: Callable,
-        label: str,
-    ) -> None:
-        """Append an ordered model or callback handler."""
-        existing = self._event_handlers.setdefault(event, [])
-        if not isinstance(existing, list):
-            logger.error(
-                "Cannot append handler to model-specific event %s.", event.value
-            )
-            msg = f"Cannot register multiple handlers for event '{event.value}'."
-            raise TypeError(msg)
-        existing.append(handler)
-        self._handler_labels.setdefault(event, []).append(label)
-
     def _discover_model_event_handlers(self) -> None:
         """Discover model-specific methods decorated with @charge."""
         discovered_count = 0
 
-        for name in dir(self.model):
-            method = getattr(self.model, name)
-            if callable(method) and hasattr(method, "_torch_batteries_event"):
-                event = method._torch_batteries_event  # noqa: SLF001
-                if event in self.DATA_SPECIFIC_EVENTS:
-                    msg = (
-                        f"Model method '{name}' cannot handle DataPack event "
-                        f"'{event.value}'."
-                    )
-                    raise ValueError(msg)
-                if event in self.MODEL_SPECIFIC_CALLBACKS:
-                    self._event_handlers[event] = method
-                else:
-                    self._append_handler(event, method, f"model.{name}")
-                discovered_count += 1
-                logger.debug(
-                    "Discovered handler '%s' for event '%s'", name, event.value
+        for name, method, event in self._discover_charged_methods(
+            self.model,
+            owner_description="Model",
+        ):
+            if event in self.DATA_SPECIFIC_EVENTS:
+                msg = (
+                    f"Model method '{name}' cannot handle DataPack event "
+                    f"'{event.value}'."
                 )
+                raise ValueError(msg)
+            if event in self.MODEL_SPECIFIC_CALLBACKS:
+                self._set_single_handler(
+                    event,
+                    method,
+                    name,
+                    conflict_message=(
+                        f"Event '{event.value}' accepts exactly one model handler; "
+                        "found: {existing}, {new}."
+                    ),
+                )
+            else:
+                self._append_handler(event, method, f"model.{name}")
+            discovered_count += 1
+            logger.debug("Discovered handler '%s' for event '%s'", name, event.value)
 
         logger.debug(
             "Discovered %d event handlers on model %s",
@@ -117,35 +112,35 @@ class EventHandler:
         discovered_count = 0
 
         for callback_idx, callback in enumerate(self._callbacks):
-            for name in dir(callback):
-                method = getattr(callback, name)
-                if callable(method) and hasattr(method, "_torch_batteries_event"):
-                    event = method._torch_batteries_event  # noqa: SLF001
-                    if event in self.DATA_SPECIFIC_EVENTS:
-                        msg = (
-                            f"Callback '{type(callback).__name__}' cannot handle "
-                            f"DataPack event '{event.value}'."
-                        )
-                        raise ValueError(msg)
-                    if event in self.MODEL_SPECIFIC_CALLBACKS:
-                        logger.warning(
-                            "Callback '%s' should not handle model-specific event '%s'",
-                            type(callback).__name__,
-                            event.value,
-                        )
-                        continue
-                    self._append_handler(
-                        event,
-                        method,
-                        f"callback[{callback_idx}].{type(callback).__name__}.{name}",
+            for name, method, event in self._discover_charged_methods(
+                callback,
+                owner_description=f"Callback '{type(callback).__name__}'",
+            ):
+                if event in self.DATA_SPECIFIC_EVENTS:
+                    msg = (
+                        f"Callback '{type(callback).__name__}' cannot handle "
+                        f"DataPack event '{event.value}'."
                     )
-                    discovered_count += 1
-                    logger.debug(
-                        "Discovered handler '%s' for event '%s' in callback '%s'",
-                        name,
-                        event.value,
+                    raise ValueError(msg)
+                if event in self.MODEL_SPECIFIC_CALLBACKS:
+                    logger.warning(
+                        "Callback '%s' should not handle model-specific event '%s'",
                         type(callback).__name__,
+                        event.value,
                     )
+                    continue
+                self._append_handler(
+                    event,
+                    method,
+                    f"callback[{callback_idx}].{type(callback).__name__}.{name}",
+                )
+                discovered_count += 1
+                logger.debug(
+                    "Discovered handler '%s' for event '%s' in callback '%s'",
+                    name,
+                    event.value,
+                    type(callback).__name__,
+                )
         logger.debug(
             "Discovered %d event handlers on %d callbacks",
             discovered_count,
@@ -154,20 +149,12 @@ class EventHandler:
 
     def _validate_exclusive_handlers(self) -> None:
         """Reject multiple owners for provider and executor events."""
-        for event in self.EXCLUSIVE_EVENTS:
-            labels = self._handler_labels.get(event, [])
-            if len(labels) > 1:
-                logger.error(
-                    "Conflicting handlers for exclusive event '%s': %s",
-                    event.value,
-                    labels,
-                )
-                joined = ", ".join(labels)
-                msg = (
-                    f"Event '{event.value}' accepts exactly one handler; "
-                    f"found: {joined}."
-                )
-                raise ValueError(msg)
+        self._reject_conflicting_handlers(
+            self.EXCLUSIVE_EVENTS,
+            conflict_message=(
+                "Event '{event}' accepts exactly one handler; found: {labels}."
+            ),
+        )
 
     def get_handler(self, event: Event) -> list[Callable] | Callable | None:
         """Get the handler for a specific event.
@@ -178,18 +165,23 @@ class EventHandler:
         Returns:
             The handler method if found, None otherwise
         """
-        return self._event_handlers.get(event)
+        handler = self._event_handlers.get(event)
+        if handler is None:
+            return None
+        if event in self.MODEL_SPECIFIC_CALLBACKS and isinstance(handler, list):
+            return handler[0]
+        return handler
 
     def has_handler(self, event: Event) -> bool:
         """Check if a handler exists for the given event.
 
         Args:
-            event: The event to check for
+            event: The event to check for.
 
         Returns:
-            True if a handler exists, False otherwise
+            True if a handler exists, otherwise False.
         """
-        return event in self._event_handlers
+        return self._has_handler(event)
 
     def call(self, event: Event, *args: Any, **kwargs: Any) -> Any:
         """Call a handler if it exists.
@@ -202,17 +194,11 @@ class EventHandler:
         Returns:
             The result of the handler call, or None if no handler exists
         """
-        handler = self.get_handler(event)
-        if handler:
-            if isinstance(handler, list):
-                logger.debug("Calling handlers for event '%s'", event.value)
-                for h in handler:
-                    h(*args, **kwargs)
-                return None
-
+        handlers = self._handlers_for(event)
+        if event in self.MODEL_SPECIFIC_CALLBACKS and handlers:
             logger.debug("Calling handler for event '%s'", event.value)
-            return handler(*args, **kwargs)
-        logger.debug("No handler found for event '%s'", event.value)
+            return handlers[0](*args, **kwargs)
+        self._call_handlers(event, *args, require_none=False, **kwargs)
         return None
 
     def provide(
@@ -222,7 +208,14 @@ class EventHandler:
         default: Any,
         **kwargs: Any,
     ) -> Any:
-        """Return an exclusive provider result or a caller-supplied default."""
+        """Return an exclusive provider result or a caller-supplied default.
+
+        Args:
+            event: Exclusive provider event to dispatch.
+            *args: Positional arguments passed to the provider.
+            default: Value returned when no provider is registered.
+            **kwargs: Keyword arguments passed to the provider.
+        """
         handler = self.get_handler(event)
         if handler is None:
             logger.debug(
@@ -237,7 +230,13 @@ class EventHandler:
         return handler[0](*args, **kwargs)
 
     def execute(self, event: Event, *args: Any, **kwargs: Any) -> bool:
-        """Run one exclusive executor and report whether it handled the event."""
+        """Run one exclusive executor and report whether it handled the event.
+
+        Args:
+            event: Exclusive executor event to dispatch.
+            *args: Positional arguments passed to the executor.
+            **kwargs: Keyword arguments passed to the executor.
+        """
         handler = self.get_handler(event)
         if handler is None:
             logger.debug("No executor found for event '%s'.", event.value)
@@ -265,13 +264,14 @@ class EventHandler:
         *args: Any,
         **kwargs: Any,
     ) -> Generator[None]:
-        """Enter every ordered context manager returned for an event."""
-        handler = self.get_handler(event)
-        handlers = (
-            handler
-            if isinstance(handler, list)
-            else ([] if handler is None else [handler])
-        )
+        """Enter every ordered context manager returned for an event.
+
+        Args:
+            event: Context-provider event to dispatch.
+            *args: Positional arguments passed to each provider.
+            **kwargs: Keyword arguments passed to each provider.
+        """
+        handlers = self._handlers_for(event)
         with ExitStack() as stack:
             for item in handlers:
                 manager = item(*args, **kwargs)
@@ -301,7 +301,7 @@ class EventHandler:
         Returns:
             List of events that have handlers
         """
-        return list(self._event_handlers.keys())
+        return list(self._handlers.keys())
 
     def get_handler_info(self) -> dict[Event, list[str] | str]:
         """Get information about all registered handlers.
@@ -310,9 +310,9 @@ class EventHandler:
             Dictionary mapping events to handler method names
         """
         result: dict[Event, list[str] | str] = {}
-        for event, handler in self._event_handlers.items():
-            if isinstance(handler, list):
-                result[event] = [h.__name__ for h in handler]
+        for event, handlers in self._handlers.items():
+            if event in self.MODEL_SPECIFIC_CALLBACKS:
+                result[event] = handlers[0].__name__
             else:
-                result[event] = handler.__name__
+                result[event] = [handler.__name__ for handler in handlers]
         return result

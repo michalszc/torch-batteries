@@ -8,7 +8,7 @@ from torch_batteries.tracking.base import ExperimentTracker
 from torch_batteries.tracking.types import Run
 from torch_batteries.utils.logging import get_logger
 
-logger = get_logger("experiment_tracking")
+logger = get_logger("callbacks.experiment_tracking")
 
 
 class ExperimentTrackingCallback(Callback):
@@ -40,7 +40,7 @@ class ExperimentTrackingCallback(Callback):
 
     # Use with Battery
     battery = Battery(model, optimizer=optimizer, callbacks=[callback])
-    battery.train(train_loader, val_loader, epochs=10)
+    battery.fit(train_loader, val_loader, epochs=10)
     ```
     """
 
@@ -111,7 +111,11 @@ class ExperimentTrackingCallback(Callback):
         }
 
     def load_state_dict(self, state_dict: dict[str, Any]) -> None:
-        """Restore experiment progress counters."""
+        """Restore experiment progress counters.
+
+        Args:
+            state_dict: State returned by :meth:`state_dict`.
+        """
         try:
             self._current_epoch = int(state_dict["current_epoch"])
             self._global_step = int(state_dict["global_step"])

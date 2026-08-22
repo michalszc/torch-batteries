@@ -1,5 +1,29 @@
 # Release Notes
 
+## 0.11.0 — 2026-08-17
+
+- Added `Battery.fit()` for training with optional per-epoch validation and
+  `Battery.validate()` for a required, optimizer-free standalone validation pass.
+  Added the public `FitResult` and `ValidationResult` contracts.
+- Retained validation through `Battery.train()` for compatibility while deprecating
+  its `val_loader` parameter and `TrainResult.val_loss`/`val_metrics` fields. The
+  compatibility path now logs and emits a deprecation warning only when validation
+  actually runs.
+- Unified charged-method discovery and dispatch behind shared handler infrastructure
+  while keeping the full public `EventHandler` and `DataPackHandler` APIs documented.
+- Split production classes, protocols, enums, and helper functions into focused
+  modules and natural data-types, event-core, trainer-types, progress-types, W&B,
+  logging, and metrics packages without changing existing public import paths.
+- Split Battery checkpointing, training, evaluation, prediction, and shared workflow
+  state into focused private modules while retaining checkpoint compatibility; made
+  `@charge` stackable with deterministic duplicate and competing-handler validation.
+- Updated guides, API references, executable documentation examples, and all seven
+  notebooks for `fit()`, standalone validation, result contracts, canonical
+  `phase="validation"`, and the reorganized public API.
+- Aligned exception ownership, built-in error types, module-qualified logging,
+  lifecycle diagnostics, docstring coverage, and notebook-focused CI validation in
+  [PR #23](https://github.com/michalszc/torch-batteries/pull/23).
+
 ## 0.10.0 — 2026-08-11
 
 - Renamed callback metric-monitoring configuration from `stage` to `phase` in
@@ -16,7 +40,8 @@
   implicit Battery workflows.
 - Added the DataPack guide and API reference, converted the MNIST notebook to the
   implicit DataPack workflow, and retained direct DataLoader coverage in the
-  function-fitting notebook.
+  function-fitting notebook in
+  [PR #22](https://github.com/michalszc/torch-batteries/pull/22).
 
 ## 0.9.0 — 2026-08-08
 

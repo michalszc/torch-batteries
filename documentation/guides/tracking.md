@@ -34,7 +34,7 @@ tracking = ExperimentTrackingCallback(
 )
 
 battery = Battery(model, optimizer=optimizer, callbacks=[tracking])
-battery.train(train_loader, val_loader, epochs=20)
+battery.fit(train_loader, val_loader, epochs=20)
 ```
 
 The callback initializes the run, logs selected train steps, logs validation metrics

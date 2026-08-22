@@ -10,7 +10,7 @@ from torch_batteries.callbacks.base import Callback
 from torch_batteries.events import Event, EventContext, charge
 from torch_batteries.utils.logging import get_logger
 
-logger = get_logger("GradientClip")
+logger = get_logger("callbacks.gradient_clip")
 
 ClipAlgorithm = Literal["norm", "value"]
 
@@ -20,6 +20,11 @@ class GradientClip(Callback):
 
     ``norm`` scales all gradients proportionally when their combined norm exceeds
     ``value``. ``value`` clamps each gradient element independently.
+
+    Args:
+        value: Non-negative clipping threshold.
+        algorithm: ``"norm"`` for global norm scaling or ``"value"`` for
+            element-wise clamping.
     """
 
     __slots__ = ("_algorithm", "_value")
@@ -52,7 +57,11 @@ class GradientClip(Callback):
         return self._algorithm
 
     def apply(self, parameters: Iterable[nn.Parameter]) -> float | None:
-        """Clip gradients and return the pre-clip norm when available."""
+        """Clip gradients and return the pre-clip norm when available.
+
+        Args:
+            parameters: Parameters whose non-null gradients should be clipped.
+        """
         parameter_list = [
             parameter for parameter in parameters if parameter.grad is not None
         ]
@@ -72,7 +81,11 @@ class GradientClip(Callback):
 
     @charge(Event.GRADIENT_CLIP)
     def run_gradient_clip(self, context: EventContext) -> None:
-        """Clip gradients exposed by the optimization event context."""
+        """Clip gradients exposed by the optimization event context.
+
+        Args:
+            context: Gradient event context containing the model.
+        """
         self.apply(context["model"].parameters())
 
     def state_dict(self) -> dict[str, Any]:
@@ -80,7 +93,11 @@ class GradientClip(Callback):
         return {"value": self._value, "algorithm": self._algorithm}
 
     def load_state_dict(self, state_dict: dict[str, Any]) -> None:
-        """Validate restored clipping configuration."""
+        """Validate restored clipping configuration.
+
+        Args:
+            state_dict: State returned by :meth:`state_dict`.
+        """
         if (
             state_dict.get("value") != self._value
             or state_dict.get("algorithm") != self._algorithm

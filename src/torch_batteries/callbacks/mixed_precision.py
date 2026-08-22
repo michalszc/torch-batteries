@@ -9,14 +9,19 @@ from torch_batteries.callbacks.base import Callback
 from torch_batteries.events import Event, EventContext, charge
 from torch_batteries.utils.logging import get_logger
 
-logger = get_logger("MixedPrecision")
+logger = get_logger("callbacks.mixed_precision")
 
 Precision = Literal["32-true", "16-mixed", "bf16-mixed", "amp"]
 _VALID_PRECISIONS = {"32-true", "16-mixed", "bf16-mixed", "amp"}
 
 
 class MixedPrecision(Callback):
-    """Apply full or mixed precision across all Battery workflow phases."""
+    """Apply full or mixed precision across all Battery workflow phases.
+
+    Args:
+        precision: ``"32-true"``, ``"16-mixed"``, ``"bf16-mixed"``, or
+            ``"amp"``. Automatic mode selects bf16 on CPU and fp16 otherwise.
+    """
 
     __slots__ = ("_device", "_effective_precision", "_precision", "_scaler")
 
@@ -50,7 +55,11 @@ class MixedPrecision(Callback):
         return self._scaler
 
     def configure(self, device: torch.device) -> None:
-        """Resolve the requested precision for a concrete device."""
+        """Resolve the requested precision for a concrete device.
+
+        Args:
+            device: Device used by the Battery workflow.
+        """
         self._device = device
         if self._precision == "amp":
             self._effective_precision = (
@@ -87,7 +96,11 @@ class MixedPrecision(Callback):
         return torch.autocast(self._device.type, dtype=dtype)
 
     def backward(self, loss: torch.Tensor) -> None:
-        """Backpropagate a normalized loss with optional gradient scaling."""
+        """Backpropagate a normalized loss with optional gradient scaling.
+
+        Args:
+            loss: Scalar loss to backpropagate.
+        """
         self._scaler.scale(loss).backward()
         logger.debug(
             "Mixed precision backward completed with scaler enabled=%s.",
@@ -95,27 +108,43 @@ class MixedPrecision(Callback):
         )
 
     def optimizer_step(self, optimizer: torch.optim.Optimizer) -> None:
-        """Apply an optimizer step and update the gradient scaler."""
+        """Apply an optimizer step and update the gradient scaler.
+
+        Args:
+            optimizer: Optimizer whose step should be executed.
+        """
         self._scaler.step(optimizer)
         self._scaler.update()
         logger.debug("Mixed precision optimizer step completed.")
 
     def unscale_(self, optimizer: torch.optim.Optimizer) -> None:
-        """Unscale optimizer gradients before operations such as clipping."""
+        """Unscale optimizer gradients before operations such as clipping.
+
+        Args:
+            optimizer: Optimizer owning the gradients.
+        """
         if self._scaler.is_enabled():
             self._scaler.unscale_(optimizer)
             logger.debug("Mixed precision gradients unscaled.")
 
     @charge(Event.SETUP)
     def on_setup(self, context: EventContext) -> None:
-        """Resolve precision using Battery's selected device."""
+        """Resolve precision using Battery's selected device.
+
+        Args:
+            context: Setup event context containing the selected device.
+        """
         self.configure(context["device"])
 
     @charge(Event.STEP_EXECUTION_CONTEXT)
     def step_execution_context(
         self, context: EventContext
     ) -> AbstractContextManager[None]:
-        """Provide autocast for train, validation, test, and prediction steps."""
+        """Provide autocast for train, validation, test, and prediction steps.
+
+        Args:
+            context: Step context identifying the active phase.
+        """
         logger.debug(
             "Providing mixed-precision context for phase %s.", context["phase"]
         )
@@ -123,12 +152,20 @@ class MixedPrecision(Callback):
 
     @charge(Event.BACKWARD)
     def run_backward(self, context: EventContext) -> None:
-        """Execute scaled or ordinary backward through the event contract."""
+        """Execute scaled or ordinary backward through the event contract.
+
+        Args:
+            context: Backward context containing the normalized loss.
+        """
         self.backward(context["backward_loss"])
 
     @charge(Event.BEFORE_GRADIENT_CLIP)
     def prepare_gradients(self, context: EventContext) -> None:
-        """Unscale gradients before optional clipping."""
+        """Unscale gradients before optional clipping.
+
+        Args:
+            context: Gradient context containing the optimizer.
+        """
         optimizer = context["optimizer"]
         if optimizer is None:
             logger.error("Mixed precision requires an optimizer before clipping.")
@@ -138,7 +175,11 @@ class MixedPrecision(Callback):
 
     @charge(Event.OPTIMIZER_STEP)
     def run_optimizer_step(self, context: EventContext) -> None:
-        """Execute the scaler-aware optimizer step."""
+        """Execute the scaler-aware optimizer step.
+
+        Args:
+            context: Optimizer context containing the optimizer.
+        """
         optimizer = context["optimizer"]
         if optimizer is None:
             logger.error("Mixed precision requires an optimizer for optimizer step.")
@@ -155,7 +196,11 @@ class MixedPrecision(Callback):
         }
 
     def load_state_dict(self, state_dict: dict[str, Any]) -> None:
-        """Restore scaler state for a compatible precision configuration."""
+        """Restore scaler state for a compatible precision configuration.
+
+        Args:
+            state_dict: State returned by :meth:`state_dict`.
+        """
         try:
             saved_precision = state_dict["precision"]
             saved_effective = state_dict["effective_precision"]

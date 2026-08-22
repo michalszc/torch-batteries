@@ -6,7 +6,7 @@ import torch
 
 from torch_batteries.utils.logging import get_logger
 
-logger = get_logger("prediction")
+logger = get_logger("utils.prediction")
 
 
 def concatenate_predictions(outputs: list[Any]) -> Any:

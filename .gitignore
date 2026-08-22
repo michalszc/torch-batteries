@@ -216,6 +216,7 @@ notebooks/**/*.pth
 
 # Weights & Biases
 wandb/
+!/src/torch_batteries/tracking/wandb/
 
 # uv
 # Ignored because uv is not the primary package manager used in this project

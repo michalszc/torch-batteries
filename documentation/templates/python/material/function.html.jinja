@@ -1,0 +1,29 @@
+{% extends "_base/function.html.jinja" %}
+
+{% block heading scoped %}
+  {% if config.show_symbol_type_heading %}<code class="doc-symbol doc-symbol-heading doc-symbol-{{ symbol_type }}"></code>{% endif %}
+  {% if config.heading and root %}
+    {{ config.heading }}
+  {% elif config.separate_signature %}
+    <span class="doc doc-object-name doc-function-name">{{ function_name }}</span>
+  {% else %}
+    {%+ filter highlight(language="python", inline=True) -%}
+      {{ function_name }}
+      {%- include "type_parameters.html.jinja" with context -%}
+      {%- include "signature.html.jinja" with context -%}
+    {%- endfilter %}
+  {% endif %}
+  {% if function.source_link %}
+    {% set source_parts = function.source_link.split("/blob/", 1) %}
+    {% set revision_path = source_parts[1].split("/", 1) %}
+    {% set source_url = source_parts[0] ~ "/blob/master/" ~ revision_path[1] %}
+    <a
+      class="tb-source-link"
+      href="{{ source_url }}"
+      title="View source on GitHub"
+      aria-label="View source for {{ function.path }} on GitHub"
+      target="_blank"
+      rel="noopener noreferrer"
+    >Source</a>
+  {% endif %}
+{% endblock heading %}
