@@ -21,7 +21,8 @@
   notebooks for `fit()`, standalone validation, result contracts, canonical
   `phase="validation"`, and the reorganized public API.
 - Aligned exception ownership, built-in error types, module-qualified logging,
-  lifecycle diagnostics, docstring coverage, and notebook-focused CI validation.
+  lifecycle diagnostics, docstring coverage, and notebook-focused CI validation in
+  [PR #23](https://github.com/michalszc/torch-batteries/pull/23).
 
 ## 0.10.0 — 2026-08-11
 
@@ -39,7 +40,8 @@
   implicit Battery workflows.
 - Added the DataPack guide and API reference, converted the MNIST notebook to the
   implicit DataPack workflow, and retained direct DataLoader coverage in the
-  function-fitting notebook.
+  function-fitting notebook in
+  [PR #22](https://github.com/michalszc/torch-batteries/pull/22).
 
 ## 0.9.0 — 2026-08-08
 
