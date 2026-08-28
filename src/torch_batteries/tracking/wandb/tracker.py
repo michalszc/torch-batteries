@@ -2,9 +2,8 @@
 
 import importlib
 import tempfile
-from collections.abc import Callable, MutableMapping
 from pathlib import Path
-from typing import Any, Protocol, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import torch
 from torch import nn
@@ -15,35 +14,12 @@ from torch_batteries.tracking.types import (
 )
 from torch_batteries.utils.logging import get_logger
 
-logger = get_logger("wandb_tracker")
+from ._run import _WandbRun
 
+if TYPE_CHECKING:
+    from ._module import _WandbModule
 
-class _WandbRun(Protocol):
-    """Runtime shape of the W&B run methods used by this tracker."""
-
-    id: Any
-    url: Any
-    summary: MutableMapping[str, Any]
-
-    def log(self, metrics: dict[str, float], step: int | None = None) -> None: ...
-
-    def finish(self, exit_code: int = 0) -> None: ...
-
-    def log_artifact(self, artifact: Any, aliases: list[str]) -> None: ...
-
-
-class _WandbArtifact(Protocol):
-    """Runtime shape of the W&B artifact methods used by this tracker."""
-
-    def add_file(self, local_path: str, name: str) -> None: ...
-
-
-class _WandbModule(Protocol):
-    """Runtime shape of the dynamically imported W&B module."""
-
-    Artifact: Callable[..., _WandbArtifact]
-
-    def init(self, **kwargs: Any) -> _WandbRun: ...
+logger = get_logger("tracking.wandb")
 
 
 class WandbTracker(ExperimentTracker):
@@ -278,6 +254,7 @@ class WandbTracker(ExperimentTracker):
         return None
 
     def _require_run(self) -> _WandbRun:
+        """Return the active W&B run or reject an uninitialized operation."""
         if not self.is_initialized or self._run is None:
             msg = "WandbTracker is not initialized. Call init()."
             raise RuntimeError(msg)

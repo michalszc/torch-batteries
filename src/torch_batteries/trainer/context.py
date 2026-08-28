@@ -5,14 +5,22 @@ from torch_batteries.trainer.types import TrainResult
 
 
 def dataset_identity_context(dataset_name: str | None) -> EventContext:
-    """Build optional dataset identity fields for implicit workflow events."""
+    """Build optional dataset identity fields for implicit workflow events.
+
+    Args:
+        dataset_name: Selected named dataset, or ``None`` for an unnamed dataset.
+    """
     if dataset_name is None:
         return {}
     return {"dataset_name": dataset_name}
 
 
 def copy_history_context(results: TrainResult) -> EventContext:
-    """Build a copied history context from accumulated train results."""
+    """Build a copied history context from accumulated train results.
+
+    Args:
+        results: Accumulated training and validation histories.
+    """
     return {
         "history_train_loss": list(results["train_loss"]),
         "history_val_loss": list(results["val_loss"]),

@@ -18,14 +18,14 @@ if TYPE_CHECKING:
 
     from torch_batteries.trainer import Battery
 
-logger = get_logger("EarlyStopping")
+logger = get_logger("callbacks.early_stopping")
 
 
 class EarlyStopping(Callback):
     """Early stops the training if selected metric doesn't improve after a given patience.
 
     Args:
-        phase: One of 'train' or 'val' to indicate which phase's metric to monitor
+        phase: ``"train"`` or ``"validation"``. ``"val"`` is deprecated.
         metric: The name of the metric to monitor
         min_delta: Minimum change in the monitored metric to qualify as an improvement
         patience: Number of epochs with no improvement after which training will be stopped
@@ -102,7 +102,11 @@ class EarlyStopping(Callback):
         return state
 
     def load_state_dict(self, state_dict: dict[str, Any]) -> None:
-        """Restore early-stopping state from a checkpoint."""
+        """Restore early-stopping state from a checkpoint.
+
+        Args:
+            state_dict: State returned by :meth:`state_dict`.
+        """
         try:
             self._best_score = state_dict["best_score"]
             self._epochs_no_improve = int(state_dict["epochs_no_improve"])
@@ -163,7 +167,7 @@ class EarlyStopping(Callback):
         Args:
             context: Event context containing validation metrics.
         """
-        if self._phase != "val":
+        if self._phase != "validation":
             return
 
         metrics = context["val_metrics"]
@@ -183,7 +187,7 @@ class EarlyStopping(Callback):
         """
 
         if self._metric not in metrics:
-            msg = f"Metric '{self._metric}' not found in training metrics."
+            msg = f"Metric '{self._metric}' not found in {self._phase} metrics."
             raise ValueError(msg)
 
         current_score = metrics[self._metric]

@@ -21,3 +21,24 @@
   color: var(--md-default-fg-color--light);
   font-size: 0.75rem;
 }
+
+.tb-source-link {
+  display: inline-block;
+  margin-left: 0.65rem;
+  padding: 0.08rem 0.4rem;
+  border: 1px solid var(--md-default-fg-color--lighter);
+  border-radius: 0.25rem;
+  color: var(--md-accent-fg-color);
+  font-family: var(--md-text-font-family);
+  font-size: 0.62rem;
+  font-weight: 600;
+  line-height: 1.4;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+.tb-source-link:hover,
+.tb-source-link:focus {
+  border-color: var(--md-accent-fg-color);
+  background-color: var(--md-accent-fg-color--transparent);
+}

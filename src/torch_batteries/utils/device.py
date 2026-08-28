@@ -6,7 +6,7 @@ import torch
 
 from torch_batteries.utils.logging import get_logger
 
-logger = get_logger("device")
+logger = get_logger("utils.device")
 
 
 def get_device(device: str | torch.device = "auto") -> torch.device:

@@ -28,14 +28,14 @@ class TestEarlyStopping:
     def test_initialization(self) -> None:
         """Test EarlyStopping initialization with valid parameters."""
         early_stopping = EarlyStopping(
-            phase="val",
+            phase="validation",
             metric="loss",
             min_delta=0.01,
             patience=3,
             mode="min",
             restore_best_weights=True,
         )
-        assert early_stopping._phase == "val"  # noqa: SLF001
+        assert early_stopping._phase == "validation"  # noqa: SLF001
         assert early_stopping._metric == "loss"  # noqa: SLF001
         assert early_stopping._min_delta == 0.01  # noqa: SLF001
         assert early_stopping._patience == 3  # noqa: SLF001
@@ -44,20 +44,33 @@ class TestEarlyStopping:
 
     def test_invalid_phase(self) -> None:
         """Test EarlyStopping initialization with an invalid phase."""
-        with pytest.raises(ValueError, match="phase must be one of 'train' or 'val'"):
+        with pytest.raises(
+            ValueError, match="phase must be one of 'train' or 'validation'"
+        ):
             EarlyStopping(phase="invalid", metric="loss")  # type: ignore[arg-type]
 
     def test_deprecated_stage_alias(self, caplog: pytest.LogCaptureFixture) -> None:
         """The deprecated stage keyword resolves to the monitoring phase."""
-        callback = EarlyStopping(stage="val", metric="loss")
+        with pytest.warns(DeprecationWarning, match="'stage' is deprecated"):
+            callback = EarlyStopping(stage="validation", metric="loss")
 
-        assert callback._phase == "val"  # noqa: SLF001
+        assert callback._phase == "validation"  # noqa: SLF001
         assert "'stage' is deprecated; use 'phase' instead" in caplog.text
+
+    def test_deprecated_val_phase_is_normalized(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """The short validation spelling warns and stores the canonical value."""
+        with pytest.warns(DeprecationWarning, match="phase='val' is deprecated"):
+            callback = EarlyStopping(phase="val", metric="loss")
+
+        assert callback._phase == "validation"  # noqa: SLF001
+        assert "phase='val' is deprecated" in caplog.text
 
     def test_rejects_phase_and_stage(self) -> None:
         """Canonical and deprecated monitoring keywords are mutually exclusive."""
         with pytest.raises(TypeError, match="cannot both be provided"):
-            EarlyStopping(phase="train", stage="val", metric="loss")
+            EarlyStopping(phase="train", stage="validation", metric="loss")
 
     def test_requires_phase(self) -> None:
         """A monitoring phase remains required when the alias is omitted."""
@@ -67,12 +80,12 @@ class TestEarlyStopping:
     def test_requires_metric(self) -> None:
         """The monitored metric remains required with compatibility syntax."""
         with pytest.raises(TypeError, match="required argument: 'metric'"):
-            EarlyStopping(phase="val")
+            EarlyStopping(phase="validation")
 
     def test_invalid_mode(self) -> None:
         """Test EarlyStopping initialization with invalid mode."""
         with pytest.raises(ValueError, match="mode must be one of 'min' or 'max'"):
-            EarlyStopping(phase="val", metric="loss", mode="invalid")  # type: ignore[arg-type]
+            EarlyStopping(phase="validation", metric="loss", mode="invalid")  # type: ignore[arg-type]
 
     @pytest.mark.parametrize(
         "kwargs",
@@ -86,11 +99,11 @@ class TestEarlyStopping:
     ) -> None:
         """Patience and minimum delta cannot be negative."""
         with pytest.raises(ValueError, match="greater than or equal to zero"):
-            EarlyStopping(phase="val", metric="loss", **kwargs)  # type: ignore[arg-type]
+            EarlyStopping(phase="validation", metric="loss", **kwargs)  # type: ignore[arg-type]
 
     def test_run_on_train_start(self) -> None:
         """Test run_on_train_start method initializes parameters correctly."""
-        early_stopping = EarlyStopping(phase="val", metric="loss")
+        early_stopping = EarlyStopping(phase="validation", metric="loss")
         context: EventContext = {}
         early_stopping.run_on_train_start(context)
         assert early_stopping.best_score is None
@@ -100,7 +113,7 @@ class TestEarlyStopping:
     def test_check_for_early_stop_min_mode(self) -> None:
         """Test _check_for_early_stop method in 'min' mode."""
         early_stopping = EarlyStopping(
-            phase="val", metric="loss", mode="min", patience=2
+            phase="validation", metric="loss", mode="min", patience=2
         )
         model = torch.nn.Linear(1, 1)
         battery = Battery(model=model)
@@ -161,7 +174,7 @@ class TestEarlyStopping:
     def test_check_for_early_stop_max_mode(self) -> None:
         """Test _check_for_early_stop method in 'max' mode."""
         early_stopping = EarlyStopping(
-            phase="val", metric="accuracy", mode="max", patience=2
+            phase="validation", metric="accuracy", mode="max", patience=2
         )
         model = torch.nn.Linear(1, 1)
         battery = Battery(model=model)
@@ -220,7 +233,7 @@ class TestEarlyStopping:
     def test_restore_best_weights(self) -> None:
         """Test that best weights are restored when restore_best_weights is True."""
         early_stopping = EarlyStopping(
-            phase="val",
+            phase="validation",
             metric="loss",
             mode="min",
             patience=1,
@@ -277,7 +290,7 @@ class TestEarlyStopping:
         model = torch.nn.BatchNorm1d(2)
         battery = Battery(model=model)
         early_stopping = EarlyStopping(
-            phase="val", metric="loss", restore_best_weights=True
+            phase="validation", metric="loss", restore_best_weights=True
         )
         context: EventContext = {
             "model": model,
@@ -329,7 +342,7 @@ class TestEarlyStopping:
             for key, value in model.state_dict().items()
         }
         early_stopping = EarlyStopping(
-            phase="val", metric="loss", restore_best_weights=True
+            phase="validation", metric="loss", restore_best_weights=True
         )
         early_stopping.run_on_validation_end(
             {
@@ -363,7 +376,7 @@ class TestEarlyStopping:
         model = torch.nn.Linear(1, 1)
         battery = Battery(model=model)
         early_stopping = EarlyStopping(
-            phase="val", metric="loss", restore_best_weights=True
+            phase="validation", metric="loss", restore_best_weights=True
         )
         early_stopping.run_on_validation_end(
             {"model": model, "battery": battery, "val_metrics": {"loss": 1.0}}
@@ -380,7 +393,7 @@ class TestEarlyStopping:
         model = torch.nn.Linear(1, 1)
         battery = Battery(model=model)
         early_stopping = EarlyStopping(
-            phase="val",
+            phase="validation",
             metric="loss",
             patience=1,
             restore_best_weights=True,
@@ -408,7 +421,9 @@ class TestEarlyStopping:
         """Serialized state can be restored into a fresh callback."""
         model = torch.nn.Linear(1, 1)
         battery = Battery(model=model)
-        source = EarlyStopping(phase="val", metric="loss", restore_best_weights=True)
+        source = EarlyStopping(
+            phase="validation", metric="loss", restore_best_weights=True
+        )
         source.run_on_validation_end(
             {"model": model, "battery": battery, "val_metrics": {"loss": 0.5}}
         )
@@ -416,7 +431,9 @@ class TestEarlyStopping:
             {"model": model, "battery": battery, "val_metrics": {"loss": 0.6}}
         )
 
-        restored = EarlyStopping(phase="val", metric="loss", restore_best_weights=True)
+        restored = EarlyStopping(
+            phase="validation", metric="loss", restore_best_weights=True
+        )
         restored.load_state_dict(source.state_dict())
 
         assert restored.best_score == 0.5
@@ -444,14 +461,14 @@ class TestEarlyStopping:
     )
     def test_invalid_state_is_rejected(self, state: dict[str, object]) -> None:
         """Malformed callback checkpoint data raises a stable public error."""
-        callback = EarlyStopping(phase="val", metric="loss")
+        callback = EarlyStopping(phase="validation", metric="loss")
 
         with pytest.raises(ValueError, match="Invalid EarlyStopping checkpoint state"):
             callback.load_state_dict(state)
 
     def test_resumed_train_start_preserves_restored_state(self) -> None:
         """A resume event does not reset state loaded from a checkpoint."""
-        callback = EarlyStopping(phase="val", metric="loss")
+        callback = EarlyStopping(phase="validation", metric="loss")
         callback.load_state_dict(
             {
                 "best_score": 0.25,
@@ -470,7 +487,7 @@ class TestEarlyStopping:
         model = torch.nn.Linear(1, 1)
         battery = Battery(model=model)
         train_callback = EarlyStopping(phase="train", metric="loss")
-        val_callback = EarlyStopping(phase="val", metric="loss")
+        val_callback = EarlyStopping(phase="validation", metric="loss")
 
         train_callback.run_on_validation_end({})
         val_callback.run_on_epoch_end({})
@@ -490,9 +507,11 @@ class TestEarlyStopping:
     def test_missing_monitored_metric_is_rejected(self) -> None:
         """A configured metric must be present in the selected phase."""
         model = torch.nn.Linear(1, 1)
-        callback = EarlyStopping(phase="val", metric="accuracy")
+        callback = EarlyStopping(phase="validation", metric="accuracy")
 
-        with pytest.raises(ValueError, match="Metric 'accuracy' not found"):
+        with pytest.raises(
+            ValueError, match="Metric 'accuracy' not found in validation metrics"
+        ):
             callback.run_on_validation_end(
                 {
                     "model": model,
@@ -505,7 +524,9 @@ class TestEarlyStopping:
         """Best weights follow a later improvement rather than the baseline."""
         model = torch.nn.Linear(1, 1)
         battery = Battery(model=model)
-        callback = EarlyStopping(phase="val", metric="loss", restore_best_weights=True)
+        callback = EarlyStopping(
+            phase="validation", metric="loss", restore_best_weights=True
+        )
         callback.run_on_validation_end(
             {"model": model, "battery": battery, "val_metrics": {"loss": 1.0}}
         )

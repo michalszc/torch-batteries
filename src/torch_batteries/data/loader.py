@@ -5,7 +5,11 @@ from typing import Any
 import torch
 from torch.utils.data import DataLoader, IterableDataset
 
+from torch_batteries.utils.logging import get_logger
+
 from .types import DataLoaderConfig, DataPhase, DatasetType
+
+logger = get_logger("data.loader")
 
 
 def materialize_dataloader(
@@ -16,12 +20,22 @@ def materialize_dataloader(
     device: torch.device,
     default_generator: torch.Generator | None = None,
 ) -> DataLoader[Any]:
-    """Construct a PyTorch DataLoader from validated high-level configuration."""
+    """Construct a PyTorch DataLoader from validated high-level configuration.
+
+    Args:
+        dataset: Map-style or iterable dataset to load.
+        config: Validated DataLoader options.
+        phase: Workflow phase used to choose the default shuffle behavior.
+        device: Device used to resolve automatic pinned memory.
+        default_generator: Seeded workflow generator used when ``config`` does not
+            provide one.
+    """
     iterable = isinstance(dataset, IterableDataset)
     shuffle = config.shuffle
     if shuffle is None:
         shuffle = phase == "train" and not iterable and config.sampler is None
     if iterable and shuffle:
+        logger.error("Cannot enable shuffling for an IterableDataset.")
         msg = "IterableDataset cannot be used with shuffle=True."
         raise ValueError(msg)
 
@@ -42,12 +56,24 @@ def materialize_dataloader(
         common["prefetch_factor"] = config.prefetch_factor
 
     if config.batch_sampler is not None:
-        return DataLoader(dataset, batch_sampler=config.batch_sampler, **common)
-    return DataLoader(
-        dataset,
-        batch_size=config.batch_size,
-        shuffle=shuffle,
-        sampler=config.sampler,
-        drop_last=config.drop_last,
-        **common,
+        loader = DataLoader(dataset, batch_sampler=config.batch_sampler, **common)
+    else:
+        loader = DataLoader(
+            dataset,
+            batch_size=config.batch_size,
+            shuffle=shuffle,
+            sampler=config.sampler,
+            drop_last=config.drop_last,
+            **common,
+        )
+    logger.debug(
+        "DataLoader materialized: phase=%s, batch_size=%s, shuffle=%s, "
+        "pin_memory=%s, num_workers=%d, custom_batch_sampler=%s",
+        phase,
+        config.batch_size,
+        shuffle,
+        pin_memory,
+        config.num_workers,
+        config.batch_sampler is not None,
     )
+    return loader

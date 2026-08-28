@@ -10,7 +10,8 @@
   and context-manager dispatch rules.
 """
 
-from .core import Event, EventContext, OptimizationStep, charge
+from .core import Event, EventContext, OptimizationStep
+from .core.charge import charge
 from .handler import EventHandler
 
 __all__ = ["Event", "EventContext", "EventHandler", "OptimizationStep", "charge"]

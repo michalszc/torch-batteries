@@ -7,7 +7,7 @@ from .progress_bar import BarProgress
 from .silent import SilentProgress
 from .simple import SimpleProgress
 
-logger = get_logger("progress.factory")
+logger = get_logger("utils.progress.factory")
 
 
 class ProgressFactory:

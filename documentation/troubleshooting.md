@@ -10,13 +10,15 @@ def training_step(self, context: EventContext) -> StepOutput:
     ...
 ```
 
-Supplying a validation loader without `VALIDATION_STEP` fails before training begins.
+Supplying validation data without `VALIDATION_STEP` fails before fitting or standalone
+validation begins.
 
 ## No loader or DataPack dataset was provided
 
 Pass an explicit primary DataLoader, or attach `Battery(data_pack=...)` with a
-`SETUP_DATA` handler returning `DatasetBundle`. An implicit train, test, or prediction
-workflow requires its corresponding dataset. Validation is optional.
+`SETUP_DATA` handler returning `DatasetBundle`. An implicit fit/train, test, or
+prediction workflow requires its corresponding dataset. Validation is optional for
+`fit()` and compatibility `train()`, but required for standalone `validate()`.
 
 Do not pass only `val_loader`: an explicit train loader selects direct-loader mode,
 and Battery never mixes it with implicit DataPack loaders.
@@ -30,8 +32,8 @@ cannot be shuffled.
 
 ## Optimizer is required for training
 
-Pass an optimizer during construction or assign `battery.optimizer` before `train`.
-Testing and prediction do not require one.
+Pass an optimizer during construction or assign `battery.optimizer` before `fit` or
+`train`. Standalone validation, testing, and prediction do not require one.
 
 ## Automatic metrics require predictions and targets
 
@@ -81,3 +83,11 @@ Install `torch-batteries[wandb]` in the environment running the process. Use
 Training progress is controlled by `verbose`. Package diagnostics use Python logging
 and default to warnings. Set `TORCH_BATTERIES_LOG_LEVEL` to `DEBUG`, `INFO`,
 `WARNING`, or `ERROR` before importing the package.
+
+Logger names follow the source module below the `torch_batteries` hierarchy, such as
+`torch_batteries.trainer.core`, `torch_batteries.data.loader`, and
+`torch_batteries.callbacks.early_stopping`. Applications can therefore filter one
+component with ordinary Python logging configuration. Debug output describes detailed
+workflow transitions and resolved configuration; info output reports user-relevant
+lifecycle operations; warnings identify deprecations and recoverable fallbacks; errors
+identify operations that are about to raise.

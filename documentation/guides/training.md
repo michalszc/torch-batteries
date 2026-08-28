@@ -2,10 +2,11 @@
 
 ## Define only the workflows you use
 
-`Battery.train` requires `Event.TRAIN_STEP` and an optimizer. Passing a validation
-loader additionally requires `Event.VALIDATION_STEP`. Testing and prediction are
-independent: each requires its corresponding charged method but neither requires an
-optimizer.
+`Battery.train` and `Battery.fit` require `Event.TRAIN_STEP` and an optimizer.
+`fit` accepts optional validation data and additionally requires
+`Event.VALIDATION_STEP` when that data is available. Standalone `Battery.validate`,
+testing, and prediction do not require an optimizer; each requires its corresponding
+charged method.
 
 ```python
 @charge(Event.TRAIN_STEP)
@@ -53,10 +54,10 @@ return loss, {"accuracy": accuracy}
 Invalid tuple shapes, non-dictionary metric payloads, non-scalar losses, and
 non-numeric metrics fail immediately.
 
-## Train with optional validation
+## Fit with optional validation
 
 ```python
-history = battery.train(
+history = battery.fit(
     train_loader,
     val_loader,
     epochs=20,
@@ -70,10 +71,38 @@ each completed train epoch. Public epochs begin at one in all event contexts.
 Without validation:
 
 ```python
-history = battery.train(train_loader, epochs=20)
+history = battery.fit(train_loader, epochs=20)
 assert history["val_loss"] == []
 assert history["val_metrics"] == {}
 ```
+
+`fit()` returns a `FitResult`. It does not fail when validation data is absent.
+
+## Train without validation
+
+Use `train()` for an intentionally training-only workflow:
+
+```python
+history = battery.train(train_loader, epochs=20)
+```
+
+For compatibility in 0.11.0, `train(..., val_loader=...)` and implicit DataPack
+validation still run validation and populate `TrainResult.val_loss` and
+`TrainResult.val_metrics`. That parameter and those fields are deprecated; the call
+logs a warning and emits `DeprecationWarning` when validation actually runs. Migrate
+combined workflows to `fit()`.
+
+## Validate once
+
+```python
+validation_result = battery.validate(val_loader, verbose=0)
+print(validation_result["val_loss"])
+print(validation_result.get("val_metrics", {}))
+```
+
+Standalone validation runs one evaluation-only pass at epoch one with gradients
+disabled. An explicit loader or validation data from the DataPack `"fit"` stage is
+required.
 
 ## Evaluate once
 
@@ -89,7 +118,7 @@ mode again.
 
 ## Result histories
 
-Training returns ordinary mappings:
+Fitting returns an ordinary `FitResult` mapping:
 
 ```python
 {
@@ -106,7 +135,8 @@ non-decomposable measurement such as macro F1 or AUROC.
 
 ## Input validation
 
-Training validates the complete configuration before dispatching lifecycle events:
+Training and fitting validate the complete configuration before dispatching lifecycle
+events:
 
 - `epochs` must be positive.
 - The train loader must be sized and non-empty.

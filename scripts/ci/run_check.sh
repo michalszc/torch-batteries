@@ -55,7 +55,7 @@ run_test_check() {
             echo "" >> $GITHUB_STEP_SUMMARY
             echo "### Coverage Report:" >> $GITHUB_STEP_SUMMARY
             echo '```' >> $GITHUB_STEP_SUMMARY
-            grep -A 10 "Name.*Stmts.*Miss.*Cover" test_output.txt >> $GITHUB_STEP_SUMMARY
+            sed -n '/Name.*Stmts.*Miss.*Cover/,/TOTAL/p' test_output.txt >> $GITHUB_STEP_SUMMARY
             echo '```' >> $GITHUB_STEP_SUMMARY
         fi
     else

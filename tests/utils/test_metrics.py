@@ -41,7 +41,9 @@ class TestCalculateMetrics:
         pred = torch.tensor([1.0, 2.0, 3.0])
         target = torch.tensor([1.5, 2.5, 3.5])
 
-        with patch("torch_batteries.utils.metrics.logger.debug") as mock_debug:
+        with patch(
+            "torch_batteries.utils.metrics.calculate.logger.debug"
+        ) as mock_debug:
             results = calculate_metrics(metrics, pred, target)
 
         assert "custom" in results
@@ -100,7 +102,9 @@ class TestCalculateMetrics:
         pred = torch.tensor([1.0, 2.0, 3.0])
         target = torch.tensor([1.0, 2.0, 3.0])
 
-        with patch("torch_batteries.utils.metrics.logger.warning") as mock_warning:
+        with patch(
+            "torch_batteries.utils.metrics.calculate.logger.warning"
+        ) as mock_warning:
             results = calculate_metrics(metrics, pred, target)
 
             assert "working" in results
@@ -122,7 +126,9 @@ class TestCalculateMetrics:
         pred = torch.tensor([1.0, 2.0, 3.0])
         target = torch.tensor([1.0, 2.0, 3.0])
 
-        with patch("torch_batteries.utils.metrics.logger.warning") as mock_warning:
+        with patch(
+            "torch_batteries.utils.metrics.calculate.logger.warning"
+        ) as mock_warning:
             results = calculate_metrics(metrics, pred, target)
 
             assert results == {}
@@ -202,7 +208,9 @@ class TestCalculateMetrics:
         pred = torch.tensor([1.0, 2.0, 3.0])
         target = torch.tensor([1.5, 2.5, 3.5])
 
-        with patch("torch_batteries.utils.metrics.logger.warning") as mock_warning:
+        with patch(
+            "torch_batteries.utils.metrics.calculate.logger.warning"
+        ) as mock_warning:
             results = calculate_metrics(metrics, pred, target)
 
             # Should be skipped due to .item() error on multi-element tensor
@@ -243,7 +251,9 @@ class TestCalculateMetrics:
         pred = torch.tensor([1.0, 2.0, 3.0])
         target = torch.tensor([0.0, 0.0, 0.0])
 
-        with patch("torch_batteries.utils.metrics.logger.warning") as mock_warning:
+        with patch(
+            "torch_batteries.utils.metrics.calculate.logger.warning"
+        ) as mock_warning:
             results = calculate_metrics(metrics, pred, target)
 
             assert "ratio" not in results

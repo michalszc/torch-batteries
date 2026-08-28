@@ -38,11 +38,11 @@ class MyModel(nn.Module):
         )
 
 battery = Battery(model, optimizer=optimizer) # Auto-detects device
-battery.train(train_loader, val_loader, epochs=10)
+battery.fit(train_loader, val_loader, epochs=10)
 ```
 """
 
-__version__ = "0.10.0"
+__version__ = "0.11.0"
 __author__ = ["Michal Szczygiel", "Arkadiusz Paterak", "Antoni Zięciak"]
 
 # Import main components
@@ -51,6 +51,7 @@ from .data import (
     DataLoaderBundle,
     DataLoaderConfig,
     DataPack,
+    DataPackHandler,
     DatasetBundle,
     ResolvedData,
 )
@@ -58,7 +59,15 @@ from .events import Event, EventContext, OptimizationStep, charge
 from .tracking import (
     Run,
 )
-from .trainer import Battery, PredictResult, StepOutput, TestResult, TrainResult
+from .trainer import (
+    Battery,
+    FitResult,
+    PredictResult,
+    StepOutput,
+    TestResult,
+    TrainResult,
+    ValidationResult,
+)
 from .utils.metrics import CollectedMetric, StatefulMetric
 
 __all__ = [
@@ -68,9 +77,11 @@ __all__ = [
     "DataLoaderBundle",
     "DataLoaderConfig",
     "DataPack",
+    "DataPackHandler",
     "DatasetBundle",
     "Event",
     "EventContext",
+    "FitResult",
     "OptimizationStep",
     "PredictResult",
     "ResolvedData",
@@ -79,6 +90,7 @@ __all__ = [
     "StepOutput",
     "TestResult",
     "TrainResult",
+    "ValidationResult",
     "callbacks",
     "charge",
     "events",

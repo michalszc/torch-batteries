@@ -14,6 +14,9 @@ class SimpleProgress(Progress):
 
     Prints epoch summaries with metrics after each epoch completes.
     Provides detailed text-based feedback without progress bars.
+
+    Args:
+        total_epochs: Total number of epochs displayed in summaries.
     """
 
     __slots__ = (
@@ -43,7 +46,11 @@ class SimpleProgress(Progress):
         self._phase_metrics: dict[Phase, dict[str, float]] = {}
 
     def start_epoch(self, epoch: int) -> None:
-        """Start a new epoch and record time."""
+        """Start a new epoch and record time.
+
+        Args:
+            epoch: One-based epoch number.
+        """
         self._current_epoch = epoch
         self._epoch_start_time = time.time()
 

@@ -13,6 +13,9 @@ class BarProgress(Progress):
 
     Shows a progress bar for each phase with real-time metrics updates.
     Provides visual feedback during training without verbose text output.
+
+    Args:
+        total_epochs: Total number of epochs displayed in progress labels.
     """
 
     __slots__ = (
@@ -38,7 +41,11 @@ class BarProgress(Progress):
         self._total_samples = 0
 
     def start_epoch(self, epoch: int) -> None:
-        """Start a new epoch and store epoch number."""
+        """Start a new epoch and store its number.
+
+        Args:
+            epoch: One-based epoch number.
+        """
         self._current_epoch = epoch
 
     def start_phase(self, phase: Phase, total_batches: int = 0) -> None:

@@ -18,48 +18,24 @@ from torch_batteries.callbacks.base import Callback
 from torch_batteries.events import Event, EventContext, charge
 from torch_batteries.utils.logging import get_logger
 
+from ._model_checkpoint_functions import (
+    _optional_string,
+    _serialized_float,
+    _string_float_dict,
+    _validate_save_weights_only,
+)
+
 if TYPE_CHECKING:
     from torch_batteries.trainer import Battery
 
-logger = get_logger("ModelCheckpoint")
-
-
-def _optional_string(value: object) -> str | None:
-    """Validate an optional serialized path."""
-    if value is None or isinstance(value, str):
-        return value
-    msg = "checkpoint path must be a string or None"
-    raise TypeError(msg)
-
-
-def _string_float_dict(value: object) -> dict[str, float]:
-    """Validate serialized checkpoint ranking data."""
-    if not isinstance(value, dict):
-        msg = "best_k_models must be a dictionary"
-        raise TypeError(msg)
-    return {str(path): _serialized_float(score) for path, score in value.items()}
-
-
-def _serialized_float(value: object) -> float:
-    """Validate a serialized numeric value."""
-    if not isinstance(value, (int, float)):
-        msg = "checkpoint score must be numeric"
-        raise TypeError(msg)
-    return float(value)
-
-
-def _validate_save_weights_only(value: object, *, expected: bool) -> None:
-    """Validate the serialized checkpoint format configuration."""
-    if value != expected:
-        msg = "save_weights_only configuration does not match"
-        raise ValueError(msg)
+logger = get_logger("callbacks.model_checkpoint")
 
 
 class ModelCheckpoint(Callback):
     """Saves the model when a monitored metric improves.
 
     Args:
-        phase: One of 'train' or 'val' to indicate which phase's metric to monitor
+        phase: ``"train"`` or ``"validation"``. ``"val"`` is deprecated.
         metric: The name of the metric to monitor
         mode: One of 'min' or 'max'. In 'min' mode, the model is saved when the
               monitored metric decreases. In 'max' mode, it is saved when the
@@ -68,6 +44,7 @@ class ModelCheckpoint(Callback):
         save_path: Filename for the saved model. If None, defaults to
                    'epochs-metric=value.pth'
         save_top_k: Saves specified number of best models (defaults to 1)
+        save_weights_only: Save only model weights instead of full Battery state.
         stage: Deprecated keyword alias for ``phase``.
 
     Missing directories are created automatically. A `.pth` suffix is added only
@@ -79,7 +56,7 @@ class ModelCheckpoint(Callback):
     Examples:
         ```python
         checkpoint = ModelCheckpoint(
-            phase="val",
+            phase="validation",
             metric="accuracy",
             mode="max",
             save_path="best_model.pth"
@@ -166,7 +143,11 @@ class ModelCheckpoint(Callback):
         return state
 
     def load_state_dict(self, state_dict: dict[str, object]) -> None:
-        """Restore checkpoint ranking state."""
+        """Restore checkpoint ranking state.
+
+        Args:
+            state_dict: State returned by :meth:`state_dict`.
+        """
         try:
             self._best_k_models = _string_float_dict(state_dict["best_k_models"])
             self._best_model_path = _optional_string(state_dict["best_model_path"])
@@ -211,7 +192,7 @@ class ModelCheckpoint(Callback):
         Args:
             context: Event context containing validation metrics and model.
         """
-        if self._phase != "val":
+        if self._phase != "validation":
             return
 
         metrics = {**context["val_metrics"], "epoch": context["epoch"]}

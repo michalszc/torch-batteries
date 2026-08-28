@@ -9,7 +9,7 @@ exact signature or event context.
 
 | Goal | Guide | Key topics |
 | --- | --- | --- |
-| Define phase behavior | [Training and Evaluation](training.md) | `StepOutput`, train/validation/test contracts, manual metrics, empty loaders, and result histories |
+| Define phase behavior | [Training and Evaluation](training.md) | `StepOutput`, fit/train/validate/test contracts, manual metrics, empty loaders, and result histories |
 | Calculate metrics correctly | [Metrics](metrics.md) | Callable metrics, `StatefulMetric`, `CollectedMetric`, weighting, state, and memory cost |
 | Reuse data construction | [DataPack Workflows](data-pack.md) | Charged data lifecycle, datasets, loader policy, deterministic setup, and state |
 | Use structured inputs | [Batches and Devices](batches-and-devices.md) | Tensor, tuple, dictionary, nested batches, multiple inputs, and automatic device transfer |
@@ -24,7 +24,7 @@ exact signature or event context.
 
 Read Training and Evaluation, Metrics, and Batches and Devices. Add DataPack when
 dataset and loader construction should be reusable. Add callbacks only
-after the basic train/validation/test workflow returns the results you expect.
+after the basic fit/validation/test workflow returns the results you expect.
 
 ### Long-running or resumable training
 

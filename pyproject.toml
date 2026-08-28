@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "torch-batteries"
-version = "0.10.0"
+version = "0.11.0"
 description = "A lightweight Python package that supplies batteries-included abstractions for PyTorch workflows"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -131,7 +131,8 @@ unfixable = []
 # Per-file ignores for test files
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["S101", "PLR2004", "ARG"]  # Allow asserts, magic values, and unused args in tests
-"src/torch_batteries/utils/metrics.py" = ["BLE001"]
+"src/torch_batteries/utils/metrics/calculate.py" = ["BLE001"]
+"src/torch_batteries/utils/metrics/phase_manager.py" = ["BLE001"]
 
 [tool.ruff.format]
 # Use double quotes for strings

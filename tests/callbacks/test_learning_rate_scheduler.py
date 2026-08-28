@@ -69,7 +69,7 @@ def test_plateau_scheduler_uses_selected_validation_metric() -> None:
     scheduler = ReduceLROnPlateau(optimizer, mode="min", patience=0, factor=0.5)
     callback = LearningRateScheduler(
         scheduler,
-        phase="val",
+        phase="validation",
         metric="loss",
     )
 
@@ -84,13 +84,14 @@ def test_deprecated_stage_alias(caplog: pytest.LogCaptureFixture) -> None:
     model = _Model()
     optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
 
-    callback = LearningRateScheduler(
-        ReduceLROnPlateau(optimizer),
-        stage="val",
-        metric="loss",
-    )
+    with pytest.warns(DeprecationWarning, match="'stage' is deprecated"):
+        callback = LearningRateScheduler(
+            ReduceLROnPlateau(optimizer),
+            stage="validation",
+            metric="loss",
+        )
 
-    assert callback._phase == "val"  # noqa: SLF001
+    assert callback._phase == "validation"  # noqa: SLF001
     assert "'stage' is deprecated; use 'phase' instead" in caplog.text
 
 
@@ -103,7 +104,7 @@ def test_rejects_phase_and_stage() -> None:
         LearningRateScheduler(
             ReduceLROnPlateau(optimizer),
             phase="train",
-            stage="val",
+            stage="validation",
             metric="loss",
         )
 
@@ -115,7 +116,7 @@ def test_validates_plateau_and_ordinary_scheduler_configuration() -> None:
     with pytest.raises(ValueError, match="requires interval='epoch'"):
         LearningRateScheduler(ReduceLROnPlateau(optimizer), interval="step")
     with pytest.raises(ValueError, match="only supported"):
-        LearningRateScheduler(StepLR(optimizer, 1), phase="val", metric="loss")
+        LearningRateScheduler(StepLR(optimizer, 1), phase="validation", metric="loss")
 
 
 def test_scheduler_state_round_trip() -> None:
@@ -142,13 +143,30 @@ def test_loads_legacy_scheduler_stage_state() -> None:
     optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
     callback = LearningRateScheduler(
         ReduceLROnPlateau(optimizer),
-        phase="val",
+        phase="validation",
         metric="loss",
     )
     state = callback.state_dict()
     state["stage"] = state.pop("phase")
 
-    callback.load_state_dict(state)
+    with pytest.warns(DeprecationWarning, match="'stage' is deprecated"):
+        callback.load_state_dict(state)
+
+
+def test_loads_legacy_scheduler_val_state() -> None:
+    """Legacy val checkpoint state normalizes to validation."""
+    model = _Model()
+    optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
+    callback = LearningRateScheduler(
+        ReduceLROnPlateau(optimizer),
+        phase="validation",
+        metric="loss",
+    )
+    state = callback.state_dict()
+    state["phase"] = "val"
+
+    with pytest.warns(DeprecationWarning, match="phase='val' is deprecated"):
+        callback.load_state_dict(state)
 
 
 @pytest.mark.parametrize(
@@ -183,7 +201,7 @@ def test_rejects_mismatched_scheduler_phase_state() -> None:
         metric="loss",
     )
     state = callback.state_dict()
-    state["phase"] = "val"
+    state["phase"] = "validation"
 
     with pytest.raises(ValueError, match="does not match"):
         callback.load_state_dict(state)
@@ -212,7 +230,7 @@ def test_validation_plateau_requires_validation_and_metric() -> None:
     optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
     callback = LearningRateScheduler(
         ReduceLROnPlateau(optimizer),
-        phase="val",
+        phase="validation",
         metric="loss",
     )
 
@@ -255,7 +273,7 @@ def test_scheduler_ignores_events_for_other_routes() -> None:
     ordinary = LearningRateScheduler(StepLR(optimizer, 1))
     validation_plateau = LearningRateScheduler(
         ReduceLROnPlateau(optimizer),
-        phase="val",
+        phase="validation",
         metric="loss",
     )
 

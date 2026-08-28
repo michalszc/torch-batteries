@@ -181,9 +181,7 @@ def test_data_pack_default_state_warns_about_unexpected_keys(
     ("kwargs", "message"),
     [
         ({"batch_size": 0}, "batch_size"),
-        ({"batch_size": True}, "batch_size"),
         ({"num_workers": -1}, "num_workers"),
-        ({"num_workers": True}, "num_workers"),
         ({"timeout": -1}, "timeout"),
         ({"prefetch_factor": 0}, "prefetch_factor"),
         ({"persistent_workers": True}, "persistent_workers"),
@@ -195,6 +193,33 @@ def test_loader_config_rejects_invalid_values(
 ) -> None:
     with pytest.raises(ValueError, match=message):
         DataLoaderConfig(**kwargs)
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "message"),
+    [
+        ({"batch_size": True}, "batch_size"),
+        ({"batch_size": 1.5}, "batch_size"),
+        ({"num_workers": True}, "num_workers"),
+        ({"num_workers": 1.5}, "num_workers"),
+        ({"timeout": "soon"}, "timeout"),
+        ({"prefetch_factor": True}, "prefetch_factor"),
+        ({"shuffle": "yes"}, "shuffle"),
+        ({"drop_last": 1}, "drop_last"),
+        ({"pin_memory": 1}, "pin_memory"),
+        ({"persistent_workers": 1}, "persistent_workers"),
+    ],
+)
+def test_loader_config_rejects_invalid_types(
+    kwargs: dict[str, Any], message: str
+) -> None:
+    with pytest.raises(TypeError, match=message):
+        DataLoaderConfig(**kwargs)
+
+
+def test_loader_config_rejects_invalid_pin_memory_option() -> None:
+    with pytest.raises(ValueError, match="pin_memory"):
+        DataLoaderConfig(pin_memory="yes")  # type: ignore[arg-type]
 
 
 def test_loader_config_rejects_sampler_with_shuffle() -> None:

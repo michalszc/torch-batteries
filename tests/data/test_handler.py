@@ -1,5 +1,6 @@
 """Tests for charged DataPack dispatch and DataLoader construction."""
 
+import logging
 from typing import Any
 
 import pytest
@@ -169,6 +170,19 @@ def test_data_pack_resolves_fit_without_a_battery() -> None:
     assert data_pack.calls == ["prepare", "setup", "loader:train", "teardown"]
 
 
+def test_data_pack_resolution_logs_lifecycle(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    data_pack = ExampleDataPack()
+    caplog.set_level(logging.DEBUG, logger="torch_batteries.data.handler")
+
+    with data_pack.resolve("fit"):
+        pass
+
+    assert "DataPack resolution started" in caplog.text
+    assert "DataPack teardown completed" in caplog.text
+
+
 @pytest.mark.parametrize("stage", ["test", "predict"])
 def test_data_pack_preserves_named_loader_shape(stage: str) -> None:
     first = TensorDataset(torch.arange(2))
@@ -277,8 +291,8 @@ def test_resolve_requires_the_primary_stage_dataset(stage: str, phase: str) -> N
         pass
 
 
-@pytest.mark.parametrize("seed", [True, -1, 1.5, "7"])
-def test_standalone_resolve_rejects_invalid_seed(seed: object) -> None:
+@pytest.mark.parametrize("seed", [True, 1.5, "7"])
+def test_standalone_resolve_rejects_invalid_seed_type(seed: object) -> None:
     class InvalidSeedDataPack(ExampleDataPack):
         seed: object = None
 
@@ -286,8 +300,19 @@ def test_standalone_resolve_rejects_invalid_seed(seed: object) -> None:
     data_pack.seed = seed
 
     with (
-        pytest.raises(ValueError, match="non-negative integer"),
+        pytest.raises(TypeError, match="integer or None"),
         data_pack.resolve("fit"),
+    ):
+        pass
+
+
+def test_standalone_resolve_rejects_negative_seed() -> None:
+    class InvalidSeedPack(ExampleDataPack):
+        seed = -1
+
+    with (
+        pytest.raises(ValueError, match="non-negative integer"),
+        InvalidSeedPack().resolve("fit"),
     ):
         pass
 
@@ -359,9 +384,12 @@ def test_resolve_tears_down_after_lifecycle_and_body_failures(failure: str) -> N
     assert data_pack.calls[-1] == "teardown"
 
 
-def test_phase_defaults_shuffle_only_map_style_training_data() -> None:
+def test_phase_defaults_shuffle_only_map_style_training_data(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     dataset = TensorDataset(torch.arange(8))
     generator = torch.Generator().manual_seed(3)
+    caplog.set_level(logging.DEBUG, logger="torch_batteries.data.loader")
 
     train_loader = materialize_dataloader(
         dataset,
@@ -381,6 +409,7 @@ def test_phase_defaults_shuffle_only_map_style_training_data() -> None:
     assert type(validation_loader.sampler).__name__ == "SequentialSampler"
     assert train_loader.generator is generator
     assert train_loader.pin_memory is False
+    assert "DataLoader materialized: phase=train" in caplog.text
 
 
 def test_cuda_device_enables_automatic_pin_memory() -> None:
@@ -426,7 +455,11 @@ class NumberStream(IterableDataset[int]):
         yield from range(4)
 
 
-def test_iterable_dataset_rejects_explicit_shuffle() -> None:
+def test_iterable_dataset_rejects_explicit_shuffle(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.ERROR, logger="torch_batteries.data.loader")
+
     with pytest.raises(ValueError, match="IterableDataset"):
         materialize_dataloader(
             NumberStream(),
@@ -434,6 +467,8 @@ def test_iterable_dataset_rejects_explicit_shuffle() -> None:
             phase="train",
             device=torch.device("cpu"),
         )
+
+    assert "Cannot enable shuffling for an IterableDataset" in caplog.text
 
 
 def test_multiple_provider_methods_are_rejected() -> None:
@@ -448,6 +483,33 @@ def test_multiple_provider_methods_are_rejected() -> None:
 
     with pytest.raises(ValueError, match="exactly one DataPack provider"):
         DataPackHandler(ConflictingPack())
+
+
+def test_stacked_data_pack_handler_serves_distinct_events() -> None:
+    calls: list[str] = []
+
+    class SharedLifecyclePack(DataPack):
+        @charge(Event.PREPARE_DATA)
+        @charge(Event.TEARDOWN_DATA)
+        def lifecycle(self, context: DataContext) -> None:
+            calls.append("teardown" if "datasets" in context else "prepare")
+
+    handler = DataPackHandler(SharedLifecyclePack())
+    handler.call(Event.PREPARE_DATA, {})
+    handler.call(Event.TEARDOWN_DATA, {"datasets": DatasetBundle()})
+
+    assert calls == ["prepare", "teardown"]
+
+
+def test_duplicate_stacked_data_event_is_rejected() -> None:
+    class DuplicatePack(DataPack):
+        @charge(Event.PREPARE_DATA)
+        @charge(Event.PREPARE_DATA)
+        def prepare(self, _: DataContext) -> None:
+            pass
+
+    with pytest.raises(ValueError, match="charged repeatedly"):
+        DataPackHandler(DuplicatePack())
 
 
 def test_data_pack_rejects_non_data_events() -> None:

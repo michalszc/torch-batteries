@@ -11,6 +11,9 @@ class SilentProgress(Progress):
 
     Tracks metrics internally but displays nothing to the console.
     Useful for production environments or when logging is handled externally.
+
+    Args:
+        total_epochs: Accepted for compatibility with other progress trackers.
     """
 
     __slots__ = (

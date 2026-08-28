@@ -1,48 +1,39 @@
 """Battery trainer class for torch-batteries."""
 
-import copy
-import tempfile
-from collections.abc import Generator, Iterator, Mapping
+from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, cast, overload
+from typing import Any, overload
 
 import torch
 from torch import nn
 from torch.utils.data import DataLoader
 
-from torch_batteries.callbacks.base import Callback
 from torch_batteries.data import DataPack, ResolvedData
 from torch_batteries.data.handler import DataPackHandler
 from torch_batteries.data.types import DataStage
-from torch_batteries.events import Event, EventContext, EventHandler, OptimizationStep
-from torch_batteries.trainer.context import (
-    copy_history_context,
-    dataset_identity_context,
-)
+from torch_batteries.events import Event, EventContext, EventHandler
 from torch_batteries.trainer.types import (
+    FitResult,
     PredictResult,
     StepOutput,
     TestResult,
     TrainResult,
+    ValidationResult,
 )
-from torch_batteries.utils.batch import get_batch_size
-from torch_batteries.utils.device import get_device, move_to_device
+from torch_batteries.utils.device import get_device
 from torch_batteries.utils.logging import get_logger
 from torch_batteries.utils.metrics import Metric, PhaseMetricManager
-from torch_batteries.utils.prediction import concatenate_predictions
-from torch_batteries.utils.progress import Phase, Progress, ProgressFactory
-from torch_batteries.utils.progress.types import (  # noqa: TC001
-    ProgressMetrics,
-)
 
-logger = get_logger("trainer")
+from ._checkpoint import CheckpointMixin
+from ._evaluation import EvaluationMixin
+from ._prediction import PredictionMixin
+from ._training import TrainingMixin
 
-_CHECKPOINT_SCHEMA_VERSION = 2
-_SUPPORTED_CHECKPOINT_SCHEMAS = {1, _CHECKPOINT_SCHEMA_VERSION}
+logger = get_logger("trainer.core")
 
 
-class Battery:
+class Battery(CheckpointMixin, TrainingMixin, EvaluationMixin, PredictionMixin):
     """Run event-driven training, evaluation, and prediction for a PyTorch model.
 
     ``Battery`` discovers model methods decorated with :func:`~torch_batteries.charge`
@@ -179,6 +170,256 @@ class Battery:
         """Set the stop_training flag."""
         self._stop_training = value
 
+    def save_checkpoint(self, path: str | Path) -> None:
+        """Save complete resumable training state atomically.
+
+        Args:
+            path: Destination checkpoint path. Parent directories are created.
+
+        Raises:
+            OSError: If the destination cannot be created or replaced.
+            Exception: If PyTorch serialization fails.
+        """
+        CheckpointMixin.save_checkpoint(self, path)
+
+    def load_checkpoint(self, path: str | Path) -> None:
+        """Restore a full checkpoint or raw model state.
+
+        Args:
+            path: Trusted checkpoint or model-state path.
+
+        Raises:
+            ValueError: If saved state is incompatible with this Battery.
+            TypeError: If the checkpoint structure is invalid.
+            RuntimeError: If strict PyTorch state restoration fails.
+        """
+        CheckpointMixin.load_checkpoint(self, path)
+
+    def train(  # noqa: PLR0913
+        self,
+        train_loader: DataLoader | None = None,
+        # Deprecated compatibility parameter; use fit(..., val_loader=...).
+        val_loader: DataLoader | None = None,
+        epochs: int = 1,
+        verbose: int = 1,
+        *,
+        resume_from: str | Path | None = None,
+        resume_epochs_mode: str = "total",
+    ) -> TrainResult:
+        """Train with explicit loaders or the attached DataPack.
+
+        Validation through this method is deprecated. Use ``fit`` for combined
+        training and validation. Calls without validation data do not warn.
+
+        Args:
+            train_loader: Optional sized, non-empty training loader.
+            val_loader: Deprecated. Optional validation loader for direct-loader
+                compatibility. Use ``fit`` for validated training.
+            epochs: Positive epoch count or resume target.
+            verbose: ``0`` for silent, ``1`` for bars, or ``2`` for summaries.
+            resume_from: Optional full checkpoint restored before data setup.
+            resume_epochs_mode: ``"total"`` or ``"additional"``.
+
+        Returns:
+            Per-epoch loss and named metric histories.
+        """
+        return TrainingMixin.train(
+            self,
+            train_loader,
+            val_loader,
+            epochs,
+            verbose,
+            resume_from=resume_from,
+            resume_epochs_mode=resume_epochs_mode,
+        )
+
+    def fit(  # noqa: PLR0913
+        self,
+        train_loader: DataLoader | None = None,
+        val_loader: DataLoader | None = None,
+        epochs: int = 1,
+        verbose: int = 1,
+        *,
+        resume_from: str | Path | None = None,
+        resume_epochs_mode: str = "total",
+    ) -> FitResult:
+        """Train with optional per-epoch validation.
+
+        Args:
+            train_loader: Optional sized, non-empty training loader.
+            val_loader: Optional validation loader for direct-loader mode.
+            epochs: Positive epoch count or resume target.
+            verbose: ``0`` for silent, ``1`` for bars, or ``2`` for summaries.
+            resume_from: Optional full checkpoint restored before data setup.
+            resume_epochs_mode: ``"total"`` or ``"additional"``.
+
+        Returns:
+            Per-epoch training histories and optional validation histories. Validation
+            histories are empty when validation data is unavailable.
+        """
+        return TrainingMixin.fit(
+            self,
+            train_loader,
+            val_loader,
+            epochs,
+            verbose,
+            resume_from=resume_from,
+            resume_epochs_mode=resume_epochs_mode,
+        )
+
+    def validate(
+        self,
+        val_loader: DataLoader | None = None,
+        verbose: int = 1,
+    ) -> ValidationResult:
+        """Run one standalone validation pass.
+
+        Args:
+            val_loader: Optional sized, non-empty validation loader. When omitted,
+                the attached DataPack must provide validation data.
+            verbose: ``0`` for silent, ``1`` for a bar, or ``2`` for a summary.
+
+        Returns:
+            Aggregate validation loss and optional named validation metrics.
+        """
+        return EvaluationMixin._validate(self, val_loader, verbose)  # noqa: SLF001
+
+    @overload
+    def test(
+        self,
+        test_loader: DataLoader,
+        verbose: int = 1,
+        *,
+        dataset: None = None,
+    ) -> TestResult: ...
+
+    @overload
+    def test(
+        self,
+        test_loader: None = None,
+        verbose: int = 1,
+        *,
+        dataset: str,
+    ) -> TestResult: ...
+
+    @overload
+    def test(
+        self,
+        test_loader: DataLoader | None = None,
+        verbose: int = 1,
+        *,
+        dataset: None = None,
+    ) -> TestResult | dict[str, TestResult]: ...
+
+    def test(
+        self,
+        test_loader: DataLoader | None = None,
+        verbose: int = 1,
+        *,
+        dataset: str | None = None,
+    ) -> TestResult | dict[str, TestResult]:
+        """Evaluate an explicit or DataPack-provided test dataset.
+
+        Args:
+            test_loader: Optional sized, non-empty test loader.
+            verbose: ``0`` for silent, ``1`` for a bar, or ``2`` for a summary.
+            dataset: Optional DataPack test dataset name.
+
+        Returns:
+            One result or a mapping of named DataPack results.
+        """
+        return EvaluationMixin._test(self, test_loader, verbose, dataset=dataset)  # noqa: SLF001
+
+    @overload
+    def predict(
+        self,
+        data_loader: DataLoader,
+        verbose: int = 1,
+        *,
+        move_to_cpu: bool = False,
+        concatenate: bool = False,
+        dataset: None = None,
+    ) -> PredictResult: ...
+
+    @overload
+    def predict(
+        self,
+        data_loader: None = None,
+        verbose: int = 1,
+        *,
+        move_to_cpu: bool = False,
+        concatenate: bool = False,
+        dataset: str,
+    ) -> PredictResult: ...
+
+    @overload
+    def predict(
+        self,
+        data_loader: DataLoader | None = None,
+        verbose: int = 1,
+        *,
+        move_to_cpu: bool = False,
+        concatenate: bool = False,
+        dataset: None = None,
+    ) -> PredictResult | dict[str, PredictResult]: ...
+
+    def predict(
+        self,
+        data_loader: DataLoader | None = None,
+        verbose: int = 1,
+        *,
+        move_to_cpu: bool = False,
+        concatenate: bool = False,
+        dataset: str | None = None,
+    ) -> PredictResult | dict[str, PredictResult]:
+        """Collect predictions from an explicit or DataPack loader.
+
+        Args:
+            data_loader: Optional sized, non-empty prediction loader.
+            verbose: ``0`` for silent, ``1`` for a bar, or ``2`` for a summary.
+            move_to_cpu: Detach tensor outputs and move them to CPU.
+            concatenate: Concatenate compatible batch output structures.
+            dataset: Optional DataPack prediction dataset name.
+
+        Returns:
+            One prediction result or a mapping of named results.
+        """
+        return PredictionMixin._predict(  # noqa: SLF001
+            self,
+            data_loader,
+            verbose,
+            move_to_cpu=move_to_cpu,
+            concatenate=concatenate,
+            dataset=dataset,
+        )
+
+    def predict_iter(
+        self,
+        data_loader: DataLoader | None = None,
+        verbose: int = 1,
+        *,
+        move_to_cpu: bool = False,
+        dataset: str | None = None,
+    ) -> Generator[Any]:
+        """Yield predictions from an explicit or DataPack loader.
+
+        Args:
+            data_loader: Optional sized, non-empty prediction loader.
+            verbose: ``0`` for silent, ``1`` for a bar, or ``2`` for a summary.
+            move_to_cpu: Detach tensor outputs and move them to CPU.
+            dataset: Optional DataPack prediction dataset name.
+
+        Yields:
+            One prediction-step output at a time.
+        """
+        yield from PredictionMixin.predict_iter(
+            self,
+            data_loader,
+            verbose,
+            move_to_cpu=move_to_cpu,
+            dataset=dataset,
+        )
+
     @contextmanager
     def _data_workflow(
         self,
@@ -271,8 +512,11 @@ class Battery:
         return self._validate_loss(result, phase), {}, None, None
 
     @staticmethod
-    def _validate_loader(dataloader: DataLoader, name: str) -> None:
+    def _validate_loader(dataloader: object, name: str) -> None:
         """Require a sized, non-empty data loader."""
+        if not isinstance(dataloader, DataLoader):
+            msg = f"{name} loader must be a torch.utils.data.DataLoader."
+            raise TypeError(msg)
         try:
             number_of_batches = len(dataloader)
         except TypeError as error:
@@ -308,1577 +552,3 @@ class Battery:
                 "Please add a validation step method to your model."
             )
             raise ValueError(msg)
-
-    def _checkpoint_callbacks(self) -> list[Callback]:
-        """Return configured callbacks participating in checkpoint state."""
-        return [
-            callback for callback in self._callbacks if isinstance(callback, Callback)
-        ]
-
-    @staticmethod
-    def _callback_identifier(callback: Callback) -> str:
-        callback_type = type(callback)
-        return f"{callback_type.__module__}.{callback_type.__qualname__}"
-
-    @staticmethod
-    def _data_pack_identifier(data_pack: DataPack) -> str:
-        """Return the stable qualified identifier stored in checkpoints."""
-        data_pack_type = type(data_pack)
-        return f"{data_pack_type.__module__}.{data_pack_type.__qualname__}"
-
-    def _checkpoint_data_pack(self) -> dict[str, Any] | None:
-        """Build and validate resumable DataPack state."""
-        if self._data_pack is None:
-            return None
-        state: object = self._data_pack.state_dict()
-        if not isinstance(state, dict):
-            msg = "DataPack state_dict() must return a dictionary."
-            raise TypeError(msg)
-        return {
-            "type": self._data_pack_identifier(self._data_pack),
-            "state": state,
-        }
-
-    def _restore_checkpoint_data_pack(
-        self,
-        payload: dict[str, Any],
-        schema_version: int,
-    ) -> None:
-        """Validate and restore DataPack state for schema version 2 and newer."""
-        if schema_version < 2:
-            return
-        if "data_pack" not in payload:
-            msg = "Training checkpoint is missing fields: ['data_pack']."
-            raise ValueError(msg)
-        saved_data_pack = payload["data_pack"]
-        if saved_data_pack is None:
-            if self._data_pack is not None:
-                msg = "Configured DataPack does not match checkpoint state."
-                raise ValueError(msg)
-            return
-        if not isinstance(saved_data_pack, dict):
-            msg = "Invalid DataPack state in training checkpoint."
-            raise TypeError(msg)
-        saved_type = saved_data_pack.get("type")
-        saved_state = saved_data_pack.get("state")
-        if not isinstance(saved_type, str) or not isinstance(saved_state, dict):
-            msg = "Invalid DataPack state in training checkpoint."
-            raise TypeError(msg)
-        if self._data_pack is None:
-            msg = "Checkpoint requires a configured DataPack."
-            raise ValueError(msg)
-        expected_type = self._data_pack_identifier(self._data_pack)
-        if saved_type != expected_type:
-            msg = (
-                "Configured DataPack does not match checkpoint state: "
-                f"expected '{saved_type}', got '{expected_type}'."
-            )
-            raise ValueError(msg)
-        self._data_pack.load_state_dict(saved_state)
-
-    def save_checkpoint(self, path: str | Path) -> None:
-        """Atomically save complete resumable training state.
-
-        The payload contains model and optimizer state, resumable callback, metric,
-        and DataPack state, the last completed epoch, optimizer-step index, and
-        accumulated results. Parent directories are created automatically and the
-        final path is replaced only after serialization succeeds.
-
-        Args:
-            path: Destination checkpoint path.
-
-        Raises:
-            OSError: If the destination cannot be created or replaced.
-            Exception: Propagates serialization errors raised by :func:`torch.save`.
-
-        Warning:
-            PyTorch checkpoints should only be loaded from trusted sources.
-        """
-        checkpoint_path = Path(path)
-        checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
-        callbacks = self._checkpoint_callbacks()
-        payload: dict[str, Any] = {
-            "__torch_batteries_checkpoint__": _CHECKPOINT_SCHEMA_VERSION,
-            "model": self._model.state_dict(),
-            "optimizer": (
-                self._optimizer.state_dict() if self._optimizer is not None else None
-            ),
-            "callbacks": [
-                {
-                    "type": self._callback_identifier(callback),
-                    "state": callback.state_dict(),
-                }
-                for callback in callbacks
-            ],
-            "metrics": self._metric_manager.state_dict(),
-            "epoch": self._last_completed_epoch,
-            "optimizer_step_idx": self._optimizer_step_idx,
-            "results": copy.deepcopy(self._train_results),
-            "data_pack": self._checkpoint_data_pack(),
-        }
-        temporary_name: str | None = None
-        try:
-            with tempfile.NamedTemporaryFile(
-                dir=checkpoint_path.parent,
-                prefix=f".{checkpoint_path.name}.",
-                suffix=".tmp",
-                delete=False,
-            ) as temporary:
-                temporary_name = temporary.name
-            torch.save(payload, temporary_name)
-            Path(temporary_name).replace(checkpoint_path)
-        except Exception:
-            logger.exception("Failed to save checkpoint at %s.", checkpoint_path)
-            if temporary_name is not None:
-                Path(temporary_name).unlink(missing_ok=True)
-            raise
-        logger.info(
-            "Training checkpoint saved: path=%s, epoch=%d, optimizer_step=%d",
-            checkpoint_path,
-            self._last_completed_epoch,
-            self._optimizer_step_idx,
-        )
-
-    @staticmethod
-    def _is_raw_model_state(payload: object) -> bool:
-        return (
-            isinstance(payload, dict)
-            and bool(payload)
-            and all(isinstance(key, str) for key in payload)
-            and all(isinstance(value, torch.Tensor) for value in payload.values())
-        )
-
-    @staticmethod
-    def _validate_checkpoint_schema(
-        payload: object, checkpoint_path: Path
-    ) -> dict[str, Any]:
-        """Validate and narrow a full-checkpoint payload."""
-        if not isinstance(payload, dict):
-            logger.error("Checkpoint at %s is not a mapping.", checkpoint_path)
-            msg = "Torch-batteries checkpoint structure must be a mapping."
-            raise TypeError(msg)
-
-        schema_version = payload.get("__torch_batteries_checkpoint__")
-        if schema_version is None:
-            logger.error("Unrecognized checkpoint structure at %s.", checkpoint_path)
-            msg = "Unrecognized torch-batteries checkpoint structure."
-            raise ValueError(msg)
-        if schema_version not in _SUPPORTED_CHECKPOINT_SCHEMAS:
-            logger.error(
-                "Unsupported checkpoint schema %r at %s; supported schemas are %s.",
-                schema_version,
-                checkpoint_path,
-                sorted(_SUPPORTED_CHECKPOINT_SCHEMAS),
-            )
-            msg = (
-                f"Checkpoint schema {schema_version!r} is unsupported; "
-                f"supported schemas are {sorted(_SUPPORTED_CHECKPOINT_SCHEMAS)}."
-            )
-            raise ValueError(msg)
-        return payload
-
-    @staticmethod
-    def _move_optimizer_state(value: Any, device: torch.device) -> Any:
-        if isinstance(value, torch.Tensor):
-            return value.to(device)
-        if isinstance(value, dict):
-            return {
-                key: Battery._move_optimizer_state(item, device)
-                for key, item in value.items()
-            }
-        if isinstance(value, list):
-            return [Battery._move_optimizer_state(item, device) for item in value]
-        if isinstance(value, tuple):
-            return tuple(Battery._move_optimizer_state(item, device) for item in value)
-        return value
-
-    def load_checkpoint(  # noqa: PLR0915
-        self, path: str | Path
-    ) -> None:
-        """Load full training state or auto-detected raw model weights.
-
-        Full checkpoints are restored strictly: the model, optimizer availability,
-        ordered resumable callbacks, stateful metrics, and saved DataPack type must
-        match the current ``Battery`` configuration. DataPack state is restored before
-        a later implicit setup, and optimizer tensors are moved to this battery's
-        device. A raw model ``state_dict`` is accepted as weights-only input but does
-        not mark training as resumable.
-
-        Args:
-            path: Full checkpoint or raw model-state path.
-
-        Raises:
-            ValueError: If the schema or configured callback/metric state differs.
-            TypeError: If the serialized payload has an invalid structure.
-            RuntimeError: If strict model or optimizer restoration fails.
-
-        Warning:
-            Load only checkpoints from trusted sources.
-        """
-        checkpoint_path = Path(path)
-        try:
-            payload = torch.load(
-                checkpoint_path,
-                map_location=self._device,
-                weights_only=True,
-            )
-        except Exception:
-            logger.exception("Failed to read checkpoint at %s.", checkpoint_path)
-            raise
-
-        if self._is_raw_model_state(payload):
-            logger.warning(
-                "Raw model state detected at %s; training state was not restored.",
-                checkpoint_path,
-            )
-            self._model.load_state_dict(payload, strict=True)
-            self._resume_loaded = False
-            return
-
-        payload = self._validate_checkpoint_schema(payload, checkpoint_path)
-        schema_version = int(payload["__torch_batteries_checkpoint__"])
-        required = {
-            "model",
-            "optimizer",
-            "callbacks",
-            "metrics",
-            "epoch",
-            "optimizer_step_idx",
-            "results",
-        }
-        if not required.issubset(payload):
-            missing = sorted(required - set(payload))
-            logger.error("Checkpoint is missing required fields: %s", missing)
-            msg = f"Training checkpoint is missing fields: {missing}."
-            raise ValueError(msg)
-
-        self._restore_checkpoint_data_pack(payload, schema_version)
-
-        self._model.load_state_dict(payload["model"], strict=True)
-        saved_optimizer = payload["optimizer"]
-        if saved_optimizer is not None:
-            if self._optimizer is None:
-                logger.error(
-                    "Checkpoint contains optimizer state but Battery does not."
-                )
-                msg = "An optimizer is required to resume this checkpoint."
-                raise ValueError(msg)
-            self._optimizer.load_state_dict(saved_optimizer)
-            self._optimizer.state = self._move_optimizer_state(
-                self._optimizer.state, self._device
-            )
-
-        saved_callbacks = payload["callbacks"]
-        callbacks = self._checkpoint_callbacks()
-        expected_ids = [self._callback_identifier(item) for item in callbacks]
-        if not isinstance(saved_callbacks, list):
-            logger.error("Checkpoint callback state is not a list.")
-            msg = "Invalid callback state in training checkpoint."
-            raise TypeError(msg)
-        actual_ids = [
-            item.get("type") if isinstance(item, dict) else None
-            for item in saved_callbacks
-        ]
-        if actual_ids != expected_ids:
-            logger.error(
-                "Callback state mismatch: expected=%s, actual=%s",
-                expected_ids,
-                actual_ids,
-            )
-            msg = "Configured callbacks do not match checkpoint state."
-            raise ValueError(msg)
-        for callback, saved in zip(callbacks, saved_callbacks, strict=True):
-            callback.load_state_dict(saved["state"])
-
-        metrics_state = payload["metrics"]
-        if not isinstance(metrics_state, dict):
-            logger.error("Checkpoint metric state is not a dictionary.")
-            msg = "Invalid metric state in training checkpoint."
-            raise TypeError(msg)
-        self._metric_manager.load_state_dict(metrics_state)
-        self._last_completed_epoch = int(payload["epoch"])
-        self._optimizer_step_idx = int(payload["optimizer_step_idx"])
-        results = payload["results"]
-        if not isinstance(results, dict):
-            logger.error("Checkpoint training results are not a dictionary.")
-            msg = "Invalid training history in checkpoint."
-            raise TypeError(msg)
-        self._train_results = cast("TrainResult", copy.deepcopy(results))
-        self._resume_loaded = True
-        logger.info(
-            "Training checkpoint restored: path=%s, epoch=%d, optimizer_step=%d",
-            checkpoint_path,
-            self._last_completed_epoch,
-            int(payload["optimizer_step_idx"]),
-        )
-
-    def train(  # noqa: PLR0913
-        self,
-        train_loader: DataLoader | None = None,
-        val_loader: DataLoader | None = None,
-        epochs: int = 1,
-        verbose: int = 1,
-        *,
-        resume_from: str | Path | None = None,
-        resume_epochs_mode: str = "total",
-    ) -> TrainResult:
-        """Train the model for one or more epochs.
-
-        Passing ``train_loader`` selects direct-loader mode. When it is omitted, the
-        attached DataPack supplies train and optional validation loaders. A checkpoint
-        passed through ``resume_from`` is restored before DataPack setup.
-
-        Args:
-            train_loader: Optional sized, non-empty training loader.
-            val_loader: Optional validation loader used only with an explicit train
-                loader. Implicit validation comes from the DataPack.
-            epochs: Positive epoch count or resume target.
-            verbose: ``0`` for silent, ``1`` for progress bars, or ``2`` for summaries.
-            resume_from: Optional full checkpoint restored before data resolution.
-            resume_epochs_mode: ``"total"`` treats ``epochs`` as the final target;
-                ``"additional"`` runs that many new epochs.
-
-        Returns:
-            Per-epoch loss histories and named metric histories.
-
-        Raises:
-            ValueError: If loaders, DataPack datasets, handlers, optimizer, resume
-                mode, or checkpoint state are incompatible.
-        """
-        if epochs <= 0:
-            msg = "epochs must be greater than zero."
-            raise ValueError(msg)
-        if resume_epochs_mode not in {"total", "additional"}:
-            logger.error("Unsupported resume epochs mode: %s", resume_epochs_mode)
-            msg = "resume_epochs_mode must be 'total' or 'additional'."
-            raise ValueError(msg)
-        if resume_from is not None:
-            self.load_checkpoint(resume_from)
-
-        if train_loader is not None:
-            return self._train_with_loaders(
-                train_loader,
-                val_loader,
-                epochs,
-                verbose,
-                resume_epochs_mode=resume_epochs_mode,
-            )
-        if val_loader is not None:
-            msg = (
-                "An explicit validation loader cannot be combined with an implicit "
-                "DataPack training loader."
-            )
-            raise ValueError(msg)
-        with self._data_workflow("fit") as workflow:
-            train_loaders = workflow.loaders.loaders_for_phase("train")
-            validation_loaders = workflow.loaders.loaders_for_phase("validation")
-            return self._train_with_loaders(
-                next(iter(train_loaders.values())),
-                next(iter(validation_loaders.values()), None),
-                epochs,
-                verbose,
-                resume_epochs_mode=resume_epochs_mode,
-            )
-
-    def _train_with_loaders(  # noqa: PLR0912, PLR0915
-        self,
-        train_loader: DataLoader,
-        val_loader: DataLoader | None = None,
-        epochs: int = 1,
-        verbose: int = 1,
-        *,
-        resume_epochs_mode: str = "total",
-    ) -> TrainResult:
-        """Train the model for one or more epochs.
-
-        A fresh call resets history and optimizer-step counters. A checkpoint loaded
-        before this method is called continues its stored history. With
-        ``resume_epochs_mode="total"``, ``epochs`` is the final epoch target; with
-        ``"additional"``, it is the number of new epochs to run.
-
-        Args:
-            train_loader: Sized, non-empty training loader.
-            val_loader: Optional sized, non-empty validation loader. Supplying one
-                requires a method charged for ``Event.VALIDATION_STEP``.
-            epochs: Positive epoch count or resume target, depending on
-                ``resume_epochs_mode``.
-            verbose: ``0`` for silent, ``1`` for progress bars, or ``2`` for summaries.
-            resume_epochs_mode: ``"total"`` or ``"additional"``.
-
-        Returns:
-            Per-epoch loss histories and named metric histories. Validation entries
-            remain empty when no validation loader is supplied.
-
-        Raises:
-            ValueError: If inputs, handlers, resume mode, or checkpoint state are
-                incompatible.
-            TypeError: If a step result has an unsupported structure.
-        """
-        self._validate_train_inputs(train_loader, val_loader)
-        resumed = self._resume_loaded
-        self._stop_training = False
-        if not resumed:
-            self._optimizer_step_idx = 0
-            self._last_completed_epoch = 0
-            self._train_results = {
-                "train_loss": [],
-                "val_loss": [],
-                "train_metrics": {},
-                "val_metrics": {},
-            }
-        logger.info(
-            "Training started: epochs=%d, train_batches=%d, validation=%s",
-            epochs,
-            len(train_loader),
-            val_loader is not None,
-        )
-
-        context: EventContext = {
-            "battery": self,
-            "model": self._model,
-            "optimizer": self._optimizer,
-            "resumed": resumed,
-        }
-        self._event_handler.call(Event.BEFORE_TRAIN, context)
-
-        results = copy.deepcopy(self._train_results)
-
-        train_metrics: dict[str, float] = {}
-        val_metrics: dict[str, float] = {}
-        last_epoch = self._last_completed_epoch
-        start_epoch = self._last_completed_epoch + 1
-        stop_epoch = (
-            epochs + 1 if resume_epochs_mode == "total" else start_epoch + epochs
-        )
-        if resumed and stop_epoch <= start_epoch:
-            logger.error(
-                "Resume target does not include new epochs: start=%d, stop=%d",
-                start_epoch,
-                stop_epoch,
-            )
-            msg = "Requested resume target does not contain any new epochs."
-            raise ValueError(msg)
-
-        progress = ProgressFactory.create(
-            verbose=verbose,
-            total_epochs=stop_epoch - 1,
-        )
-        for epoch in range(start_epoch, stop_epoch):
-            if self._stop_training:
-                logger.info("Training stopped early at epoch %d.", epoch)
-                break
-
-            logger.debug("Training epoch started: epoch=%d", epoch)
-            progress.start_epoch(epoch)
-
-            try:
-                train_metrics = self._train_epoch(train_loader, progress, epoch)
-            except BaseException:
-                progress.abort()
-                raise
-            results["train_loss"].append(train_metrics["loss"])
-
-            for key, value in train_metrics.items():
-                if key != "loss":
-                    if key not in results["train_metrics"]:
-                        results["train_metrics"][key] = []
-                    results["train_metrics"][key].append(value)
-            self._last_completed_epoch = epoch
-            self._train_results = copy.deepcopy(results)
-
-            after_epoch_context: EventContext = {
-                "battery": self,
-                "model": self._model,
-                "optimizer": self._optimizer,
-                "epoch": epoch,
-                "train_metrics": train_metrics,
-                **copy_history_context(results),
-            }
-            self._event_handler.call(Event.AFTER_TRAIN_EPOCH, after_epoch_context)
-
-            if val_loader:
-                logger.debug("Validation phase started: epoch=%d", epoch)
-                before_val_context: EventContext = {
-                    "battery": self,
-                    "model": self._model,
-                    "optimizer": self._optimizer,
-                    "epoch": epoch,
-                    "train_metrics": train_metrics,
-                    **copy_history_context(results),
-                }
-                self._event_handler.call(Event.BEFORE_VALIDATION, before_val_context)
-
-                try:
-                    val_metrics = self._validate_epoch(val_loader, progress, epoch)
-                except BaseException:
-                    progress.abort()
-                    raise
-                results["val_loss"].append(val_metrics["loss"])
-
-                for key, value in val_metrics.items():
-                    if key != "loss":
-                        if key not in results["val_metrics"]:
-                            results["val_metrics"][key] = []
-                        results["val_metrics"][key].append(value)
-                self._train_results = copy.deepcopy(results)
-
-                after_val_context: EventContext = {
-                    "battery": self,
-                    "model": self._model,
-                    "optimizer": self._optimizer,
-                    "epoch": epoch,
-                    "train_metrics": train_metrics,
-                    "val_metrics": val_metrics,
-                    **copy_history_context(results),
-                }
-                self._event_handler.call(Event.AFTER_VALIDATION, after_val_context)
-                logger.debug(
-                    "Validation phase completed: epoch=%d, metrics=%s",
-                    epoch,
-                    val_metrics,
-                )
-
-            progress.end_epoch()
-            logger.debug(
-                "Training epoch completed: epoch=%d, train_metrics=%s",
-                epoch,
-                train_metrics,
-            )
-            last_epoch = epoch
-
-        progress.end_training()
-
-        after_train_context: EventContext = {
-            "battery": self,
-            "model": self._model,
-            "optimizer": self._optimizer,
-            "epoch": last_epoch,
-            "train_metrics": train_metrics,
-            **copy_history_context(results),
-        }
-        if val_loader and val_metrics:
-            after_train_context["val_metrics"] = val_metrics
-        self._event_handler.call(Event.AFTER_TRAIN, after_train_context)
-        self._train_results = copy.deepcopy(results)
-        self._last_completed_epoch = last_epoch
-        self._resume_loaded = False
-        logger.info(
-            "Training completed: completed_epochs=%d, stopped_early=%s",
-            len(results["train_loss"]),
-            self._stop_training,
-        )
-
-        return results
-
-    def _configure_optimization_step(
-        self,
-        batch: Any,
-        batch_idx: int,
-        total_batches: int,
-        epoch: int,
-    ) -> tuple[OptimizationStep, EventContext]:
-        """Resolve the optimization plan and its shared batch context."""
-        context: EventContext = {
-            "battery": self,
-            "model": self._model,
-            "optimizer": self._optimizer,
-            "device": self._device,
-            "phase": "train",
-            "batch": batch,
-            "batch_idx": batch_idx,
-            "total_batches": total_batches,
-            "epoch": epoch,
-            "optimizer_step_idx": self._optimizer_step_idx,
-        }
-        plan = self._event_handler.provide(
-            Event.CONFIGURE_TRAIN_STEP,
-            context,
-            default=OptimizationStep(),
-        )
-        if not isinstance(plan, OptimizationStep):
-            logger.error(
-                "Train-step provider returned %s instead of OptimizationStep.",
-                type(plan).__name__,
-            )
-            msg = "CONFIGURE_TRAIN_STEP handler must return an OptimizationStep."
-            raise TypeError(msg)
-        context["optimization_plan"] = plan
-        context["optimizer_step"] = plan.optimizer_step
-        return plan, context
-
-    def _run_optimization(
-        self,
-        loss: torch.Tensor,
-        plan: OptimizationStep,
-        context: EventContext,
-    ) -> None:
-        """Run backward and an optional optimizer step through generic events."""
-        backward_context: EventContext = {
-            **context,
-            "loss_tensor": loss,
-            "backward_loss": loss / plan.loss_divisor,
-        }
-        self._event_handler.call(Event.BEFORE_BACKWARD, backward_context)
-        backward_loss = backward_context.get("backward_loss")
-        if not isinstance(backward_loss, torch.Tensor):
-            logger.error("BEFORE_BACKWARD produced a non-tensor backward loss.")
-            msg = "BEFORE_BACKWARD must leave backward_loss as a torch.Tensor."
-            raise TypeError(msg)
-        if not self._event_handler.execute(Event.BACKWARD, backward_context):
-            backward_loss.backward()
-        self._event_handler.call(Event.AFTER_BACKWARD, backward_context)
-        if not plan.optimizer_step:
-            return
-
-        self._event_handler.call(Event.BEFORE_GRADIENT_CLIP, backward_context)
-        self._event_handler.execute(Event.GRADIENT_CLIP, backward_context)
-        self._event_handler.call(Event.BEFORE_OPTIMIZER_STEP, backward_context)
-        if not self._event_handler.execute(Event.OPTIMIZER_STEP, backward_context):
-            self._optimizer.step()  # type: ignore[union-attr]
-        self._optimizer_step_idx += 1
-        backward_context["optimizer_step_idx"] = self._optimizer_step_idx
-        self._event_handler.call(Event.AFTER_OPTIMIZER_STEP, backward_context)
-
-    def _train_epoch(
-        self, dataloader: DataLoader, progress: Progress, epoch: int
-    ) -> dict[str, float]:
-        """Run a single training epoch.
-
-        Args:
-            dataloader: Training data loader
-            progress: Progress tracker instance
-            epoch: Current epoch number
-
-        Returns:
-            Dictionary with average loss and any additional metrics for the epoch
-        """
-        # Trigger BEFORE_TRAIN_EPOCH event
-        epoch_context: EventContext = {
-            "battery": self,
-            "model": self._model,
-            "optimizer": self._optimizer,
-            "epoch": epoch,
-        }
-        self._event_handler.call(Event.BEFORE_TRAIN_EPOCH, epoch_context)
-
-        self._model.train()
-
-        progress.start_phase(Phase.TRAIN, total_batches=len(dataloader))
-        self._metric_manager.reset()
-        manual_metric_names: set[str] = set()
-        logger.debug("Training phase started: epoch=%d", epoch)
-
-        total_batches = len(dataloader)
-        for batch_idx, batch_data in enumerate(dataloader):
-            batch = move_to_device(batch_data, self._device)
-
-            optimization_plan, before_step_context = self._configure_optimization_step(
-                batch,
-                batch_idx,
-                total_batches,
-                epoch,
-            )
-
-            if optimization_plan.zero_grad:
-                # Optimizer is guaranteed to be non-None by train() method
-                self._optimizer.zero_grad()  # type: ignore[union-attr]
-                logger.debug(
-                    "Gradients cleared: epoch=%d, batch=%d",
-                    epoch,
-                    batch_idx,
-                )
-            self._event_handler.call(Event.BEFORE_TRAIN_STEP, before_step_context)
-
-            step_context: EventContext = {
-                **before_step_context,
-            }
-            with self._event_handler.execution_context(
-                Event.STEP_EXECUTION_CONTEXT, step_context
-            ):
-                result = self._event_handler.call(Event.TRAIN_STEP, step_context)
-
-            loss, step_metrics, predictions, targets = self._parse_step_result(
-                result, "Training"
-            )
-            automatic_metrics = (
-                self._metric_manager.update(predictions, targets)
-                if predictions is not None and targets is not None
-                else {}
-            )
-            manual_metric_names.update(step_metrics)
-
-            self._run_optimization(loss, optimization_plan, before_step_context)
-            optimizer_step = optimization_plan.optimizer_step
-
-            batch_metrics = {
-                "loss": loss.item(),
-                **automatic_metrics,
-                **step_metrics,
-            }
-            logger.debug(
-                "Training step completed: epoch=%d, batch=%d, metrics=%s",
-                epoch,
-                batch_idx,
-                batch_metrics,
-            )
-
-            after_step_context: EventContext = {
-                "battery": self,
-                "model": self._model,
-                "optimizer": self._optimizer,
-                "batch": batch,
-                "batch_idx": batch_idx,
-                "epoch": epoch,
-                "loss": loss.item(),
-                "train_loss": loss.item(),
-                "train_metrics": batch_metrics,
-                "optimizer_step": optimizer_step,
-                "optimizer_step_idx": self._optimizer_step_idx,
-                "optimization_plan": optimization_plan,
-            }
-            self._event_handler.call(Event.AFTER_TRAIN_STEP, after_step_context)
-
-            num_samples = get_batch_size(batch)
-            progress.update(cast("ProgressMetrics", batch_metrics), num_samples)
-
-        avg_metrics = progress.end_phase()
-        train_metrics = (
-            avg_metrics if isinstance(avg_metrics, dict) else {"loss": avg_metrics}
-        )
-        train_metrics.update(
-            {
-                name: value
-                for name, value in self._metric_manager.compute().items()
-                if name not in manual_metric_names
-            }
-        )
-        logger.debug(
-            "Training phase completed: epoch=%d, metrics=%s",
-            epoch,
-            train_metrics,
-        )
-        return train_metrics
-
-    def _validate_epoch(
-        self, dataloader: DataLoader, progress: Progress, epoch: int
-    ) -> dict[str, float]:
-        """Run a single validation epoch.
-
-        Args:
-            dataloader: Validation data loader
-            progress: Progress tracker instance
-            epoch: Current epoch number
-
-        Returns:
-            Dictionary with average loss and any additional metrics for the epoch
-        """
-        if not self._event_handler.has_handler(Event.VALIDATION_STEP):
-            msg = (
-                "No method decorated with @charge(Event.VALIDATION_STEP) found. "
-                "Please add a validation step method to your model."
-            )
-            raise ValueError(msg)
-
-        # Trigger BEFORE_VALIDATION_EPOCH event
-        before_val_epoch_context: EventContext = {
-            "battery": self,
-            "model": self._model,
-            "epoch": epoch,
-        }
-        self._event_handler.call(
-            Event.BEFORE_VALIDATION_EPOCH, before_val_epoch_context
-        )
-
-        self._model.eval()
-
-        progress.start_phase(Phase.VALIDATION, total_batches=len(dataloader))
-        self._metric_manager.reset()
-        manual_metric_names: set[str] = set()
-
-        with torch.no_grad():
-            for batch_idx, batch_data in enumerate(dataloader):
-                batch = move_to_device(batch_data, self._device)
-
-                before_step_context: EventContext = {
-                    "battery": self,
-                    "model": self._model,
-                    "optimizer": self._optimizer,
-                    "device": self._device,
-                    "phase": "validation",
-                    "batch": batch,
-                    "batch_idx": batch_idx,
-                    "epoch": epoch,
-                }
-                self._event_handler.call(
-                    Event.BEFORE_VALIDATION_STEP, before_step_context
-                )
-
-                step_context: EventContext = {
-                    **before_step_context,
-                }
-                with self._event_handler.execution_context(
-                    Event.STEP_EXECUTION_CONTEXT, step_context
-                ):
-                    result = self._event_handler.call(
-                        Event.VALIDATION_STEP, step_context
-                    )
-
-                loss, step_metrics, predictions, targets = self._parse_step_result(
-                    result, "Validation"
-                )
-                automatic_metrics = (
-                    self._metric_manager.update(predictions, targets)
-                    if predictions is not None and targets is not None
-                    else {}
-                )
-                manual_metric_names.update(step_metrics)
-                batch_metrics = {
-                    "loss": loss.item(),
-                    **automatic_metrics,
-                    **step_metrics,
-                }
-                logger.debug(
-                    "Validation step completed: epoch=%d, batch=%d, metrics=%s",
-                    epoch,
-                    batch_idx,
-                    batch_metrics,
-                )
-
-                after_step_context: EventContext = {
-                    "battery": self,
-                    "model": self._model,
-                    "batch": batch,
-                    "batch_idx": batch_idx,
-                    "epoch": epoch,
-                    "loss": loss.item(),
-                    "val_loss": loss.item(),
-                    "val_metrics": batch_metrics,
-                }
-                self._event_handler.call(
-                    Event.AFTER_VALIDATION_STEP, after_step_context
-                )
-
-                num_samples = get_batch_size(batch)
-                progress.update(cast("ProgressMetrics", batch_metrics), num_samples)
-
-        avg_metrics = progress.end_phase()
-        val_metrics = (
-            avg_metrics if isinstance(avg_metrics, dict) else {"loss": avg_metrics}
-        )
-        val_metrics.update(
-            {
-                name: value
-                for name, value in self._metric_manager.compute().items()
-                if name not in manual_metric_names
-            }
-        )
-
-        # Trigger AFTER_VALIDATION_EPOCH event
-        after_val_epoch_context: EventContext = {
-            "battery": self,
-            "model": self._model,
-            "epoch": epoch,
-            "val_metrics": val_metrics,
-        }
-        self._event_handler.call(Event.AFTER_VALIDATION_EPOCH, after_val_epoch_context)
-
-        return val_metrics
-
-    @overload
-    def test(
-        self,
-        test_loader: DataLoader,
-        verbose: int = 1,
-        *,
-        dataset: None = None,
-    ) -> TestResult: ...
-
-    @overload
-    def test(
-        self,
-        test_loader: None = None,
-        verbose: int = 1,
-        *,
-        dataset: str,
-    ) -> TestResult: ...
-
-    @overload
-    def test(
-        self,
-        test_loader: DataLoader | None = None,
-        verbose: int = 1,
-        *,
-        dataset: None = None,
-    ) -> TestResult | dict[str, TestResult]: ...
-
-    def test(
-        self,
-        test_loader: DataLoader | None = None,
-        verbose: int = 1,
-        *,
-        dataset: str | None = None,
-    ) -> TestResult | dict[str, TestResult]:
-        """Evaluate once with an explicit or DataPack-provided test loader.
-
-        Args:
-            test_loader: Optional sized, non-empty test loader. When omitted, the
-                attached DataPack must provide its test dataset.
-            verbose: ``0`` for silent, ``1`` for a progress bar, or ``2`` for a summary.
-            dataset: Optional name selecting one DataPack test dataset. It cannot be
-                combined with an explicit loader.
-
-        Returns:
-            One test result for an explicit, selected, or bare dataset. A named
-            dataset mapping returns results keyed by dataset name.
-        """
-        if test_loader is not None:
-            if dataset is not None:
-                msg = "dataset cannot be combined with an explicit test loader."
-                raise ValueError(msg)
-            return self._test_with_loader(test_loader, verbose)
-        with self._data_workflow("test", dataset_name=dataset) as workflow:
-            test_loaders = workflow.loaders.loaders_for_phase("test")
-            results = {
-                name: self._test_with_loader(
-                    loader,
-                    verbose,
-                    dataset_name=name,
-                )
-                for name, loader in test_loaders.items()
-            }
-            if dataset is not None or not isinstance(workflow.loaders.test, Mapping):
-                return next(iter(results.values()))
-            return results
-
-    def _test_with_loader(
-        self,
-        test_loader: DataLoader,
-        verbose: int = 1,
-        *,
-        dataset_name: str | None = None,
-    ) -> TestResult:
-        """Evaluate the model once without gradient tracking.
-
-        The model is placed in evaluation mode and ``Event.TEST_STEP`` runs for each
-        batch. Callable metrics are sample-weighted; stateful and collected metrics
-        compute once over the completed phase.
-
-        Args:
-            test_loader: Sized, non-empty test loader.
-            verbose: ``0`` for silent, ``1`` for a progress bar, or ``2`` for a summary.
-
-        Returns:
-            Average test loss and, when present, named test metrics.
-
-        Raises:
-            ValueError: If the loader is empty or no test-step handler exists.
-            TypeError: If a step returns an unsupported result structure.
-        """
-        if not self._event_handler.has_handler(Event.TEST_STEP):
-            msg = (
-                "No method decorated with @charge(Event.TEST_STEP) found. "
-                "Please add a test step method to your model."
-            )
-            raise ValueError(msg)
-
-        self._validate_loader(test_loader, "Test")
-        logger.info("Testing started: batches=%d", len(test_loader))
-
-        before_test_context: EventContext = {
-            "battery": self,
-            "model": self._model,
-            "optimizer": self._optimizer,
-            **dataset_identity_context(dataset_name),
-        }
-        self._event_handler.call(Event.BEFORE_TEST, before_test_context)
-
-        before_test_epoch_context: EventContext = {
-            "battery": self,
-            "model": self._model,
-            "optimizer": self._optimizer,
-            "epoch": 1,
-            **dataset_identity_context(dataset_name),
-        }
-        self._event_handler.call(Event.BEFORE_TEST_EPOCH, before_test_epoch_context)
-
-        self._model.eval()
-
-        progress = ProgressFactory.create(verbose=verbose, total_epochs=1)
-        progress.start_epoch(1)
-        progress.start_phase(Phase.TEST, total_batches=len(test_loader))
-        self._metric_manager.reset()
-        manual_metric_names: set[str] = set()
-        logger.debug("Test phase started: epoch=1")
-
-        try:
-            with torch.no_grad():
-                for batch_idx, batch_data in enumerate(test_loader):
-                    self._test_batch(
-                        batch_data,
-                        batch_idx,
-                        progress,
-                        manual_metric_names,
-                        dataset_name=dataset_name,
-                    )
-        except BaseException:
-            progress.abort()
-            raise
-
-        test_metrics = progress.end_phase()
-        progress.end_epoch()
-        test_loss = (
-            test_metrics
-            if isinstance(test_metrics, float)
-            else test_metrics.get("loss", 0.0)
-        )
-        test_metrics_context = (
-            test_metrics if isinstance(test_metrics, dict) else {"loss": test_metrics}
-        )
-        test_metrics_context.update(
-            {
-                name: value
-                for name, value in self._metric_manager.compute().items()
-                if name not in manual_metric_names
-            }
-        )
-
-        after_test_epoch_context: EventContext = {
-            "battery": self,
-            "model": self._model,
-            "optimizer": self._optimizer,
-            "epoch": 1,
-            "loss": test_loss,
-            "test_loss": test_loss,
-            "test_metrics": test_metrics_context,
-            **dataset_identity_context(dataset_name),
-        }
-        self._event_handler.call(Event.AFTER_TEST_EPOCH, after_test_epoch_context)
-
-        after_test_context: EventContext = {
-            "battery": self,
-            "model": self._model,
-            "optimizer": self._optimizer,
-            "loss": test_loss,
-            "test_loss": test_loss,
-            "test_metrics": test_metrics_context,
-            **dataset_identity_context(dataset_name),
-        }
-        self._event_handler.call(Event.AFTER_TEST, after_test_context)
-        logger.debug("Test phase completed: epoch=1, metrics=%s", test_metrics_context)
-
-        results: TestResult = {"test_loss": test_metrics_context["loss"]}
-        if len(test_metrics_context) > 1:
-            results["test_metrics"] = {
-                key: value
-                for key, value in test_metrics_context.items()
-                if key != "loss"
-            }
-
-        logger.info("Testing completed")
-        return results
-
-    def _test_batch(
-        self,
-        batch_data: Any,
-        batch_idx: int,
-        progress: Progress,
-        manual_metric_names: set[str],
-        *,
-        dataset_name: str | None = None,
-    ) -> None:
-        """Process one test batch."""
-        batch = move_to_device(batch_data, self._device)
-
-        before_step_context: EventContext = {
-            "battery": self,
-            "model": self._model,
-            "optimizer": self._optimizer,
-            "device": self._device,
-            "phase": "test",
-            "batch": batch,
-            "batch_idx": batch_idx,
-            "epoch": 1,
-            **dataset_identity_context(dataset_name),
-        }
-        self._event_handler.call(Event.BEFORE_TEST_STEP, before_step_context)
-
-        step_context: EventContext = {
-            **before_step_context,
-        }
-        with self._event_handler.execution_context(
-            Event.STEP_EXECUTION_CONTEXT, step_context
-        ):
-            result = self._event_handler.call(Event.TEST_STEP, step_context)
-
-        loss, step_metrics, predictions, targets = self._parse_step_result(
-            result, "Test"
-        )
-        automatic_metrics = (
-            self._metric_manager.update(predictions, targets)
-            if predictions is not None and targets is not None
-            else {}
-        )
-        manual_metric_names.update(step_metrics)
-        batch_metrics = {
-            "loss": loss.item(),
-            **automatic_metrics,
-            **step_metrics,
-        }
-        logger.debug(
-            "Test step completed: epoch=1, batch=%d, metrics=%s",
-            batch_idx,
-            batch_metrics,
-        )
-
-        after_step_context: EventContext = {
-            "battery": self,
-            "model": self._model,
-            "optimizer": self._optimizer,
-            "batch": batch,
-            "batch_idx": batch_idx,
-            "epoch": 1,
-            "loss": loss.item(),
-            "test_loss": loss.item(),
-            "test_metrics": batch_metrics,
-            **dataset_identity_context(dataset_name),
-        }
-        self._event_handler.call(Event.AFTER_TEST_STEP, after_step_context)
-
-        num_samples = get_batch_size(batch)
-        progress.update(cast("ProgressMetrics", batch_metrics), num_samples)
-
-    @overload
-    def predict(
-        self,
-        data_loader: DataLoader,
-        verbose: int = 1,
-        *,
-        move_to_cpu: bool = False,
-        concatenate: bool = False,
-        dataset: None = None,
-    ) -> PredictResult: ...
-
-    @overload
-    def predict(
-        self,
-        data_loader: None = None,
-        verbose: int = 1,
-        *,
-        move_to_cpu: bool = False,
-        concatenate: bool = False,
-        dataset: str,
-    ) -> PredictResult: ...
-
-    @overload
-    def predict(
-        self,
-        data_loader: DataLoader | None = None,
-        verbose: int = 1,
-        *,
-        move_to_cpu: bool = False,
-        concatenate: bool = False,
-        dataset: None = None,
-    ) -> PredictResult | dict[str, PredictResult]: ...
-
-    def predict(
-        self,
-        data_loader: DataLoader | None = None,
-        verbose: int = 1,
-        *,
-        move_to_cpu: bool = False,
-        concatenate: bool = False,
-        dataset: str | None = None,
-    ) -> PredictResult | dict[str, PredictResult]:
-        """Collect predictions using an explicit or DataPack-provided loader.
-
-        Args:
-            data_loader: Optional sized, non-empty prediction loader. When omitted,
-                the attached DataPack must provide its prediction dataset.
-            verbose: ``0`` for silent, ``1`` for a progress bar, or ``2`` for a summary.
-            move_to_cpu: Recursively detach tensor outputs and move them to CPU.
-            concatenate: Recursively concatenate matching outputs along their first
-                dimension while retaining nested container structure.
-            dataset: Optional name selecting one DataPack prediction dataset. It
-                cannot be combined with an explicit loader.
-
-        Returns:
-            One prediction result for an explicit, selected, or bare dataset. A named
-            dataset mapping returns results keyed by dataset name.
-        """
-        if data_loader is not None:
-            if dataset is not None:
-                msg = "dataset cannot be combined with an explicit prediction loader."
-                raise ValueError(msg)
-            return self._predict_with_loader(
-                data_loader,
-                verbose,
-                move_to_cpu=move_to_cpu,
-                concatenate=concatenate,
-            )
-        with self._data_workflow("predict", dataset_name=dataset) as workflow:
-            prediction_loaders = workflow.loaders.loaders_for_phase("predict")
-            results = {
-                name: self._predict_with_loader(
-                    loader,
-                    verbose,
-                    move_to_cpu=move_to_cpu,
-                    concatenate=concatenate,
-                    dataset_name=name,
-                )
-                for name, loader in prediction_loaders.items()
-            }
-            if dataset is not None or not isinstance(workflow.loaders.predict, Mapping):
-                return next(iter(results.values()))
-            return results
-
-    def _predict_with_loader(
-        self,
-        data_loader: DataLoader,
-        verbose: int = 1,
-        *,
-        move_to_cpu: bool = False,
-        concatenate: bool = False,
-        dataset_name: str | None = None,
-    ) -> PredictResult:
-        """Collect predictions from one evaluation-mode pass over a loader.
-
-        The default result contains one user-defined output per batch. Structured
-        outputs can be recursively moved to CPU and concatenated without changing
-        matching dictionary, tuple, named-tuple, or list containers.
-
-        Args:
-            data_loader: Sized, non-empty prediction loader.
-            verbose: ``0`` for silent, ``1`` for a progress bar, or ``2`` for a summary.
-            move_to_cpu: Recursively detach tensor outputs and move them to CPU.
-                This is useful when predictions should not retain accelerator memory.
-            concatenate: Recursively concatenate matching tensor outputs along their
-                first dimension. Nested dictionaries, tuples, named tuples, and lists
-                retain their structure.
-
-        Returns:
-            Mapping containing either a list of batch outputs or one recursively
-            concatenated structured output.
-
-        Raises:
-            ValueError: If the loader is empty, no handler exists, or output shapes
-                cannot be concatenated.
-            TypeError: If concatenated batch structures do not match.
-        """
-        if not self._event_handler.has_handler(Event.PREDICT_STEP):
-            logger.error("Prediction requires a predict step handler.")
-            msg = (
-                "No method decorated with @charge(Event.PREDICT_STEP) found. "
-                "Please add a predict step method to your model."
-            )
-            raise ValueError(msg)
-
-        self._validate_loader(data_loader, "Prediction")
-        logger.info("Prediction started: batches=%d", len(data_loader))
-        logger.debug(
-            "Prediction output options selected: move_to_cpu=%s, concatenate=%s",
-            move_to_cpu,
-            concatenate,
-        )
-
-        before_predict_context: EventContext = {
-            "battery": self,
-            "model": self._model,
-            "optimizer": self._optimizer,
-            **dataset_identity_context(dataset_name),
-        }
-        self._event_handler.call(Event.BEFORE_PREDICT, before_predict_context)
-
-        before_predict_epoch_context: EventContext = {
-            "battery": self,
-            "model": self._model,
-            "optimizer": self._optimizer,
-            "epoch": 1,
-            **dataset_identity_context(dataset_name),
-        }
-        self._event_handler.call(
-            Event.BEFORE_PREDICT_EPOCH, before_predict_epoch_context
-        )
-
-        self._model.eval()
-        predictions: list[Any] = []
-
-        progress = ProgressFactory.create(verbose=verbose, total_epochs=1)
-        progress.start_epoch(1)
-        progress.start_phase(Phase.PREDICT, total_batches=len(data_loader))
-        logger.debug("Prediction phase started: epoch=1")
-
-        try:
-            with torch.no_grad():
-                for batch_idx, batch_data in enumerate(data_loader):
-                    prediction = self._predict_batch(
-                        batch_data,
-                        batch_idx,
-                        progress,
-                        move_to_cpu=move_to_cpu,
-                        dataset_name=dataset_name,
-                    )
-                    if prediction is not None:
-                        predictions.append(prediction)
-        except BaseException:
-            progress.abort()
-            raise
-
-        progress.end_phase()
-        progress.end_epoch()
-
-        prediction_output = (
-            concatenate_predictions(predictions) if concatenate else predictions
-        )
-        after_predict_epoch_context: EventContext = {
-            "battery": self,
-            "model": self._model,
-            "optimizer": self._optimizer,
-            "epoch": 1,
-            "predictions": prediction_output,
-            "prediction_batches": len(predictions),
-            **dataset_identity_context(dataset_name),
-        }
-        self._event_handler.call(Event.AFTER_PREDICT_EPOCH, after_predict_epoch_context)
-
-        after_predict_context: EventContext = {
-            "battery": self,
-            "model": self._model,
-            "optimizer": self._optimizer,
-            "predictions": prediction_output,
-            "prediction_batches": len(predictions),
-            **dataset_identity_context(dataset_name),
-        }
-        self._event_handler.call(Event.AFTER_PREDICT, after_predict_context)
-        logger.debug(
-            "Prediction phase completed: epoch=1, outputs=%d", len(predictions)
-        )
-        logger.info("Prediction completed: outputs=%d", len(predictions))
-
-        logger.debug(
-            "Prediction output options applied: move_to_cpu=%s, concatenate=%s",
-            move_to_cpu,
-            concatenate,
-        )
-        return {"predictions": prediction_output}
-
-    def predict_iter(
-        self,
-        data_loader: DataLoader | None = None,
-        verbose: int = 1,
-        *,
-        move_to_cpu: bool = False,
-        dataset: str | None = None,
-    ) -> Generator[Any]:
-        """Stream predictions using an explicit or DataPack-provided loader.
-
-        Args:
-            data_loader: Optional sized, non-empty prediction loader. When omitted,
-                the attached DataPack must provide its prediction dataset.
-            verbose: ``0`` for silent, ``1`` for a progress bar, or ``2`` for a summary.
-            move_to_cpu: Recursively detach tensor outputs and move them to CPU before
-                yielding them.
-            dataset: Optional name selecting one DataPack prediction dataset. It is
-                required when the DataPack provides multiple prediction datasets.
-
-        Yields:
-            One user-defined prediction-step output at a time.
-
-        Note:
-            Iteration must finish for final prediction and DataPack teardown events to
-            run.
-        """
-        if data_loader is not None:
-            if dataset is not None:
-                msg = "dataset cannot be combined with an explicit prediction loader."
-                raise ValueError(msg)
-            yield from self._predict_iter_with_loader(
-                data_loader,
-                verbose,
-                move_to_cpu=move_to_cpu,
-            )
-            return
-        with self._data_workflow(
-            "predict",
-            dataset_name=dataset,
-        ) as workflow:
-            prediction_loaders = workflow.loaders.loaders_for_phase("predict")
-            if dataset is None and len(prediction_loaders) > 1:
-                available = ", ".join(repr(name) for name in prediction_loaders)
-                msg = (
-                    "predict_iter() requires dataset= when multiple prediction "
-                    f"datasets are configured. Available datasets: {available}."
-                )
-                raise ValueError(msg)
-            name, loader = next(iter(prediction_loaders.items()))
-            yield from self._predict_iter_with_loader(
-                loader,
-                verbose,
-                move_to_cpu=move_to_cpu,
-                dataset_name=name,
-            )
-
-    def _predict_iter_with_loader(
-        self,
-        data_loader: DataLoader,
-        verbose: int = 1,
-        *,
-        move_to_cpu: bool = False,
-        dataset_name: str | None = None,
-    ) -> Iterator[Any]:
-        """Yield prediction batches without retaining the complete result.
-
-        Lifecycle events still receive the number of yielded batches, but not an
-        accumulated ``predictions`` value. Iteration must finish for final prediction
-        events to run.
-
-        Args:
-            data_loader: Sized, non-empty prediction loader.
-            verbose: ``0`` for silent, ``1`` for a progress bar, or ``2`` for a summary.
-            move_to_cpu: Recursively detach tensor outputs and move them to CPU
-                before yielding them.
-
-        Yields:
-            One user-defined prediction-step output at a time.
-
-        Raises:
-            ValueError: If the loader is empty or no predict-step handler exists.
-        """
-        if not self._event_handler.has_handler(Event.PREDICT_STEP):
-            logger.error("Streaming prediction requires a predict step handler.")
-            msg = (
-                "No method decorated with @charge(Event.PREDICT_STEP) found. "
-                "Please add a predict step method to your model."
-            )
-            raise ValueError(msg)
-        self._validate_loader(data_loader, "Prediction")
-        logger.info(
-            "Streaming prediction started: batches=%d, move_to_cpu=%s",
-            len(data_loader),
-            move_to_cpu,
-        )
-        yield from self._prediction_iterator(
-            data_loader,
-            verbose,
-            move_to_cpu=move_to_cpu,
-            dataset_name=dataset_name,
-        )
-
-    def _prediction_iterator(
-        self,
-        data_loader: DataLoader,
-        verbose: int,
-        *,
-        move_to_cpu: bool,
-        dataset_name: str | None = None,
-    ) -> Iterator[Any]:
-        """Run lazy prediction lifecycle and yield each non-None output."""
-        before_context: EventContext = {
-            "battery": self,
-            "model": self._model,
-            "optimizer": self._optimizer,
-            **dataset_identity_context(dataset_name),
-        }
-        self._event_handler.call(Event.BEFORE_PREDICT, before_context)
-        self._event_handler.call(
-            Event.BEFORE_PREDICT_EPOCH,
-            {**before_context, "epoch": 1},
-        )
-        self._model.eval()
-        progress = ProgressFactory.create(verbose=verbose, total_epochs=1)
-        progress.start_epoch(1)
-        progress.start_phase(Phase.PREDICT, total_batches=len(data_loader))
-        processed_batches = 0
-        completed = False
-        try:
-            with torch.no_grad():
-                for batch_idx, batch_data in enumerate(data_loader):
-                    prediction = self._predict_batch(
-                        batch_data,
-                        batch_idx,
-                        progress,
-                        move_to_cpu=move_to_cpu,
-                        dataset_name=dataset_name,
-                    )
-                    processed_batches += 1
-                    if prediction is not None:
-                        yield prediction
-            progress.end_phase()
-            progress.end_epoch()
-            completion_context: EventContext = {
-                "battery": self,
-                "model": self._model,
-                "optimizer": self._optimizer,
-                "epoch": 1,
-                "prediction_batches": processed_batches,
-                **dataset_identity_context(dataset_name),
-            }
-            self._event_handler.call(Event.AFTER_PREDICT_EPOCH, completion_context)
-            completion_context.pop("epoch")
-            self._event_handler.call(Event.AFTER_PREDICT, completion_context)
-            completed = True
-            logger.info("Streaming prediction completed: batches=%d", processed_batches)
-        finally:
-            if not completed:
-                progress.abort()
-                logger.warning(
-                    "Streaming prediction aborted after %d batches.",
-                    processed_batches,
-                )
-
-    def _predict_batch(
-        self,
-        batch_data: Any,
-        batch_idx: int,
-        progress: Progress,
-        *,
-        move_to_cpu: bool = False,
-        dataset_name: str | None = None,
-    ) -> Any:
-        """Process one prediction batch."""
-        batch = move_to_device(batch_data, self._device)
-
-        before_step_context: EventContext = {
-            "battery": self,
-            "model": self._model,
-            "optimizer": self._optimizer,
-            "device": self._device,
-            "phase": "predict",
-            "batch": batch,
-            "batch_idx": batch_idx,
-            "epoch": 1,
-            **dataset_identity_context(dataset_name),
-        }
-        self._event_handler.call(Event.BEFORE_PREDICT_STEP, before_step_context)
-
-        step_context: EventContext = {
-            **before_step_context,
-        }
-        with self._event_handler.execution_context(
-            Event.STEP_EXECUTION_CONTEXT, step_context
-        ):
-            prediction = self._event_handler.call(Event.PREDICT_STEP, step_context)
-        if move_to_cpu:
-            prediction = move_to_device(
-                prediction,
-                torch.device("cpu"),
-                detach=True,
-            )
-        logger.debug(
-            "Prediction step completed: epoch=1, batch=%d, output_type=%s",
-            batch_idx,
-            type(prediction).__name__,
-        )
-        after_step_context: EventContext = {
-            "battery": self,
-            "model": self._model,
-            "optimizer": self._optimizer,
-            "batch": batch,
-            "batch_idx": batch_idx,
-            "epoch": 1,
-            "predictions": prediction,
-            **dataset_identity_context(dataset_name),
-        }
-        self._event_handler.call(Event.AFTER_PREDICT_STEP, after_step_context)
-
-        progress.update()
-        return prediction

@@ -1,6 +1,5 @@
 """Tests for torch_batteries.trainer module."""
 
-from collections.abc import Iterator
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -204,6 +203,12 @@ class TestBattery:
         with pytest.raises(ValueError, match="Prediction loader must not be empty"):
             battery.predict(empty_loader)
 
+    def test_loader_validation_rejects_non_dataloader(self) -> None:
+        """Workflow loader validation reports an input type error."""
+        message = r"must be a torch\.utils\.data\.DataLoader"
+        with pytest.raises(TypeError, match=message):
+            Battery._validate_loader([], "Training")  # noqa: SLF001
+
     def test_train_resets_stop_training_flag(self) -> None:
         """A Battery remains reusable after a previous stop request."""
         model = SimpleModel()
@@ -234,7 +239,7 @@ class TestBattery:
 
         with (
             patch(
-                "torch_batteries.trainer.core.ProgressFactory.create",
+                "torch_batteries.trainer._training.ProgressFactory.create",
                 return_value=progress,
             ),
             patch.object(progress, "abort", wraps=progress.abort) as abort,
@@ -306,9 +311,15 @@ class TestBattery:
             else:
                 battery.predict(loader, verbose=0)
 
+        progress_module = {
+            "validation": "_training",
+            "test": "_evaluation",
+            "predict": "_prediction",
+        }[workflow]
+
         with (
             patch(
-                "torch_batteries.trainer.core.ProgressFactory.create",
+                f"torch_batteries.trainer.{progress_module}.ProgressFactory.create",
                 return_value=progress,
             ),
             patch.object(progress, "abort", wraps=progress.abort) as abort,
@@ -383,12 +394,20 @@ class TestBattery:
         loader = self.create_simple_data_loader(batch_size=2, num_samples=4)
         battery = Battery(model, optimizer=optim.SGD(model.parameters(), lr=0.01))
 
-        with patch("torch_batteries.trainer.core.logger.info") as mock_info:
+        with (
+            patch("torch_batteries.trainer._training.logger.info") as train_info,
+            patch("torch_batteries.trainer._evaluation.logger.info") as test_info,
+            patch("torch_batteries.trainer._prediction.logger.info") as predict_info,
+        ):
             battery.train(loader, epochs=1, verbose=0)
             battery.test(loader, verbose=0)
             battery.predict(loader, verbose=0)
 
-        calls = [call.args for call in mock_info.call_args_list]
+        calls = [
+            *(call.args for call in train_info.call_args_list),
+            *(call.args for call in test_info.call_args_list),
+            *(call.args for call in predict_info.call_args_list),
+        ]
         assert (
             "Training started: epochs=%d, train_batches=%d, validation=%s",
             1,
@@ -972,14 +991,15 @@ class TestBattery:
     def test_unsized_loader_is_rejected(self) -> None:
         """Workflow loaders must expose their number of batches."""
 
-        class UnsizedLoader:
-            def __iter__(self) -> Iterator[object]:
-                return iter(())
+        class UnsizedLoader(DataLoader[object]):
+            def __len__(self) -> int:
+                raise TypeError
 
         battery = Battery(SimpleModel())
+        loader = UnsizedLoader(TensorDataset(torch.arange(1)))
 
         with pytest.raises(ValueError, match="must define its number of batches"):
-            battery.test(UnsizedLoader())  # type: ignore[call-overload]
+            battery.test(loader)
 
     def test_before_backward_must_preserve_tensor_loss(self) -> None:
         """Callbacks cannot replace the backward loss with a non-tensor."""

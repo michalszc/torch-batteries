@@ -55,7 +55,11 @@ class DataPack:
         return {}
 
     def load_state_dict(self, state_dict: dict[str, Any]) -> None:
-        """Restore state previously returned by :meth:`state_dict`."""
+        """Restore state previously returned by :meth:`state_dict`.
+
+        Args:
+            state_dict: DataPack-specific checkpoint state.
+        """
         if state_dict:
             logger.warning(
                 "DataPack %s ignored unexpected state keys: %s",

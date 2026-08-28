@@ -68,7 +68,7 @@ battery = Battery(
     metrics={"mae": lambda pred, target: F.l1_loss(pred, target)},
 )
 
-history = battery.train(train_loader, val_loader, epochs=3, verbose=0)
+history = battery.fit(train_loader, val_loader, epochs=3, verbose=0)
 test_result = battery.test(test_loader, verbose=0)
 prediction_result = battery.predict(
     test_loader,

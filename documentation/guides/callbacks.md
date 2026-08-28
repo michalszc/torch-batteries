@@ -17,7 +17,7 @@ battery = Battery(
 
 ```python
 early_stopping = EarlyStopping(
-    phase="val",
+    phase="validation",
     metric="loss",
     mode="min",
     patience=5,
@@ -26,7 +26,8 @@ early_stopping = EarlyStopping(
 )
 ```
 
-`phase` is `"train"` or `"val"`. The monitored metric can be `"loss"` or a metric
+`phase` is `"train"` or `"validation"`. The deprecated `"val"` spelling remains
+accepted until the next major release. The monitored metric can be `"loss"` or a metric
 produced by the phase. Patience counts consecutive completed monitored phases without
 the required improvement. Best weights are cloned to CPU-safe independent tensors
 and restored after training when requested. Full checkpoints preserve the best score,
@@ -100,7 +101,7 @@ callback = LearningRateScheduler(scheduler, interval="epoch")
 callback = LearningRateScheduler(
     torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer),
     interval="epoch",
-    phase="val",
+    phase="validation",
     metric="loss",
 )
 ```

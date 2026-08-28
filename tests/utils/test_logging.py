@@ -2,6 +2,7 @@
 
 import logging
 from collections.abc import Callable, Generator
+from importlib import import_module
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -18,6 +19,32 @@ from torch_batteries.utils.logging import (
     set_verbosity_error,
     set_verbosity_info,
     set_verbosity_warning,
+)
+
+LOGGER_MODULES = (
+    "callbacks._monitor",
+    "callbacks.base",
+    "callbacks.early_stopping",
+    "callbacks.experiment_tracking",
+    "callbacks.gradient_accumulation",
+    "callbacks.gradient_clip",
+    "callbacks.learning_rate_scheduler",
+    "callbacks.mixed_precision",
+    "callbacks.model_checkpoint",
+    "data.base",
+    "data.handler",
+    "data.loader",
+    "events.core",
+    "events.handler",
+    "tracking.wandb",
+    "trainer._checkpoint",
+    "trainer._evaluation",
+    "trainer._prediction",
+    "trainer._training",
+    "trainer.core",
+    "utils.device",
+    "utils.prediction",
+    "utils.progress.factory",
 )
 
 
@@ -83,7 +110,16 @@ class TestGetLogger:
         # Logger should inherit from root logger or have INFO level
         assert logger.level in [0, logging.INFO, logging.WARNING]  # 0 means inherit
 
-    @patch("torch_batteries.utils.logging.logging.getLogger")
+    @pytest.mark.parametrize("module_name", LOGGER_MODULES)
+    def test_library_logger_uses_module_qualified_name(self, module_name: str) -> None:
+        """Every library logger follows its lowercase module path."""
+        module = import_module(f"torch_batteries.{module_name}")
+        logger = module.__dict__["logger"]
+
+        assert isinstance(logger, logging.Logger)
+        assert logger.name == f"torch_batteries.{module_name}"
+
+    @patch("torch_batteries.utils.logging._manager.logging.getLogger")
     def test_get_logger_calls_logging_module(self, mock_get_logger: MagicMock) -> None:
         """Test that get_logger properly calls logging.getLogger."""
         mock_root_logger = MagicMock()

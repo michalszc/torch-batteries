@@ -9,7 +9,7 @@ explanations, start with the [Guides](../guides/index.md).
 
 | Area | Page | Main public objects |
 | --- | --- | --- |
-| Workflows | [Trainer API](trainer.md) | `Battery`, `StepOutput`, `TrainResult`, `TestResult`, and `PredictResult` |
+| Workflows | [Trainer API](trainer.md) | `Battery`, `StepOutput`, `FitResult`, `TrainResult`, `ValidationResult`, `TestResult`, and `PredictResult` |
 | Data construction | [Data API](data.md) | `DataPack`, `ResolvedData`, dataset/loader bundles, configuration, and context |
 | Lifecycle | [Events API](events.md) | `Event`, `EventContext`, `OptimizationStep`, and `charge` |
 | Extensions | [Callbacks API](callbacks.md) | `Callback`, early stopping, checkpoints, optimization callbacks, and experiment tracking |
@@ -38,7 +38,7 @@ organization.
 - Check method entries for exact return structures and raised exceptions.
 - For charged methods and callbacks, cross-reference the Events API to see when an
   event runs and which context keys are available.
-- For training, testing, and prediction, cross-reference Results and Exceptions before
+- For fitting, training, validation, testing, and prediction, cross-reference Results and Exceptions before
   persisting or serializing returned values.
 
 !!! note "Optional integrations"
