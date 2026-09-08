@@ -1,6 +1,6 @@
 """Utilities for calculating and managing metrics."""
 
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 import torch
 
@@ -18,22 +18,34 @@ class PhaseMetricManager:
 
     Ordinary callables produce batch values that are sample-weighted by progress
     tracking. Stateful metrics own their exact aggregation. ``CollectedMetric``
-    instances share detached CPU collections. A metric that raises is skipped for
-    the remainder of the current phase.
+    instances share detached CPU collections. Metric lifecycle failures either
+    propagate immediately or skip the failed metric for the remainder of the phase.
 
     Args:
         metrics: Named callable, stateful, or collected metrics.
+        metric_error_policy: ``"raise"`` to propagate metric exceptions or
+            ``"warn"`` to log and skip a failed metric for the current phase.
     """
 
     __slots__ = (
         "_collected_predictions",
         "_collected_targets",
         "_failed",
+        "_metric_error_policy",
         "_metrics",
     )
 
-    def __init__(self, metrics: dict[str, Metric]) -> None:
+    def __init__(
+        self,
+        metrics: dict[str, Metric],
+        *,
+        metric_error_policy: Literal["raise", "warn"] = "raise",
+    ) -> None:
+        if metric_error_policy not in {"raise", "warn"}:
+            msg = "metric_error_policy must be either 'raise' or 'warn'."
+            raise ValueError(msg)
         self._metrics = metrics
+        self._metric_error_policy = metric_error_policy
         self._collected_predictions: list[torch.Tensor] = []
         self._collected_targets: list[torch.Tensor] = []
         self._failed: set[str] = set()
@@ -49,6 +61,9 @@ class PhaseMetricManager:
                     metric.reset()
                     logger.debug("Stateful metric '%s' reset.", name)
                 except Exception:
+                    if self._metric_error_policy == "raise":
+                        logger.exception("Failed to reset metric '%s'.", name)
+                        raise
                     self._failed.add(name)
                     logger.warning(
                         "Failed to reset metric '%s'; skipping this phase.",
@@ -93,6 +108,9 @@ class PhaseMetricManager:
                         name, metric(metric_predictions, metric_targets)
                     )
             except Exception:
+                if self._metric_error_policy == "raise":
+                    logger.exception("Failed to update metric '%s'.", name)
+                    raise
                 self._failed.add(name)
                 logger.warning(
                     "Failed to update metric '%s'; skipping this phase.",
@@ -124,6 +142,10 @@ class PhaseMetricManager:
                 results[name] = _metric_float(name, value)
                 logger.debug("Full-phase metric '%s' computed: %s", name, results[name])
             except Exception:
+                if self._metric_error_policy == "raise":
+                    logger.exception("Failed to compute metric '%s'.", name)
+                    raise
+                self._failed.add(name)
                 logger.warning(
                     "Failed to compute metric '%s'; skipping this phase.",
                     name,

@@ -3,7 +3,7 @@
 from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, overload
+from typing import Any, Literal, overload
 
 import torch
 from torch import nn
@@ -54,6 +54,8 @@ class Battery(CheckpointMixin, TrainingMixin, EvaluationMixin, PredictionMixin):
             provider-style optimization events.
         data_pack: Optional event-driven dataset and DataLoader configuration. When
             attached, workflow loaders may be omitted.
+        metric_error_policy: ``"raise"`` to propagate metric lifecycle exceptions.
+            ``"warn"`` logs the failure and skips that metric for the phase.
 
     Note:
         Epoch values exposed through event contexts are one-based. Prediction output
@@ -67,6 +69,7 @@ class Battery(CheckpointMixin, TrainingMixin, EvaluationMixin, PredictionMixin):
         "_device",
         "_event_handler",
         "_last_completed_epoch",
+        "_metric_error_policy",
         "_metric_manager",
         "_metrics",
         "_model",
@@ -86,12 +89,17 @@ class Battery(CheckpointMixin, TrainingMixin, EvaluationMixin, PredictionMixin):
         callbacks: list | None = None,
         *,
         data_pack: DataPack | None = None,
+        metric_error_policy: Literal["raise", "warn"] = "raise",
     ):
         self._device = get_device(device)
         self._model = model.to(self._device)
         self._optimizer = optimizer
         self._metrics = metrics or {}
-        self._metric_manager = PhaseMetricManager(self._metrics)
+        self._metric_error_policy = metric_error_policy
+        self._metric_manager = PhaseMetricManager(
+            self._metrics,
+            metric_error_policy=metric_error_policy,
+        )
         callback_list = list(callbacks or [])
         self._callbacks = callback_list
         self._event_handler = EventHandler(self._model, callbacks=callback_list)
@@ -158,7 +166,27 @@ class Battery(CheckpointMixin, TrainingMixin, EvaluationMixin, PredictionMixin):
     ) -> None:
         """Set the metrics dictionary."""
         self._metrics = value or {}
-        self._metric_manager = PhaseMetricManager(self._metrics)
+        self._metric_manager = PhaseMetricManager(
+            self._metrics,
+            metric_error_policy=self._metric_error_policy,
+        )
+
+    @property
+    def metric_error_policy(self) -> Literal["raise", "warn"]:
+        """Get the configured metric exception handling policy."""
+        return self._metric_error_policy
+
+    @metric_error_policy.setter
+    def metric_error_policy(self, value: Literal["raise", "warn"]) -> None:
+        """Set the metric exception policy while retaining configured metrics.
+
+        Args:
+            value: ``"raise"`` to propagate metric exceptions or ``"warn"`` to
+                log and skip failed metrics for the current phase.
+        """
+        manager = PhaseMetricManager(self._metrics, metric_error_policy=value)
+        self._metric_error_policy = value
+        self._metric_manager = manager
 
     @property
     def stop_training(self) -> bool:

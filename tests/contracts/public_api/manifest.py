@@ -79,6 +79,7 @@ PUBLIC_MEMBERS: dict[str, set[str]] = {
         "data_pack",
         "optimizer",
         "metrics",
+        "metric_error_policy",
         "stop_training",
         "save_checkpoint",
         "load_checkpoint",
@@ -246,6 +247,7 @@ PUBLIC_PARAMETERS: dict[str, dict[str, object]] = {
         "metrics": None,
         "callbacks": None,
         "data_pack": None,
+        "metric_error_policy": "raise",
     },
     "torch_batteries.trainer.Battery.train": {
         "train_loader": None,
@@ -282,6 +284,25 @@ PUBLIC_PARAMETERS: dict[str, dict[str, object]] = {
         "move_to_cpu": False,
         "dataset": None,
     },
+}
+
+PUBLIC_KEYWORD_ONLY_PARAMETERS: dict[str, set[str]] = {
+    "torch_batteries.trainer.Battery": {"data_pack", "metric_error_policy"},
+    "torch_batteries.trainer.Battery.train": {
+        "resume_from",
+        "resume_epochs_mode",
+    },
+    "torch_batteries.trainer.Battery.fit": {
+        "resume_from",
+        "resume_epochs_mode",
+    },
+    "torch_batteries.trainer.Battery.test": {"dataset"},
+    "torch_batteries.trainer.Battery.predict": {
+        "move_to_cpu",
+        "concatenate",
+        "dataset",
+    },
+    "torch_batteries.trainer.Battery.predict_iter": {"move_to_cpu", "dataset"},
 }
 
 DEPRECATED_PARAMETERS: dict[str, set[str]] = {

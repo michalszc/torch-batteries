@@ -14,6 +14,7 @@ if TYPE_CHECKING:
 from tests.contracts.public_api.manifest import (
     DEPRECATED_PARAMETERS,
     PUBLIC_EXPORTS,
+    PUBLIC_KEYWORD_ONLY_PARAMETERS,
     PUBLIC_MEMBERS,
     PUBLIC_PARAMETERS,
     REFERENCE_EXCLUSIONS,
@@ -59,6 +60,20 @@ def test_protected_parameter_defaults_remain_compatible() -> None:
         for name, default in expected.items():
             assert name in parameters, f"{callable_name} lost parameter {name}"
             assert parameters[name].default == default
+
+
+def test_protected_parameter_kinds_remain_compatible() -> None:
+    """Protected parameters retain positional or keyword-only calling behavior."""
+    for callable_name, expected in PUBLIC_PARAMETERS.items():
+        parameters = inspect.signature(_resolve(callable_name)).parameters
+        keyword_only = PUBLIC_KEYWORD_ONLY_PARAMETERS.get(callable_name, set())
+        for name in expected:
+            expected_kind = (
+                inspect.Parameter.KEYWORD_ONLY
+                if name in keyword_only
+                else inspect.Parameter.POSITIONAL_OR_KEYWORD
+            )
+            assert parameters[name].kind is expected_kind
 
 
 def test_deprecated_parameters_are_explicitly_tracked() -> None:

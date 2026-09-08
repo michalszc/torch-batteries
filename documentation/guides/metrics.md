@@ -22,8 +22,10 @@ battery = Battery(
 )
 ```
 
-The callable must return a Python numeric value or scalar tensor. A metric that raises
-is logged and skipped for the remainder of that phase.
+The callable must return a Python numeric value or scalar tensor. Metric exceptions
+raise by default, including failures from stateful ``reset``, ``update``, and
+``compute`` operations. Set ``Battery(..., metric_error_policy="warn")`` to log a
+failure and skip only that metric for the remainder of the current phase.
 
 ## Stateful phase metrics
 
