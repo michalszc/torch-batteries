@@ -67,6 +67,7 @@ class Battery(CheckpointMixin, TrainingMixin, EvaluationMixin, PredictionMixin):
         "_data_pack",
         "_data_pack_handler",
         "_device",
+        "_event_dispatch_depth",
         "_event_handler",
         "_last_completed_epoch",
         "_metric_error_policy",
@@ -91,6 +92,7 @@ class Battery(CheckpointMixin, TrainingMixin, EvaluationMixin, PredictionMixin):
         data_pack: DataPack | None = None,
         metric_error_policy: Literal["raise", "warn"] = "raise",
     ):
+        self._event_dispatch_depth = 0
         self._device = get_device(device)
         self._model = model.to(self._device)
         self._optimizer = optimizer
@@ -150,6 +152,7 @@ class Battery(CheckpointMixin, TrainingMixin, EvaluationMixin, PredictionMixin):
     @optimizer.setter
     def optimizer(self, value: torch.optim.Optimizer | None) -> None:
         """Set the optimizer."""
+        self._ensure_configuration_mutable("optimizer")
         self._optimizer = value
 
     @property
@@ -165,6 +168,7 @@ class Battery(CheckpointMixin, TrainingMixin, EvaluationMixin, PredictionMixin):
         value: dict[str, Metric] | None,
     ) -> None:
         """Set the metrics dictionary."""
+        self._ensure_configuration_mutable("metrics")
         self._metrics = value or {}
         self._metric_manager = PhaseMetricManager(
             self._metrics,
@@ -184,6 +188,7 @@ class Battery(CheckpointMixin, TrainingMixin, EvaluationMixin, PredictionMixin):
             value: ``"raise"`` to propagate metric exceptions or ``"warn"`` to
                 log and skip failed metrics for the current phase.
         """
+        self._ensure_configuration_mutable("metric_error_policy")
         manager = PhaseMetricManager(self._metrics, metric_error_policy=value)
         self._metric_error_policy = value
         self._metric_manager = manager
@@ -197,6 +202,25 @@ class Battery(CheckpointMixin, TrainingMixin, EvaluationMixin, PredictionMixin):
     def stop_training(self, value: bool) -> None:
         """Set the stop_training flag."""
         self._stop_training = value
+
+    def _ensure_configuration_mutable(self, name: str) -> None:
+        """Reject configuration assignment from inside an event dispatch."""
+        if self._event_dispatch_depth == 0:
+            return
+        logger.error(
+            "Battery.%s cannot be changed while an event handler is running.", name
+        )
+        msg = f"Battery.{name} cannot be changed while an event handler is running."
+        raise RuntimeError(msg)
+
+    @contextmanager
+    def _event_dispatch_scope(self) -> Generator[None]:
+        """Track nested event dispatch while handlers receive this Battery."""
+        self._event_dispatch_depth += 1
+        try:
+            yield
+        finally:
+            self._event_dispatch_depth -= 1
 
     def save_checkpoint(self, path: str | Path) -> None:
         """Save complete resumable training state atomically.

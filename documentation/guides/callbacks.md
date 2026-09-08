@@ -111,6 +111,12 @@ configuration and advancement state are restored strictly from full checkpoints.
 
 ## Custom callbacks
 
+Configure ``battery.optimizer``, ``battery.metrics``, and
+``battery.metric_error_policy`` outside charged event handlers. Assigning these
+workflow settings while any model, callback, or DataPack event is running raises a
+``RuntimeError``. The ``battery.stop_training`` flag remains available to callbacks as
+the explicit runtime control for requesting an orderly stop.
+
 ```python
 class EpochReporter(Callback):
     @charge(Event.AFTER_TRAIN_EPOCH)

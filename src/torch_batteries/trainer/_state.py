@@ -29,6 +29,7 @@ if TYPE_CHECKING:
         _data_pack: DataPack | None
         _data_pack_handler: DataPackHandler | None
         _device: torch.device
+        _event_dispatch_depth: int
         _event_handler: EventHandler
         _last_completed_epoch: int
         _metric_manager: PhaseMetricManager

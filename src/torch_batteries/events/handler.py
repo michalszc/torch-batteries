@@ -197,7 +197,8 @@ class EventHandler(_ChargedHandlerBase):
         handlers = self._handlers_for(event)
         if event in self.MODEL_SPECIFIC_CALLBACKS and handlers:
             logger.debug("Calling handler for event '%s'", event.value)
-            return handlers[0](*args, **kwargs)
+            with self._dispatch_scope(*args, **kwargs):
+                return handlers[0](*args, **kwargs)
         self._call_handlers(event, *args, require_none=False, **kwargs)
         return None
 
@@ -227,7 +228,8 @@ class EventHandler(_ChargedHandlerBase):
             msg = f"Event '{event.value}' requires one provider handler."
             raise ValueError(msg)
         logger.debug("Calling provider for event '%s'.", event.value)
-        return handler[0](*args, **kwargs)
+        with self._dispatch_scope(*args, **kwargs):
+            return handler[0](*args, **kwargs)
 
     def execute(self, event: Event, *args: Any, **kwargs: Any) -> bool:
         """Run one exclusive executor and report whether it handled the event.
@@ -246,7 +248,8 @@ class EventHandler(_ChargedHandlerBase):
             msg = f"Event '{event.value}' requires one executor handler."
             raise ValueError(msg)
         logger.debug("Calling executor for event '%s'.", event.value)
-        result = handler[0](*args, **kwargs)
+        with self._dispatch_scope(*args, **kwargs):
+            result = handler[0](*args, **kwargs)
         if result is not None:
             logger.error(
                 "Executor for event '%s' returned %s instead of None.",
@@ -272,7 +275,7 @@ class EventHandler(_ChargedHandlerBase):
             **kwargs: Keyword arguments passed to each provider.
         """
         handlers = self._handlers_for(event)
-        with ExitStack() as stack:
+        with self._dispatch_scope(*args, **kwargs), ExitStack() as stack:
             for item in handlers:
                 manager = item(*args, **kwargs)
                 if not hasattr(manager, "__enter__") or not hasattr(
