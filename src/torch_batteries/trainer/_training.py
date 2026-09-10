@@ -194,6 +194,9 @@ class TrainingMixin(BatteryStateMixin):
             TypeError: If a step result has an unsupported structure.
         """
         self._validate_train_inputs(train_loader, val_loader)
+        self._restore_loader_generator_state("train", train_loader)
+        if val_loader is not None:
+            self._restore_loader_generator_state("validation", val_loader)
         resumed = self._resume_loaded
         self._stop_training = False
         if not resumed:
@@ -255,6 +258,7 @@ class TrainingMixin(BatteryStateMixin):
             except BaseException:
                 progress.abort()
                 raise
+            self._capture_loader_generator_state("train", train_loader)
             results["train_loss"].append(train_metrics["loss"])
 
             for key, value in train_metrics.items():
@@ -307,6 +311,7 @@ class TrainingMixin(BatteryStateMixin):
                 except BaseException:
                     progress.abort()
                     raise
+                self._capture_loader_generator_state("validation", val_loader)
                 results["val_loss"].append(val_metrics["loss"])
 
                 for key, value in val_metrics.items():

@@ -140,11 +140,11 @@ def test_rejects_unsupported_full_checkpoint_schema(tmp_path: Path) -> None:
     path = tmp_path / "unsupported-schema.pth"
     source.save_checkpoint(path)
     payload = torch.load(path, weights_only=True)
-    payload["__torch_batteries_checkpoint__"] = 3
+    payload["__torch_batteries_checkpoint__"] = 4
     torch.save(payload, path)
     target, _ = _battery()
 
-    with pytest.raises(ValueError, match="schema 3 is unsupported"):
+    with pytest.raises(ValueError, match="schema 4 is unsupported"):
         target.load_checkpoint(path)
 
 
@@ -268,7 +268,7 @@ def test_model_checkpoint_saves_full_training_state_by_default(
     battery.train(_loader(), verbose=0)
 
     payload = torch.load(tmp_path / "full.pth", weights_only=True)
-    assert payload["__torch_batteries_checkpoint__"] == 2
+    assert payload["__torch_batteries_checkpoint__"] == 3
 
 
 def test_model_checkpoint_can_save_raw_weights(tmp_path: Path) -> None:
@@ -419,10 +419,27 @@ def test_schema_one_checkpoint_remains_loadable(tmp_path: Path) -> None:
     target.load_checkpoint(checkpoint)
 
 
+def test_schema_two_checkpoint_remains_loadable(tmp_path: Path) -> None:
+    source, _ = _battery()
+    checkpoint = tmp_path / "schema-two.pth"
+    source.save_checkpoint(checkpoint)
+    payload = torch.load(checkpoint, weights_only=True)
+    payload["__torch_batteries_checkpoint__"] = 2
+    del payload["rng_state"]
+    del payload["loader_generator_states"]
+    torch.save(payload, checkpoint)
+
+    target, _ = _battery()
+    target.load_checkpoint(checkpoint)
+
+
 def test_schema_two_checkpoint_requires_data_pack_field(tmp_path: Path) -> None:
     checkpoint = tmp_path / "missing-data-pack-field.pth"
     _battery()[0].save_checkpoint(checkpoint)
     payload = torch.load(checkpoint, weights_only=True)
+    payload["__torch_batteries_checkpoint__"] = 2
+    del payload["rng_state"]
+    del payload["loader_generator_states"]
     del payload["data_pack"]
     torch.save(payload, checkpoint)
 

@@ -50,6 +50,7 @@ class EvaluationMixin(BatteryStateMixin):
     ) -> ValidationResult:
         """Run one evaluation-only validation pass at epoch one."""
         self._validate_loader(val_loader, "Validation")
+        self._restore_loader_generator_state("validation", val_loader)
         logger.info("Validation started: batches=%d", len(val_loader))
 
         before_validation_context: EventContext = {
@@ -67,6 +68,7 @@ class EvaluationMixin(BatteryStateMixin):
         except BaseException:
             progress.abort()
             raise
+        self._capture_loader_generator_state("validation", val_loader)
         progress.end_epoch()
         progress.end_training()
 
@@ -160,6 +162,9 @@ class EvaluationMixin(BatteryStateMixin):
             raise ValueError(msg)
 
         self._validate_loader(test_loader, "Test")
+        self._restore_loader_generator_state(
+            "test", test_loader, dataset_name=dataset_name
+        )
         logger.info("Testing started: batches=%d", len(test_loader))
 
         before_test_context: EventContext = {
@@ -201,6 +206,10 @@ class EvaluationMixin(BatteryStateMixin):
         except BaseException:
             progress.abort()
             raise
+
+        self._capture_loader_generator_state(
+            "test", test_loader, dataset_name=dataset_name
+        )
 
         test_metrics = progress.end_phase()
         progress.end_epoch()

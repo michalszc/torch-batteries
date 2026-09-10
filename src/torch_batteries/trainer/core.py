@@ -70,12 +70,14 @@ class Battery(CheckpointMixin, TrainingMixin, EvaluationMixin, PredictionMixin):
         "_event_dispatch_depth",
         "_event_handler",
         "_last_completed_epoch",
+        "_loader_generator_states",
         "_metric_error_policy",
         "_metric_manager",
         "_metrics",
         "_model",
         "_optimizer",
         "_optimizer_step_idx",
+        "_pending_loader_generator_states",
         "_resume_loaded",
         "_stop_training",
         "_train_results",
@@ -111,7 +113,9 @@ class Battery(CheckpointMixin, TrainingMixin, EvaluationMixin, PredictionMixin):
         )
         self._stop_training = False
         self._last_completed_epoch = 0
+        self._loader_generator_states: dict[str, dict[str, torch.Tensor]] = {}
         self._optimizer_step_idx = 0
+        self._pending_loader_generator_states: dict[str, dict[str, torch.Tensor]] = {}
         self._resume_loaded = False
         self._train_results: TrainResult = {
             "train_loss": [],
