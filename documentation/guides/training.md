@@ -20,8 +20,23 @@ def training_step(self, context: EventContext) -> StepOutput:
     )
 ```
 
-The loss must be a scalar `torch.Tensor`. During training, its original value is
-reported while optimization callbacks may divide the tensor used for backward.
+The loss must be a scalar `torch.Tensor` and should normally be the mean loss for the
+batch. Battery weights reported batch losses by the inferred batch size when it builds
+phase and epoch results. If a step calculates a summed loss, normalize it in user code
+before returning it. During training, the returned value is reported while optimization
+callbacks may divide the tensor used for backward.
+
+## Optionally compile the model
+
+`torch.compile` is optional. When using it, compile the model first, then construct the
+optimizer and `Battery` from the compiled model. This keeps charged-method discovery
+and optimizer parameters attached to the same model object.
+
+```python
+model = torch.compile(MyModel())
+optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+battery = Battery(model, optimizer=optimizer)
+```
 
 ## Step-result forms
 
