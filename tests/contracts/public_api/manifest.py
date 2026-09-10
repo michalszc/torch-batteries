@@ -35,6 +35,7 @@ PUBLIC_EXPORTS: dict[str, set[str]] = {
         "LearningRateScheduler",
         "MixedPrecision",
         "ModelCheckpoint",
+        "TerminateOnNonFinite",
     },
     "torch_batteries.data": {
         "DataContext",
@@ -172,6 +173,13 @@ PUBLIC_MEMBERS: dict[str, set[str]] = {
         "run_on_train_epoch_end",
         "run_on_validation_end",
     },
+    "torch_batteries.callbacks.TerminateOnNonFinite": {
+        "on_before_backward",
+        "on_step_end",
+        "on_phase_end",
+        "state_dict",
+        "load_state_dict",
+    },
     "torch_batteries.data.DataPack": {"resolve", "state_dict", "load_state_dict"},
     "torch_batteries.data.DataPackHandler": {
         "has_handler",
@@ -241,6 +249,10 @@ PUBLIC_MEMBERS: dict[str, set[str]] = {
 # Parameters listed here are compatibility requirements; additive optional parameters
 # remain allowed. Values are their current defaults as exposed by inspect.signature.
 PUBLIC_PARAMETERS: dict[str, dict[str, object]] = {
+    "torch_batteries.callbacks.TerminateOnNonFinite": {
+        "check_loss": True,
+        "check_metrics": True,
+    },
     "torch_batteries.trainer.Battery": {
         "device": "auto",
         "optimizer": None,
@@ -287,6 +299,10 @@ PUBLIC_PARAMETERS: dict[str, dict[str, object]] = {
 }
 
 PUBLIC_KEYWORD_ONLY_PARAMETERS: dict[str, set[str]] = {
+    "torch_batteries.callbacks.TerminateOnNonFinite": {
+        "check_loss",
+        "check_metrics",
+    },
     "torch_batteries.trainer.Battery": {"data_pack", "metric_error_policy"},
     "torch_batteries.trainer.Battery.train": {
         "resume_from",

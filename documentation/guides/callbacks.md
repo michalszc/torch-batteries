@@ -114,6 +114,23 @@ callback = LearningRateScheduler(
 A validation-monitored plateau scheduler requires a validation loader. Scheduler
 configuration and advancement state are restored strictly from full checkpoints.
 
+## Non-finite termination
+
+Use ``TerminateOnNonFinite`` to fail immediately when selected workflow values become
+NaN or infinite:
+
+```python
+from torch_batteries.callbacks import TerminateOnNonFinite
+
+callback = TerminateOnNonFinite(check_loss=True, check_metrics=True)
+```
+
+Training loss is checked before backward, so a non-finite loss never reaches backward
+or the optimizer. Validation and test losses are checked after their step returns.
+Named batch metrics and final stateful or collected metrics are checked separately.
+Set either option to ``False`` to disable that category; the metric name ``"loss"``
+always follows ``check_loss``. Both options cannot be disabled together.
+
 ## Custom callbacks
 
 Configure ``battery.optimizer``, ``battery.metrics``, and
