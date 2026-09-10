@@ -36,6 +36,7 @@ OPTIMIZATION_FIELDS = STEP_EXECUTION_FIELDS | {
 
 EXPECTED_FIELDS: dict[Event, set[str]] = {
     Event.SETUP: COMMON_FIELDS | {"optimizer", "device"},
+    Event.ON_EXCEPTION: COMMON_FIELDS | {"optimizer", "exception"},
     Event.STEP_EXECUTION_CONTEXT: STEP_EXECUTION_FIELDS,
     Event.CONFIGURE_TRAIN_STEP: STEP_EXECUTION_FIELDS
     | {"total_batches", "optimizer_step_idx"},
@@ -261,12 +262,13 @@ def test_all_documented_event_context_contracts() -> None:  # noqa: PLR0915
     battery.test(loader, verbose=0)
     prediction_result = battery.predict(loader, verbose=0)
 
-    assert len(Event) == 43
+    assert len(Event) == 44
     assert set(EXPECTED_FIELDS) == set(Event) - DATA_EVENTS
-    assert all(records[event] for event in set(Event) - DATA_EVENTS)
+    successful_events = set(Event) - DATA_EVENTS - {Event.ON_EXCEPTION}
+    assert all(records[event] for event in successful_events)
 
     for event, event_records in records.items():
-        if event in DATA_EVENTS:
+        if event in DATA_EVENTS or event is Event.ON_EXCEPTION:
             continue
         for context in event_records:
             assert EXPECTED_FIELDS[event] <= context.keys()

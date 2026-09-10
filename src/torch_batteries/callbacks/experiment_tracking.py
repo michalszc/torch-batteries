@@ -263,3 +263,16 @@ class ExperimentTrackingCallback(Callback):
 
         self.tracker.finish()
         logger.info("Experiment tracking finished")
+
+    @charge(Event.ON_EXCEPTION)
+    def on_exception(self, _: EventContext) -> None:
+        """Finish an initialized tracker with failure status.
+
+        Args:
+            _: Exception context, unused by this handler.
+        """
+        if not self.tracker.is_initialized:
+            logger.debug("Experiment tracker was not initialized at workflow failure.")
+            return
+        self.tracker.finish(exit_code=1)
+        logger.info("Experiment tracking finished after workflow failure")

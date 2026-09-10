@@ -195,6 +195,15 @@ class EventHandler(_ChargedHandlerBase):
             The result of the handler call, or None if no handler exists
         """
         handlers = self._handlers_for(event)
+        if event is Event.ON_EXCEPTION:
+            labels = self._handler_labels.get(event, [])
+            for handler, label in zip(handlers, labels, strict=True):
+                try:
+                    with self._dispatch_scope(*args, **kwargs):
+                        handler(*args, **kwargs)
+                except BaseException:
+                    logger.exception("ON_EXCEPTION handler '%s' failed.", label)
+            return None
         if event in self.MODEL_SPECIFIC_CALLBACKS and handlers:
             logger.debug("Calling handler for event '%s'", event.value)
             with self._dispatch_scope(*args, **kwargs):

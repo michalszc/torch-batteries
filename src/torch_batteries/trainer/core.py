@@ -222,6 +222,34 @@ class Battery(CheckpointMixin, TrainingMixin, EvaluationMixin, PredictionMixin):
         finally:
             self._event_dispatch_depth -= 1
 
+    @contextmanager
+    def _workflow_exception_boundary(
+        self, *, ignore_generator_exit: bool = False
+    ) -> Generator[None]:
+        """Dispatch one failure event for an exception escaping a public workflow."""
+        try:
+            yield
+        except GeneratorExit as exception:
+            if not ignore_generator_exit:
+                self._dispatch_workflow_exception(exception)
+            raise
+        except BaseException as exception:
+            self._dispatch_workflow_exception(exception)
+            raise
+
+    def _dispatch_workflow_exception(self, exception: BaseException) -> None:
+        """Notify failure handlers without allowing them to replace the failure."""
+        context: EventContext = {
+            "battery": self,
+            "model": self._model,
+            "optimizer": self._optimizer,
+            "exception": exception,
+        }
+        try:
+            self._event_handler.call(Event.ON_EXCEPTION, context)
+        except BaseException:
+            logger.exception("Unexpected failure while dispatching ON_EXCEPTION.")
+
     def save_checkpoint(self, path: str | Path) -> None:
         """Save complete resumable training state atomically.
 
@@ -275,15 +303,16 @@ class Battery(CheckpointMixin, TrainingMixin, EvaluationMixin, PredictionMixin):
         Returns:
             Per-epoch loss and named metric histories.
         """
-        return TrainingMixin.train(
-            self,
-            train_loader,
-            val_loader,
-            epochs,
-            verbose,
-            resume_from=resume_from,
-            resume_epochs_mode=resume_epochs_mode,
-        )
+        with self._workflow_exception_boundary():
+            return TrainingMixin.train(
+                self,
+                train_loader,
+                val_loader,
+                epochs,
+                verbose,
+                resume_from=resume_from,
+                resume_epochs_mode=resume_epochs_mode,
+            )
 
     def fit(  # noqa: PLR0913
         self,
@@ -309,15 +338,16 @@ class Battery(CheckpointMixin, TrainingMixin, EvaluationMixin, PredictionMixin):
             Per-epoch training histories and optional validation histories. Validation
             histories are empty when validation data is unavailable.
         """
-        return TrainingMixin.fit(
-            self,
-            train_loader,
-            val_loader,
-            epochs,
-            verbose,
-            resume_from=resume_from,
-            resume_epochs_mode=resume_epochs_mode,
-        )
+        with self._workflow_exception_boundary():
+            return TrainingMixin.fit(
+                self,
+                train_loader,
+                val_loader,
+                epochs,
+                verbose,
+                resume_from=resume_from,
+                resume_epochs_mode=resume_epochs_mode,
+            )
 
     def validate(
         self,
@@ -334,7 +364,8 @@ class Battery(CheckpointMixin, TrainingMixin, EvaluationMixin, PredictionMixin):
         Returns:
             Aggregate validation loss and optional named validation metrics.
         """
-        return EvaluationMixin._validate(self, val_loader, verbose)  # noqa: SLF001
+        with self._workflow_exception_boundary():
+            return EvaluationMixin._validate(self, val_loader, verbose)  # noqa: SLF001
 
     @overload
     def test(
@@ -380,7 +411,10 @@ class Battery(CheckpointMixin, TrainingMixin, EvaluationMixin, PredictionMixin):
         Returns:
             One result or a mapping of named DataPack results.
         """
-        return EvaluationMixin._test(self, test_loader, verbose, dataset=dataset)  # noqa: SLF001
+        with self._workflow_exception_boundary():
+            return EvaluationMixin._test(  # noqa: SLF001
+                self, test_loader, verbose, dataset=dataset
+            )
 
     @overload
     def predict(
@@ -436,14 +470,15 @@ class Battery(CheckpointMixin, TrainingMixin, EvaluationMixin, PredictionMixin):
         Returns:
             One prediction result or a mapping of named results.
         """
-        return PredictionMixin._predict(  # noqa: SLF001
-            self,
-            data_loader,
-            verbose,
-            move_to_cpu=move_to_cpu,
-            concatenate=concatenate,
-            dataset=dataset,
-        )
+        with self._workflow_exception_boundary():
+            return PredictionMixin._predict(  # noqa: SLF001
+                self,
+                data_loader,
+                verbose,
+                move_to_cpu=move_to_cpu,
+                concatenate=concatenate,
+                dataset=dataset,
+            )
 
     def predict_iter(
         self,
@@ -464,13 +499,14 @@ class Battery(CheckpointMixin, TrainingMixin, EvaluationMixin, PredictionMixin):
         Yields:
             One prediction-step output at a time.
         """
-        yield from PredictionMixin.predict_iter(
-            self,
-            data_loader,
-            verbose,
-            move_to_cpu=move_to_cpu,
-            dataset=dataset,
-        )
+        with self._workflow_exception_boundary(ignore_generator_exit=True):
+            yield from PredictionMixin.predict_iter(
+                self,
+                data_loader,
+                verbose,
+                move_to_cpu=move_to_cpu,
+                dataset=dataset,
+            )
 
     @contextmanager
     def _data_workflow(

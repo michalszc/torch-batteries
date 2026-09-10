@@ -33,6 +33,7 @@ class EventContext(TypedDict, total=False):
     - `phase`: Active workflow phase: `train`, `validation`, `test`, or
       `predict`.
     - `dataset_name`: Name of the active implicit DataPack dataset.
+    - `exception`: Original failure supplied only to `ON_EXCEPTION`.
 
     Optimization keys:
 
@@ -92,6 +93,7 @@ class EventContext(TypedDict, total=False):
     optimizer_step: bool
     optimizer_step_idx: int
     resumed: bool
+    exception: BaseException
     train_metrics: dict[str, float]
     val_metrics: dict[str, float]
     test_metrics: dict[str, float]

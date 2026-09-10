@@ -115,6 +115,7 @@ PUBLIC_MEMBERS: dict[str, set[str]] = {
         "on_train_step_end",
         "on_validation_epoch_end",
         "on_train_end",
+        "on_exception",
     },
     "torch_batteries.callbacks.GradientAccumulation": {
         "steps",
