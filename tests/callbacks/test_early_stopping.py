@@ -457,6 +457,11 @@ class TestEarlyStopping:
                 "epochs_no_improve": None,
                 "best_weights": None,
             },
+            {
+                "best_score": 1.0,
+                "epochs_no_improve": 0,
+                "best_weights": [],
+            },
         ],
     )
     def test_invalid_state_is_rejected(self, state: dict[str, object]) -> None:

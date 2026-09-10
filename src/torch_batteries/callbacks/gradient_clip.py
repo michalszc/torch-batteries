@@ -30,6 +30,18 @@ class GradientClip(Callback):
     __slots__ = ("_algorithm", "_value")
 
     def __init__(self, value: float, algorithm: ClipAlgorithm = "norm") -> None:
+        self._validate_configuration(value, algorithm)
+        self._value = float(value)
+        self._algorithm = algorithm
+        logger.info(
+            "Gradient clipping configured: algorithm=%s, value=%s",
+            algorithm,
+            self._value,
+        )
+
+    @staticmethod
+    def _validate_configuration(value: float, algorithm: object) -> None:
+        """Validate clipping options from any configuration source."""
         if value < 0:
             logger.error("Gradient clip value must not be negative: %s", value)
             msg = "GradientClip value must be greater than or equal to zero."
@@ -38,13 +50,6 @@ class GradientClip(Callback):
             logger.error("Unsupported gradient clipping algorithm: %s", algorithm)
             msg = "GradientClip algorithm must be 'norm' or 'value'."
             raise ValueError(msg)
-        self._value = float(value)
-        self._algorithm = algorithm
-        logger.info(
-            "Gradient clipping configured: algorithm=%s, value=%s",
-            algorithm,
-            self._value,
-        )
 
     @property
     def value(self) -> float:
@@ -98,17 +103,24 @@ class GradientClip(Callback):
         Args:
             state_dict: State returned by :meth:`state_dict`.
         """
-        if (
-            state_dict.get("value") != self._value
-            or state_dict.get("algorithm") != self._algorithm
-        ):
+        self._validate_checkpoint_state(state_dict)
+        logger.debug("Gradient clipping checkpoint configuration validated.")
+
+    def _validate_checkpoint_state(self, state_dict: dict[str, Any]) -> None:
+        """Validate fixed clipping configuration without changing state."""
+        saved_value = state_dict.get("value")
+        saved_algorithm = state_dict.get("algorithm")
+        if not isinstance(saved_value, (int, float)):
+            msg = "Invalid GradientClip checkpoint state."
+            raise TypeError(msg)
+        self._validate_configuration(float(saved_value), saved_algorithm)
+        if float(saved_value) != self._value or saved_algorithm != self._algorithm:
             logger.error(
                 "Gradient clipping state mismatch: configured=%s/%s, saved=%s/%s",
                 self._algorithm,
                 self._value,
-                state_dict.get("algorithm"),
-                state_dict.get("value"),
+                saved_algorithm,
+                saved_value,
             )
             msg = "GradientClip configuration does not match checkpoint state."
             raise ValueError(msg)
-        logger.debug("Gradient clipping checkpoint configuration validated.")

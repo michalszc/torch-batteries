@@ -111,3 +111,5 @@ def test_rejects_invalid_configuration_and_checkpoint_state() -> None:
         control.load_state_dict({})
     with pytest.raises(ValueError, match="do not match"):
         control.load_state_dict({"steps": 3, "optimizer_step_idx": 1})
+    with pytest.raises(ValueError, match="Invalid GradientAccumulation"):
+        control.load_state_dict({"steps": 2, "optimizer_step_idx": -1})

@@ -4,6 +4,7 @@ import copy
 import importlib
 import random
 import tempfile
+from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
@@ -61,14 +62,14 @@ class CheckpointMixin(BatteryStateMixin):
             "state": state,
         }
 
-    def _restore_checkpoint_data_pack(
+    def _validate_checkpoint_data_pack(
         self,
         payload: dict[str, Any],
         schema_version: int,
-    ) -> None:
-        """Validate and restore DataPack state for schema version 2 and newer."""
+    ) -> dict[str, Any] | None:
+        """Validate and return DataPack state for schema version 2 and newer."""
         if schema_version < 2:
-            return
+            return None
         if "data_pack" not in payload:
             msg = "Training checkpoint is missing fields: ['data_pack']."
             raise ValueError(msg)
@@ -77,7 +78,7 @@ class CheckpointMixin(BatteryStateMixin):
             if self._data_pack is not None:
                 msg = "Configured DataPack does not match checkpoint state."
                 raise ValueError(msg)
-            return
+            return None
         if not isinstance(saved_data_pack, dict):
             msg = "Invalid DataPack state in training checkpoint."
             raise TypeError(msg)
@@ -96,7 +97,7 @@ class CheckpointMixin(BatteryStateMixin):
                 f"expected '{saved_type}', got '{expected_type}'."
             )
             raise ValueError(msg)
-        self._data_pack.load_state_dict(saved_state)
+        return saved_state
 
     @staticmethod
     def _loader_generators(
@@ -258,6 +259,298 @@ class CheckpointMixin(BatteryStateMixin):
 
         torch.set_rng_state(state["torch_cpu"].cpu())
 
+    @staticmethod
+    def _validate_global_rng_state(state: object) -> dict[str, Any]:
+        """Validate schema-three global RNG state without changing live RNGs."""
+        if not isinstance(state, dict):
+            msg = "Invalid RNG state in training checkpoint."
+            raise TypeError(msg)
+        if "python" not in state or not isinstance(
+            state.get("torch_cpu"), torch.Tensor
+        ):
+            msg = "Invalid RNG state in training checkpoint."
+            raise TypeError(msg)
+        try:
+            random.Random().setstate(state["python"])
+        except (TypeError, ValueError) as error:
+            msg = "Invalid Python RNG state in training checkpoint."
+            raise TypeError(msg) from error
+        cuda_states = state.get("cuda")
+        if cuda_states is not None and (
+            not isinstance(cuda_states, list)
+            or any(not isinstance(item, torch.Tensor) for item in cuda_states)
+        ):
+            msg = "Invalid CUDA RNG state in training checkpoint."
+            raise TypeError(msg)
+        if state.get("mps") is not None and not isinstance(state["mps"], torch.Tensor):
+            msg = "Invalid MPS RNG state in training checkpoint."
+            raise TypeError(msg)
+        numpy_state = state.get("numpy")
+        if numpy_state is not None and (
+            not isinstance(numpy_state, dict)
+            or not isinstance(numpy_state.get("bit_generator"), str)
+            or not isinstance(numpy_state.get("keys"), torch.Tensor)
+            or not isinstance(numpy_state.get("position"), int)
+            or not isinstance(numpy_state.get("has_gauss"), int)
+            or not isinstance(numpy_state.get("cached_gaussian"), float)
+        ):
+            msg = "Invalid NumPy RNG state in training checkpoint."
+            raise TypeError(msg)
+        return state
+
+    @staticmethod
+    def _validate_loader_generator_states(
+        states: object,
+    ) -> dict[str, dict[str, torch.Tensor]]:
+        """Validate retained DataLoader generator states."""
+        if not isinstance(states, dict) or any(
+            not isinstance(key, str)
+            or not isinstance(value, dict)
+            or any(
+                not isinstance(path, str) or not isinstance(state, torch.Tensor)
+                for path, state in value.items()
+            )
+            for key, value in states.items()
+        ):
+            msg = "Invalid loader generator state in training checkpoint."
+            raise TypeError(msg)
+        return cast("dict[str, dict[str, torch.Tensor]]", states)
+
+    def _validate_checkpoint_components(  # noqa: PLR0912, PLR0915
+        self,
+        payload: dict[str, Any],
+        schema_version: int,
+    ) -> tuple[list[Callback], dict[str, Any] | None]:
+        """Validate component identities and payload structure before mutation."""
+        data_pack_state = self._validate_checkpoint_data_pack(payload, schema_version)
+        saved_optimizer = payload["optimizer"]
+        if saved_optimizer is not None and self._optimizer is None:
+            logger.error("Checkpoint contains optimizer state but Battery does not.")
+            msg = "An optimizer is required to resume this checkpoint."
+            raise ValueError(msg)
+        if saved_optimizer is None and self._optimizer is not None:
+            logger.error("Checkpoint optimizer availability does not match Battery.")
+            msg = "Configured optimizer does not match checkpoint state."
+            raise ValueError(msg)
+        if saved_optimizer is not None and not isinstance(saved_optimizer, dict):
+            msg = "Invalid optimizer state in training checkpoint."
+            raise TypeError(msg)
+        if saved_optimizer is not None and self._optimizer is not None:
+            saved_groups = saved_optimizer.get("param_groups")
+            current_groups = self._optimizer.state_dict().get("param_groups")
+            if (
+                not isinstance(saved_groups, list)
+                or not isinstance(current_groups, list)
+                or len(saved_groups) != len(current_groups)
+                or any(
+                    not isinstance(saved, dict)
+                    or not isinstance(current, dict)
+                    or not isinstance(saved.get("params"), list)
+                    or not isinstance(current.get("params"), list)
+                    or len(saved["params"]) != len(current["params"])
+                    for saved, current in zip(saved_groups, current_groups, strict=True)
+                )
+            ):
+                logger.error("Checkpoint optimizer parameter groups are incompatible.")
+                msg = "Configured optimizer does not match checkpoint state."
+                raise ValueError(msg)
+
+        saved_callbacks = payload["callbacks"]
+        callbacks = self._checkpoint_callbacks()
+        if not isinstance(saved_callbacks, list):
+            logger.error("Checkpoint callback state is not a list.")
+            msg = "Invalid callback state in training checkpoint."
+            raise TypeError(msg)
+        expected_ids = [self._callback_identifier(item) for item in callbacks]
+        actual_ids = [
+            item.get("type") if isinstance(item, dict) else None
+            for item in saved_callbacks
+        ]
+        if actual_ids != expected_ids:
+            logger.error(
+                "Callback state mismatch: expected=%s, actual=%s",
+                expected_ids,
+                actual_ids,
+            )
+            msg = "Configured callbacks do not match checkpoint state."
+            raise ValueError(msg)
+        if any(
+            not isinstance(item, dict) or not isinstance(item.get("state"), dict)
+            for item in saved_callbacks
+        ):
+            msg = "Invalid callback state in training checkpoint."
+            raise TypeError(msg)
+        for callback, saved in zip(callbacks, saved_callbacks, strict=True):
+            callback._validate_checkpoint_state(saved["state"])  # noqa: SLF001
+
+        metrics_state = payload["metrics"]
+        if not isinstance(metrics_state, dict):
+            logger.error("Checkpoint metric state is not a dictionary.")
+            msg = "Invalid metric state in training checkpoint."
+            raise TypeError(msg)
+        expected_metric_names = {
+            name
+            for name, metric in self._metrics.items()
+            if callable(getattr(metric, "load_state_dict", None))
+        }
+        if set(metrics_state) != expected_metric_names:
+            logger.error(
+                "Metric checkpoint state mismatch: expected=%s, actual=%s",
+                sorted(expected_metric_names),
+                sorted(metrics_state),
+            )
+            msg = "Configured metric states do not match checkpoint state."
+            raise ValueError(msg)
+
+        if not isinstance(payload["model"], dict):
+            msg = "Invalid model state in training checkpoint."
+            raise TypeError(msg)
+        if not isinstance(payload["epoch"], int) or not isinstance(
+            payload["optimizer_step_idx"], int
+        ):
+            msg = "Invalid training counters in checkpoint."
+            raise TypeError(msg)
+        if not isinstance(payload["results"], dict):
+            logger.error("Checkpoint training results are not a dictionary.")
+            msg = "Invalid training history in checkpoint."
+            raise TypeError(msg)
+
+        if schema_version >= 3:
+            self._validate_global_rng_state(payload["rng_state"])
+            self._validate_loader_generator_states(payload["loader_generator_states"])
+        return callbacks, data_pack_state
+
+    def _checkpoint_snapshot(self, callbacks: list[Callback]) -> dict[str, Any]:
+        """Capture every mutable checkpoint participant before restoration."""
+        rng_state = self._capture_global_rng_state()
+        callback_states = [
+            copy.deepcopy(callback.state_dict()) for callback in callbacks
+        ]
+        if any(not isinstance(state, dict) for state in callback_states):
+            msg = "Callback state_dict() must return a dictionary."
+            raise TypeError(msg)
+        data_pack_state: dict[str, Any] | None = None
+        if self._data_pack is not None:
+            raw_data_pack_state: object = self._data_pack.state_dict()
+            if not isinstance(raw_data_pack_state, dict):
+                msg = "DataPack state_dict() must return a dictionary."
+                raise TypeError(msg)
+            data_pack_state = copy.deepcopy(raw_data_pack_state)
+        return {
+            "model": copy.deepcopy(self._model.state_dict()),
+            "optimizer": (
+                copy.deepcopy(self._optimizer.state_dict())
+                if self._optimizer is not None
+                else None
+            ),
+            "callbacks": callback_states,
+            "metrics": copy.deepcopy(self._metric_manager.state_dict()),
+            "data_pack": data_pack_state,
+            "last_completed_epoch": self._last_completed_epoch,
+            "optimizer_step_idx": self._optimizer_step_idx,
+            "results": copy.deepcopy(self._train_results),
+            "loader_generator_states": copy.deepcopy(self._loader_generator_states),
+            "pending_loader_generator_states": copy.deepcopy(
+                self._pending_loader_generator_states
+            ),
+            "resume_loaded": self._resume_loaded,
+            "stop_training": self._stop_training,
+            "rng_state": rng_state,
+        }
+
+    def _apply_checkpoint_internal_state(
+        self,
+        payload: dict[str, Any],
+        schema_version: int,
+    ) -> None:
+        """Apply Battery-owned counters, history, and deferred loader state."""
+        self._last_completed_epoch = payload["epoch"]
+        self._optimizer_step_idx = payload["optimizer_step_idx"]
+        self._train_results = cast("TrainResult", copy.deepcopy(payload["results"]))
+        if schema_version >= 3:
+            loader_states = self._validate_loader_generator_states(
+                payload["loader_generator_states"]
+            )
+            self._loader_generator_states = copy.deepcopy(loader_states)
+            self._pending_loader_generator_states = copy.deepcopy(loader_states)
+        else:
+            self._loader_generator_states = {}
+            self._pending_loader_generator_states = {}
+            logger.warning(
+                "Legacy checkpoint schema %d has no reproducible RNG state.",
+                schema_version,
+            )
+        self._resume_loaded = True
+
+    @staticmethod
+    def _rollback_action(name: str, action: Callable[[], None]) -> None:
+        """Attempt one rollback action without masking the load failure."""
+        try:
+            action()
+        except BaseException:
+            logger.exception("Checkpoint rollback failed for %s.", name)
+
+    def _rollback_checkpoint(
+        self,
+        snapshot: dict[str, Any],
+        callbacks: list[Callback],
+    ) -> None:
+        """Restore a pre-load snapshot, attempting every component."""
+        self._rollback_action(
+            "model",
+            lambda: self._model.load_state_dict(snapshot["model"], strict=True),
+        )
+        optimizer = self._optimizer
+        if optimizer is not None and snapshot["optimizer"] is not None:
+            self._rollback_action(
+                "optimizer",
+                lambda: optimizer.load_state_dict(snapshot["optimizer"]),
+            )
+        for index, (callback, state) in enumerate(
+            zip(callbacks, snapshot["callbacks"], strict=True)
+        ):
+
+            def restore_callback(
+                callback: Callback = callback,
+                state: dict[str, Any] = state,
+            ) -> None:
+                callback.load_state_dict(state)
+
+            self._rollback_action(
+                f"callback[{index}]",
+                restore_callback,
+            )
+        self._rollback_action(
+            "metrics",
+            lambda: self._metric_manager.load_state_dict(snapshot["metrics"]),
+        )
+        data_pack = self._data_pack
+        if data_pack is not None and snapshot["data_pack"] is not None:
+            self._rollback_action(
+                "DataPack",
+                lambda: data_pack.load_state_dict(snapshot["data_pack"]),
+            )
+
+        def restore_internal_state() -> None:
+            self._last_completed_epoch = snapshot["last_completed_epoch"]
+            self._optimizer_step_idx = snapshot["optimizer_step_idx"]
+            self._train_results = copy.deepcopy(snapshot["results"])
+            self._loader_generator_states = copy.deepcopy(
+                snapshot["loader_generator_states"]
+            )
+            self._pending_loader_generator_states = copy.deepcopy(
+                snapshot["pending_loader_generator_states"]
+            )
+            self._resume_loaded = snapshot["resume_loaded"]
+            self._stop_training = snapshot["stop_training"]
+
+        self._rollback_action("Battery state", restore_internal_state)
+        self._rollback_action(
+            "global RNG",
+            lambda: self._restore_global_rng_state(snapshot["rng_state"]),
+        )
+        logger.warning("Rolled back failed checkpoint restoration.")
+
     def save_checkpoint(self, path: str | Path) -> None:
         """Atomically save complete resumable training state.
 
@@ -367,9 +660,7 @@ class CheckpointMixin(BatteryStateMixin):
         """Move nested optimizer state through the shared device utility."""
         return move_to_device(value, device)
 
-    def load_checkpoint(  # noqa: PLR0912, PLR0915
-        self, path: str | Path
-    ) -> None:
+    def load_checkpoint(self, path: str | Path) -> None:
         """Load full training state or auto-detected raw model weights.
 
         Full checkpoints are restored strictly: the model, optimizer availability,
@@ -406,8 +697,22 @@ class CheckpointMixin(BatteryStateMixin):
                 "Raw model state detected at %s; training state was not restored.",
                 checkpoint_path,
             )
-            self._model.load_state_dict(payload, strict=True)
-            self._resume_loaded = False
+            model_snapshot = copy.deepcopy(self._model.state_dict())
+            resume_snapshot = self._resume_loaded
+            try:
+                self._model.load_state_dict(payload, strict=True)
+                self._resume_loaded = False
+            except BaseException:
+                logger.exception(
+                    "Raw model checkpoint restoration failed at %s; rolling back.",
+                    checkpoint_path,
+                )
+                self._rollback_action(
+                    "model",
+                    lambda: self._model.load_state_dict(model_snapshot, strict=True),
+                )
+                self._resume_loaded = resume_snapshot
+                raise
             return
 
         payload = self._validate_checkpoint_schema(payload, checkpoint_path)
@@ -428,87 +733,32 @@ class CheckpointMixin(BatteryStateMixin):
             logger.error("Checkpoint is missing required fields: %s", missing)
             msg = f"Training checkpoint is missing fields: {missing}."
             raise ValueError(msg)
-
-        self._restore_checkpoint_data_pack(payload, schema_version)
-
-        self._model.load_state_dict(payload["model"], strict=True)
-        saved_optimizer = payload["optimizer"]
-        if saved_optimizer is not None:
-            if self._optimizer is None:
-                logger.error(
-                    "Checkpoint contains optimizer state but Battery does not."
+        callbacks, data_pack_state = self._validate_checkpoint_components(
+            payload, schema_version
+        )
+        snapshot = self._checkpoint_snapshot(callbacks)
+        try:
+            self._model.load_state_dict(payload["model"], strict=True)
+            if self._optimizer is not None:
+                self._optimizer.load_state_dict(payload["optimizer"])
+                self._optimizer.state = self._move_optimizer_state(
+                    self._optimizer.state, self._device
                 )
-                msg = "An optimizer is required to resume this checkpoint."
-                raise ValueError(msg)
-            self._optimizer.load_state_dict(saved_optimizer)
-            self._optimizer.state = self._move_optimizer_state(
-                self._optimizer.state, self._device
+            for callback, saved in zip(callbacks, payload["callbacks"], strict=True):
+                callback.load_state_dict(saved["state"])
+            self._metric_manager.load_state_dict(payload["metrics"])
+            if self._data_pack is not None and data_pack_state is not None:
+                self._data_pack.load_state_dict(data_pack_state)
+            self._apply_checkpoint_internal_state(payload, schema_version)
+            if schema_version >= 3:
+                self._restore_global_rng_state(payload["rng_state"])
+        except BaseException:
+            logger.exception(
+                "Checkpoint restoration failed at %s; rolling back.",
+                checkpoint_path,
             )
-
-        saved_callbacks = payload["callbacks"]
-        callbacks = self._checkpoint_callbacks()
-        expected_ids = [self._callback_identifier(item) for item in callbacks]
-        if not isinstance(saved_callbacks, list):
-            logger.error("Checkpoint callback state is not a list.")
-            msg = "Invalid callback state in training checkpoint."
-            raise TypeError(msg)
-        actual_ids = [
-            item.get("type") if isinstance(item, dict) else None
-            for item in saved_callbacks
-        ]
-        if actual_ids != expected_ids:
-            logger.error(
-                "Callback state mismatch: expected=%s, actual=%s",
-                expected_ids,
-                actual_ids,
-            )
-            msg = "Configured callbacks do not match checkpoint state."
-            raise ValueError(msg)
-        for callback, saved in zip(callbacks, saved_callbacks, strict=True):
-            callback.load_state_dict(saved["state"])
-
-        metrics_state = payload["metrics"]
-        if not isinstance(metrics_state, dict):
-            logger.error("Checkpoint metric state is not a dictionary.")
-            msg = "Invalid metric state in training checkpoint."
-            raise TypeError(msg)
-        self._metric_manager.load_state_dict(metrics_state)
-        self._last_completed_epoch = int(payload["epoch"])
-        self._optimizer_step_idx = int(payload["optimizer_step_idx"])
-        results = payload["results"]
-        if not isinstance(results, dict):
-            logger.error("Checkpoint training results are not a dictionary.")
-            msg = "Invalid training history in checkpoint."
-            raise TypeError(msg)
-        self._train_results = cast("TrainResult", copy.deepcopy(results))
-        if schema_version >= 3:
-            rng_state = payload["rng_state"]
-            loader_states = payload["loader_generator_states"]
-            if not isinstance(rng_state, dict):
-                msg = "Invalid RNG state in training checkpoint."
-                raise TypeError(msg)
-            if not isinstance(loader_states, dict) or any(
-                not isinstance(key, str)
-                or not isinstance(value, dict)
-                or any(
-                    not isinstance(path, str) or not isinstance(state, torch.Tensor)
-                    for path, state in value.items()
-                )
-                for key, value in loader_states.items()
-            ):
-                msg = "Invalid loader generator state in training checkpoint."
-                raise TypeError(msg)
-            self._loader_generator_states = copy.deepcopy(loader_states)
-            self._pending_loader_generator_states = copy.deepcopy(loader_states)
-            self._restore_global_rng_state(rng_state)
-        else:
-            self._loader_generator_states = {}
-            self._pending_loader_generator_states = {}
-            logger.warning(
-                "Legacy checkpoint schema %d has no reproducible RNG state.",
-                schema_version,
-            )
-        self._resume_loaded = True
+            self._rollback_checkpoint(snapshot, callbacks)
+            raise
         logger.info(
             "Training checkpoint restored: path=%s, epoch=%d, optimizer_step=%d",
             checkpoint_path,

@@ -78,6 +78,13 @@ not reproduce an iterator from the middle of an epoch, already-prefetched worker
 or persistent-worker process state. Schemas 1 and 2 remain loadable but do not contain
 the reproducible RNG fields.
 
+Full and raw-model restoration is transactional. The complete serialized structure and
+component compatibility are checked first. If applying any model, optimizer, callback,
+metric, DataPack, Battery, loader-generator, or RNG state fails, the pre-load state is
+restored and the original exception is raised. Custom callbacks, metrics, and DataPacks
+participate in this guarantee when their `state_dict()` output can be passed back to
+`load_state_dict()` to restore the same state.
+
 ## Keep the best checkpoints
 
 ```python

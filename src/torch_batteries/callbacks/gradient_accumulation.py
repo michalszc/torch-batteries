@@ -19,13 +19,18 @@ class GradientAccumulation(Callback):
     __slots__ = ("_optimizer_step_idx", "_steps")
 
     def __init__(self, steps: int) -> None:
+        self._validate_steps(steps)
+        self._steps = steps
+        self._optimizer_step_idx = 0
+        logger.info("Gradient accumulation configured with %d steps.", steps)
+
+    @staticmethod
+    def _validate_steps(steps: int) -> None:
+        """Validate an accumulation count from any configuration source."""
         if steps < 1:
             logger.error("Invalid gradient accumulation steps: %d", steps)
             msg = "GradientAccumulation steps must be greater than zero."
             raise ValueError(msg)
-        self._steps = steps
-        self._optimizer_step_idx = 0
-        logger.info("Gradient accumulation configured with %d steps.", steps)
 
     @property
     def steps(self) -> int:
@@ -138,13 +143,30 @@ class GradientAccumulation(Callback):
         Args:
             state_dict: State returned by :meth:`state_dict`.
         """
+        _, optimizer_step_idx = self._validate_checkpoint_state(state_dict)
+        self._optimizer_step_idx = optimizer_step_idx
+        logger.info(
+            "Restored gradient accumulation at optimizer step %d.",
+            self._optimizer_step_idx,
+        )
+
+    def _validate_checkpoint_state(self, state_dict: dict[str, Any]) -> tuple[int, int]:
+        """Validate all accumulation checkpoint state without mutation."""
         try:
-            saved_steps = int(state_dict["steps"])
-            optimizer_step_idx = int(state_dict["optimizer_step_idx"])
-        except (KeyError, TypeError, ValueError) as error:
+            saved_steps = state_dict["steps"]
+            optimizer_step_idx = state_dict["optimizer_step_idx"]
+        except KeyError as error:
             logger.exception("Invalid gradient accumulation state.")
             msg = "Invalid GradientAccumulation checkpoint state."
             raise ValueError(msg) from error
+        if any(
+            not isinstance(value, int) or isinstance(value, bool) or value < 0
+            for value in (saved_steps, optimizer_step_idx)
+        ):
+            logger.error("Invalid gradient accumulation state.")
+            msg = "Invalid GradientAccumulation checkpoint state."
+            raise ValueError(msg)
+        self._validate_steps(saved_steps)
         if saved_steps != self._steps:
             logger.error(
                 "Gradient accumulation step mismatch: configured=%d, saved=%d",
@@ -153,8 +175,4 @@ class GradientAccumulation(Callback):
             )
             msg = "GradientAccumulation steps do not match checkpoint state."
             raise ValueError(msg)
-        self._optimizer_step_idx = optimizer_step_idx
-        logger.info(
-            "Restored gradient accumulation at optimizer step %d.",
-            self._optimizer_step_idx,
-        )
+        return saved_steps, optimizer_step_idx

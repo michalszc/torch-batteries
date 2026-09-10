@@ -1,7 +1,7 @@
 """Terminate workflows when selected losses or metrics are not finite."""
 
 import math
-from typing import Any, cast
+from typing import Any
 
 import torch
 
@@ -30,17 +30,19 @@ class TerminateOnNonFinite(Callback):
     __slots__ = ("_check_loss", "_check_metrics")
 
     def __init__(self, *, check_loss: bool = True, check_metrics: bool = True) -> None:
-        if (
-            type(cast("object", check_loss)) is not bool
-            or type(cast("object", check_metrics)) is not bool
-        ):
+        self._validate_configuration(check_loss, check_metrics)
+        self._check_loss = check_loss
+        self._check_metrics = check_metrics
+
+    @staticmethod
+    def _validate_configuration(check_loss: object, check_metrics: object) -> None:
+        """Validate non-finite options from any configuration source."""
+        if not isinstance(check_loss, bool) or not isinstance(check_metrics, bool):
             msg = "check_loss and check_metrics must be booleans."
             raise TypeError(msg)
         if not check_loss and not check_metrics:
             msg = "At least one of check_loss or check_metrics must be enabled."
             raise ValueError(msg)
-        self._check_loss = check_loss
-        self._check_metrics = check_metrics
 
     def state_dict(self) -> dict[str, bool]:
         """Return the fixed non-finite check configuration."""
@@ -55,6 +57,13 @@ class TerminateOnNonFinite(Callback):
         Args:
             state_dict: Configuration stored by :meth:`state_dict`.
         """
+        self._validate_checkpoint_state(state_dict)
+
+    def _validate_checkpoint_state(self, state_dict: dict[str, Any]) -> None:
+        """Validate fixed non-finite checks without changing state."""
+        self._validate_configuration(
+            state_dict.get("check_loss"), state_dict.get("check_metrics")
+        )
         if state_dict != self.state_dict():
             logger.error("TerminateOnNonFinite checkpoint configuration mismatch.")
             msg = "TerminateOnNonFinite checkpoint configuration does not match."

@@ -13,12 +13,16 @@ if TYPE_CHECKING:
     from torch_batteries.events import EventContext
 
 
-def valid_checkpoint_state() -> dict[str, object]:
+def valid_checkpoint_state(tmp_path: Path) -> dict[str, object]:
     """Return a minimal valid callback state for corruption tests."""
+    first = tmp_path / "first.pth"
+    second = tmp_path / "second.pth"
+    first.touch()
+    second.touch()
     return {
-        "best_k_models": {"first.pth": 0.8, "second.pth": 0.9},
-        "best_model_path": "second.pth",
-        "kth_best_model_path": "first.pth",
+        "best_k_models": {str(first): 0.8, str(second): 0.9},
+        "best_model_path": str(second),
+        "kth_best_model_path": str(first),
         "best_score": 0.9,
         "kth_best_score": 0.8,
         "save_weights_only": False,
@@ -539,15 +543,17 @@ class TestModelCheckpoint:
         )
 
     @pytest.mark.parametrize("mode", ["min", "max"])
-    def test_state_round_trip_restores_checkpoint_ranking(self, mode: str) -> None:
+    def test_state_round_trip_restores_checkpoint_ranking(
+        self, mode: str, tmp_path: Path
+    ) -> None:
         """Checkpoint ranking metadata survives callback serialization."""
-        state = valid_checkpoint_state()
+        state = valid_checkpoint_state(tmp_path)
         if mode == "min":
             state.update(
                 {
-                    "best_model_path": "first.pth",
+                    "best_model_path": str(tmp_path / "first.pth"),
                     "best_score": 0.8,
-                    "kth_best_model_path": "second.pth",
+                    "kth_best_model_path": str(tmp_path / "second.pth"),
                     "kth_best_score": 0.9,
                 }
             )
@@ -566,8 +572,8 @@ class TestModelCheckpoint:
         restored.load_state_dict(source.state_dict())
 
         assert restored.best_k_models == {
-            "first.pth": 0.8,
-            "second.pth": 0.9,
+            str(tmp_path / "first.pth"): 0.8,
+            str(tmp_path / "second.pth"): 0.9,
         }
         assert restored.best_model_path == state["best_model_path"]
         assert restored.best_score == state["best_score"]
@@ -584,9 +590,11 @@ class TestModelCheckpoint:
             ("save_weights_only", True),
         ],
     )
-    def test_invalid_state_is_rejected(self, field: str, value: object) -> None:
+    def test_invalid_state_is_rejected(
+        self, field: str, value: object, tmp_path: Path
+    ) -> None:
         """Every serialized ranking field is validated before restoration."""
-        state = valid_checkpoint_state()
+        state = valid_checkpoint_state(tmp_path)
         state[field] = value
         checkpoint = ModelCheckpoint(phase="validation", metric="score")
 
@@ -603,6 +611,28 @@ class TestModelCheckpoint:
             ValueError, match="Invalid ModelCheckpoint checkpoint state"
         ):
             checkpoint.load_state_dict({})
+
+    def test_missing_checkpoint_paths_are_rejected(self, tmp_path: Path) -> None:
+        """Serialized ranking paths must still reference checkpoint files."""
+        state = valid_checkpoint_state(tmp_path)
+        state["best_model_path"] = str(tmp_path / "missing.pth")
+        checkpoint = ModelCheckpoint(phase="validation", metric="score")
+
+        with pytest.raises(
+            ValueError, match="Invalid ModelCheckpoint checkpoint state"
+        ):
+            checkpoint.load_state_dict(state)
+
+    def test_inconsistent_checkpoint_ranking_is_rejected(self, tmp_path: Path) -> None:
+        """Cached ranking fields must agree with the retained checkpoint map."""
+        state = valid_checkpoint_state(tmp_path)
+        state["best_score"] = 0.1
+        checkpoint = ModelCheckpoint(phase="validation", metric="score")
+
+        with pytest.raises(
+            ValueError, match="Invalid ModelCheckpoint checkpoint state"
+        ):
+            checkpoint.load_state_dict(state)
 
     def test_phase_handlers_ignore_the_opposite_phase(self) -> None:
         """A checkpoint callback only handles its configured phase."""

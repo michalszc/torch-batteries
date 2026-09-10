@@ -116,18 +116,32 @@ class ExperimentTrackingCallback(Callback):
         Args:
             state_dict: State returned by :meth:`state_dict`.
         """
-        try:
-            self._current_epoch = int(state_dict["current_epoch"])
-            self._global_step = int(state_dict["global_step"])
-        except (KeyError, TypeError, ValueError) as error:
-            logger.exception("Invalid experiment tracking callback state.")
-            msg = "Invalid ExperimentTrackingCallback checkpoint state."
-            raise ValueError(msg) from error
+        current_epoch, global_step = self._validate_checkpoint_state(state_dict)
+        self._current_epoch = current_epoch
+        self._global_step = global_step
         logger.info(
             "Restored experiment tracking state: epoch=%d, global_step=%d",
             self._current_epoch,
             self._global_step,
         )
+
+    def _validate_checkpoint_state(self, state_dict: dict[str, Any]) -> tuple[int, int]:
+        """Validate all experiment progress state without mutation."""
+        try:
+            current_epoch = state_dict["current_epoch"]
+            global_step = state_dict["global_step"]
+        except KeyError as error:
+            logger.exception("Invalid experiment tracking callback state.")
+            msg = "Invalid ExperimentTrackingCallback checkpoint state."
+            raise ValueError(msg) from error
+        if any(
+            not isinstance(value, int) or isinstance(value, bool) or value < 0
+            for value in (current_epoch, global_step)
+        ):
+            logger.error("Invalid experiment tracking callback state.")
+            msg = "Invalid ExperimentTrackingCallback checkpoint state."
+            raise ValueError(msg)
+        return current_epoch, global_step
 
     @charge(Event.BEFORE_TRAIN)
     def on_train_start(self, _: EventContext) -> None:
