@@ -451,27 +451,40 @@ class TestModelCheckpoint:
             str(missing_path),
         )
 
-    def test_missing_monitor_metric_logs_warning(self, tmp_path: Path) -> None:
-        """Missing checkpoint monitor data is visible at WARNING level."""
+    @pytest.mark.parametrize(
+        ("phase", "metrics_key", "handler_name"),
+        [
+            ("train", "train_metrics", "run_on_train_epoch_end"),
+            ("validation", "val_metrics", "run_on_validation_end"),
+        ],
+    )
+    def test_missing_monitor_metric_is_rejected(
+        self,
+        tmp_path: Path,
+        phase: str,
+        metrics_key: str,
+        handler_name: str,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Missing checkpoint monitor data fails for both monitoring phases."""
         checkpoint = ModelCheckpoint(
-            phase="validation", metric="accuracy", save_dir=str(tmp_path)
+            phase=phase,  # type: ignore[arg-type]
+            metric="accuracy",
+            save_dir=str(tmp_path),
         )
+        context = {
+            "model": torch.nn.Linear(1, 1),
+            metrics_key: {"loss": 0.5},
+            "epoch": 1,
+        }
 
-        with patch(
-            "torch_batteries.callbacks.model_checkpoint.logger.warning"
-        ) as mock_warning:
-            checkpoint.run_on_validation_end(
-                {
-                    "model": torch.nn.Linear(1, 1),
-                    "val_metrics": {"loss": 0.5},
-                    "epoch": 1,
-                }
-            )
+        with pytest.raises(
+            ValueError,
+            match=rf"metric 'accuracy'.*phase '{phase}'",
+        ):
+            getattr(checkpoint, handler_name)(context)
 
-        mock_warning.assert_called_once_with(
-            "Checkpoint monitor metric '%s' is missing; checkpoint was skipped.",
-            "accuracy",
-        )
+        assert f"phase={phase}, metric=accuracy" in caplog.text
 
     def test_min_mode_retains_two_lowest_checkpoints(self, tmp_path: Path) -> None:
         """Minimum-mode top-k retention evicts the highest loss checkpoint."""

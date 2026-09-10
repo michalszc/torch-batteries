@@ -214,11 +214,16 @@ class ModelCheckpoint(Callback):
         """
         current_score = metrics.get(self._metric)
         if current_score is None:
-            logger.warning(
-                "Checkpoint monitor metric '%s' is missing; checkpoint was skipped.",
+            logger.error(
+                "Checkpoint metric is unavailable: phase=%s, metric=%s",
+                self._phase,
                 self._metric,
             )
-            return
+            msg = (
+                f"ModelCheckpoint metric '{self._metric}' is unavailable "
+                f"for phase '{self._phase}'."
+            )
+            raise ValueError(msg)
 
         is_best = self._monitor_op(current_score, self._best_score)
         qualifies = len(self._best_k_models) < self._save_top_k or self._monitor_op(

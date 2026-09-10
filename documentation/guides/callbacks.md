@@ -33,6 +33,11 @@ the required improvement. Best weights are cloned to CPU-safe independent tensor
 and restored after training when requested. Full checkpoints preserve the best score,
 patience counter, and optional best weights.
 
+``EarlyStopping``, ``ModelCheckpoint``, and metric-aware
+``LearningRateScheduler`` configurations raise ``ValueError`` when their selected
+train or validation metric is unavailable. A misspelled or unproduced metric never
+silently disables monitoring.
+
 For compatibility, the callbacks still accept `stage=` as a deprecated keyword
 alias. New code should use `phase=`.
 

@@ -187,7 +187,15 @@ class EarlyStopping(Callback):
         """
 
         if self._metric not in metrics:
-            msg = f"Metric '{self._metric}' not found in {self._phase} metrics."
+            logger.error(
+                "Early stopping metric is unavailable: phase=%s, metric=%s",
+                self._phase,
+                self._metric,
+            )
+            msg = (
+                f"EarlyStopping metric '{self._metric}' is unavailable "
+                f"for phase '{self._phase}'."
+            )
             raise ValueError(msg)
 
         current_score = metrics[self._metric]
