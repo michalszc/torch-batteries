@@ -181,6 +181,36 @@ def test_missing_loader_generator_warns_and_continues(
     assert "Saved loader generator is unavailable" in caplog.text
 
 
+def test_incompatible_loader_generator_warns_and_continues(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    battery = _battery()
+    loader = _explicit_loader()
+    battery._pending_loader_generator_states = {  # noqa: SLF001
+        "train": {"loader.generator": torch.tensor([1])}
+    }
+
+    battery._restore_loader_generator_state("train", loader)  # noqa: SLF001
+
+    assert "Saved loader generator is incompatible" in caplog.text
+
+
+def test_rng_capture_without_numpy_omits_numpy_state() -> None:
+    with (
+        patch("torch_batteries.trainer._checkpoint.logger.debug") as debug,
+        patch(
+            "torch_batteries.trainer._checkpoint.importlib.import_module",
+            side_effect=ModuleNotFoundError,
+        ),
+    ):
+        state = Battery._capture_global_rng_state()  # noqa: SLF001
+
+    assert "numpy" not in state
+    debug.assert_called_once_with(
+        "NumPy is unavailable; its RNG state was not checkpointed."
+    )
+
+
 def test_accelerator_rng_capture_includes_all_cuda_and_mps_states() -> None:
     cuda_states = [
         torch.tensor([1], dtype=torch.uint8),
@@ -238,11 +268,13 @@ def test_unavailable_saved_accelerators_warn_and_continue(
     assert "MPS is unavailable" in caplog.text
 
 
-def test_available_saved_accelerators_restore_each_state() -> None:
+def test_available_saved_accelerators_restore_each_state(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     state = Battery._capture_global_rng_state()  # noqa: SLF001
     cuda_state = torch.tensor([1], dtype=torch.uint8)
     mps_state = torch.tensor([2], dtype=torch.uint8)
-    state["cuda"] = [cuda_state]
+    state["cuda"] = [cuda_state, torch.tensor([3], dtype=torch.uint8)]
     state["mps"] = mps_state
 
     with (
@@ -269,6 +301,7 @@ def test_available_saved_accelerators_restore_each_state() -> None:
     set_mps.assert_called_once()
     assert torch.equal(set_cuda.call_args.args[0], cuda_state)
     assert torch.equal(set_mps.call_args.args[0], mps_state)
+    assert "CUDA RNG device count differs" in caplog.text
 
 
 def test_unavailable_numpy_warns_and_continues(
@@ -283,3 +316,52 @@ def test_unavailable_numpy_warns_and_continues(
         Battery._restore_global_rng_state(state)  # noqa: SLF001
 
     assert "NumPy is unavailable" in caplog.text
+
+
+@pytest.mark.parametrize(
+    ("state", "message"),
+    [
+        ([], "Invalid RNG state"),
+        ({"python": random.getstate()}, "Invalid RNG state"),
+        (
+            {"python": (0, (), None), "torch_cpu": torch.get_rng_state()},
+            "Invalid Python RNG state",
+        ),
+        (
+            {
+                "python": random.getstate(),
+                "torch_cpu": torch.get_rng_state(),
+                "cuda": {},
+            },
+            "Invalid CUDA RNG state",
+        ),
+        (
+            {
+                "python": random.getstate(),
+                "torch_cpu": torch.get_rng_state(),
+                "mps": [],
+            },
+            "Invalid MPS RNG state",
+        ),
+        (
+            {
+                "python": random.getstate(),
+                "torch_cpu": torch.get_rng_state(),
+                "numpy": {},
+            },
+            "Invalid NumPy RNG state",
+        ),
+    ],
+)
+def test_invalid_global_rng_state_is_rejected(state: object, message: str) -> None:
+    with pytest.raises(TypeError, match=message):
+        Battery._validate_global_rng_state(state)  # noqa: SLF001
+
+
+@pytest.mark.parametrize(
+    "state",
+    [[], {1: {}}, {"train": []}, {"train": {1: torch.get_rng_state()}}],
+)
+def test_invalid_loader_generator_state_is_rejected(state: object) -> None:
+    with pytest.raises(TypeError, match="Invalid loader generator state"):
+        Battery._validate_loader_generator_states(state)  # noqa: SLF001

@@ -339,3 +339,33 @@ def test_fixed_callback_configuration_is_validated_before_model_mutation(
         target.load_checkpoint(checkpoint)
 
     assert model_loads == 0
+
+
+def test_rejects_non_mapping_callback_snapshot_before_mutation(
+    tmp_path: Path,
+) -> None:
+    source, *_ = _battery(7)
+    checkpoint = tmp_path / "callback-snapshot.pth"
+    source.save_checkpoint(checkpoint)
+    target = _battery(2)[0]
+
+    with (
+        patch.object(_CheckpointCallback, "state_dict", return_value=[]),
+        pytest.raises(TypeError, match=r"Callback state_dict\(\) must return"),
+    ):
+        target.load_checkpoint(checkpoint)
+
+
+def test_rejects_non_mapping_data_pack_snapshot_before_mutation(
+    tmp_path: Path,
+) -> None:
+    source, *_ = _battery(7)
+    checkpoint = tmp_path / "data-pack-snapshot.pth"
+    source.save_checkpoint(checkpoint)
+    target = _battery(2)[0]
+
+    with (
+        patch.object(_CheckpointDataPack, "state_dict", return_value=[]),
+        pytest.raises(TypeError, match=r"DataPack state_dict\(\) must return"),
+    ):
+        target.load_checkpoint(checkpoint)

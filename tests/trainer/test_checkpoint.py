@@ -180,6 +180,10 @@ def test_resume_requires_optimizer_when_checkpoint_contains_one(
         ("callbacks", {}, TypeError, "Invalid callback state"),
         ("metrics", [], TypeError, "Invalid metric state"),
         ("results", [], TypeError, "Invalid training history"),
+        ("optimizer", [], TypeError, "Invalid optimizer state"),
+        ("model", [], TypeError, "Invalid model state"),
+        ("epoch", "one", TypeError, "Invalid training counters"),
+        ("optimizer_step_idx", None, TypeError, "Invalid training counters"),
     ],
 )
 def test_rejects_invalid_full_checkpoint_field_types(
@@ -199,6 +203,58 @@ def test_rejects_invalid_full_checkpoint_field_types(
 
     with pytest.raises(exception, match=message):
         target.load_checkpoint(path)
+
+
+def test_rejects_optimizer_when_checkpoint_has_none(tmp_path: Path) -> None:
+    model = _Model()
+    source = Battery(model, device="cpu")
+    path = tmp_path / "without-optimizer.pth"
+    source.save_checkpoint(path)
+    target_model = _Model()
+    target = Battery(
+        target_model,
+        device="cpu",
+        optimizer=torch.optim.SGD(target_model.parameters(), lr=0.1),
+    )
+
+    with pytest.raises(ValueError, match="optimizer does not match"):
+        target.load_checkpoint(path)
+
+
+def test_rejects_incompatible_optimizer_parameter_groups(tmp_path: Path) -> None:
+    source, _ = _battery()
+    path = tmp_path / "optimizer-groups.pth"
+    source.save_checkpoint(path)
+    payload = torch.load(path, weights_only=True)
+    payload["optimizer"]["param_groups"][0]["params"].append(999)
+    torch.save(payload, path)
+
+    with pytest.raises(ValueError, match="optimizer does not match"):
+        _battery()[0].load_checkpoint(path)
+
+
+def test_rejects_invalid_callback_item_state(tmp_path: Path) -> None:
+    source, _ = _battery()
+    path = tmp_path / "callback-item.pth"
+    source.save_checkpoint(path)
+    payload = torch.load(path, weights_only=True)
+    payload["callbacks"][0]["state"] = []
+    torch.save(payload, path)
+
+    with pytest.raises(TypeError, match="Invalid callback state"):
+        _battery()[0].load_checkpoint(path)
+
+
+def test_rejects_mismatched_metric_state_names(tmp_path: Path) -> None:
+    source, _ = _battery()
+    path = tmp_path / "metric-names.pth"
+    source.save_checkpoint(path)
+    payload = torch.load(path, weights_only=True)
+    payload["metrics"] = {"unexpected": {}}
+    torch.save(payload, path)
+
+    with pytest.raises(ValueError, match="metric states do not match"):
+        _battery()[0].load_checkpoint(path)
 
 
 def test_rejects_callback_order_mismatch(tmp_path: Path) -> None:
