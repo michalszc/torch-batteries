@@ -49,28 +49,18 @@ class TestEarlyStopping:
         ):
             EarlyStopping(phase="invalid", metric="loss")  # type: ignore[arg-type]
 
-    def test_deprecated_stage_alias(self, caplog: pytest.LogCaptureFixture) -> None:
-        """The deprecated stage keyword resolves to the monitoring phase."""
-        with pytest.warns(DeprecationWarning, match="'stage' is deprecated"):
-            callback = EarlyStopping(stage="validation", metric="loss")
+    def test_rejects_removed_stage_alias(self) -> None:
+        with pytest.raises(TypeError, match="unexpected keyword argument 'stage'"):
+            EarlyStopping(stage="validation", metric="loss")  # type: ignore[call-arg]
 
-        assert callback._phase == "validation"  # noqa: SLF001
-        assert "'stage' is deprecated; use 'phase' instead" in caplog.text
-
-    def test_deprecated_val_phase_is_normalized(
-        self, caplog: pytest.LogCaptureFixture
-    ) -> None:
-        """The short validation spelling warns and stores the canonical value."""
-        with pytest.warns(DeprecationWarning, match="phase='val' is deprecated"):
-            callback = EarlyStopping(phase="val", metric="loss")
-
-        assert callback._phase == "validation"  # noqa: SLF001
-        assert "phase='val' is deprecated" in caplog.text
+    def test_rejects_removed_val_phase(self) -> None:
+        with pytest.raises(ValueError, match="phase must be"):
+            EarlyStopping(phase="val", metric="loss")  # type: ignore[arg-type]
 
     def test_rejects_phase_and_stage(self) -> None:
-        """Canonical and deprecated monitoring keywords are mutually exclusive."""
-        with pytest.raises(TypeError, match="cannot both be provided"):
-            EarlyStopping(phase="train", stage="validation", metric="loss")
+        """The removed stage keyword is unavailable alongside phase."""
+        with pytest.raises(TypeError, match="unexpected keyword argument 'stage'"):
+            EarlyStopping(phase="train", stage="validation", metric="loss")  # type: ignore[call-arg]
 
     def test_requires_phase(self) -> None:
         """A monitoring phase remains required when the alias is omitted."""

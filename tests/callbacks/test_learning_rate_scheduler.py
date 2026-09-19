@@ -8,7 +8,7 @@ from torch import nn
 from torch.optim.lr_scheduler import ReduceLROnPlateau, StepLR
 from torch.utils.data import DataLoader, TensorDataset
 
-from torch_batteries import Battery, Event, EventContext, charge
+from torch_batteries import Battery, Event, EventContext, StepOutput, charge
 from torch_batteries.callbacks import GradientAccumulation, LearningRateScheduler
 
 
@@ -18,9 +18,11 @@ class _Model(nn.Module):
         self.layer = nn.Linear(1, 1)
 
     @charge(Event.TRAIN_STEP)
-    def training_step(self, context: EventContext) -> torch.Tensor:
+    def training_step(self, context: EventContext) -> StepOutput:
         inputs, targets = cast("tuple[torch.Tensor, torch.Tensor]", context["batch"])
-        return cast("torch.Tensor", ((self.layer(inputs) - targets) ** 2).mean())
+        return StepOutput(
+            loss=cast("torch.Tensor", ((self.layer(inputs) - targets) ** 2).mean())
+        )
 
 
 def _loader(samples: int = 4) -> DataLoader:
@@ -79,34 +81,30 @@ def test_plateau_scheduler_uses_selected_validation_metric() -> None:
     assert optimizer.param_groups[0]["lr"] == pytest.approx(0.05)
 
 
-def test_deprecated_stage_alias(caplog: pytest.LogCaptureFixture) -> None:
-    """The deprecated stage keyword resolves to the monitoring phase."""
+def test_rejects_removed_stage_alias() -> None:
     model = _Model()
     optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
 
-    with pytest.warns(DeprecationWarning, match="'stage' is deprecated"):
-        callback = LearningRateScheduler(
+    with pytest.raises(TypeError, match="unexpected keyword argument 'stage'"):
+        LearningRateScheduler(
             ReduceLROnPlateau(optimizer),
             stage="validation",
             metric="loss",
-        )
-
-    assert callback._phase == "validation"  # noqa: SLF001
-    assert "'stage' is deprecated; use 'phase' instead" in caplog.text
+        )  # type: ignore[call-arg]
 
 
 def test_rejects_phase_and_stage() -> None:
-    """Canonical and deprecated monitoring keywords are mutually exclusive."""
+    """The removed stage keyword is unavailable alongside phase."""
     model = _Model()
     optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
 
-    with pytest.raises(TypeError, match="cannot both be provided"):
+    with pytest.raises(TypeError, match="unexpected keyword argument 'stage'"):
         LearningRateScheduler(
             ReduceLROnPlateau(optimizer),
             phase="train",
             stage="validation",
             metric="loss",
-        )
+        )  # type: ignore[call-arg]
 
 
 def test_validates_plateau_and_ordinary_scheduler_configuration() -> None:
@@ -137,8 +135,7 @@ def test_scheduler_state_round_trip() -> None:
     assert restored.scheduler.last_epoch == callback.scheduler.last_epoch
 
 
-def test_loads_legacy_scheduler_stage_state() -> None:
-    """Scheduler state from before the phase rename remains loadable."""
+def test_rejects_removed_scheduler_stage_state() -> None:
     model = _Model()
     optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
     callback = LearningRateScheduler(
@@ -149,12 +146,11 @@ def test_loads_legacy_scheduler_stage_state() -> None:
     state = callback.state_dict()
     state["stage"] = state.pop("phase")
 
-    with pytest.warns(DeprecationWarning, match="'stage' is deprecated"):
+    with pytest.raises(ValueError, match="requires 'phase'"):
         callback.load_state_dict(state)
 
 
-def test_loads_legacy_scheduler_val_state() -> None:
-    """Legacy val checkpoint state normalizes to validation."""
+def test_rejects_removed_scheduler_val_state() -> None:
     model = _Model()
     optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
     callback = LearningRateScheduler(
@@ -165,7 +161,7 @@ def test_loads_legacy_scheduler_val_state() -> None:
     state = callback.state_dict()
     state["phase"] = "val"
 
-    with pytest.warns(DeprecationWarning, match="phase='val' is deprecated"):
+    with pytest.raises(ValueError, match="phase must be"):
         callback.load_state_dict(state)
 
 
@@ -173,7 +169,6 @@ def test_loads_legacy_scheduler_val_state() -> None:
     "phase_keys",
     [
         {},
-        {"phase": None, "stage": None},
     ],
 )
 def test_rejects_ambiguous_scheduler_phase_state(
@@ -187,7 +182,7 @@ def test_rejects_ambiguous_scheduler_phase_state(
     state.pop("phase")
     state.update(phase_keys)
 
-    with pytest.raises(ValueError, match="exactly one"):
+    with pytest.raises(ValueError, match="requires 'phase'"):
         callback.load_state_dict(state)
 
 
@@ -245,7 +240,7 @@ def test_rejects_invalid_scheduler_checkpoint_state() -> None:
     optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
     callback = LearningRateScheduler(StepLR(optimizer, 1))
 
-    with pytest.raises(ValueError, match="does not match"):
+    with pytest.raises(ValueError, match="requires 'phase'"):
         callback.load_state_dict(
             {
                 "interval": "step",
@@ -259,7 +254,7 @@ def test_rejects_invalid_scheduler_checkpoint_state() -> None:
         callback.load_state_dict(
             {
                 "interval": "epoch",
-                "stage": None,
+                "phase": None,
                 "metric": None,
                 "scheduler": None,
                 "stepped_epochs": None,

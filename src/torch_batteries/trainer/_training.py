@@ -1,7 +1,6 @@
 """Training workflows for ``torch_batteries.Battery``."""
 
 import copy
-import warnings
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
@@ -59,14 +58,12 @@ class TrainingMixin(BatteryStateMixin):
             verbose,
             resume_from=resume_from,
             resume_epochs_mode=resume_epochs_mode,
-            warn_for_validation=False,
+            run_validation=True,
         )
 
-    def train(  # noqa: PLR0913
+    def train(
         self,
         train_loader: DataLoader | None = None,
-        # Deprecated compatibility parameter; use fit(..., val_loader=...).
-        val_loader: DataLoader | None = None,
         epochs: int = 1,
         verbose: int = 1,
         *,
@@ -76,14 +73,11 @@ class TrainingMixin(BatteryStateMixin):
         """Train the model for one or more epochs.
 
         Passing ``train_loader`` selects direct-loader mode. When it is omitted, the
-        attached DataPack supplies train and optional validation loaders. A checkpoint
+        attached DataPack supplies training data. A checkpoint
         passed through ``resume_from`` is restored before DataPack setup.
 
         Args:
             train_loader: Optional sized, non-empty training loader.
-            val_loader: Deprecated. Optional validation loader used only with an
-                explicit train loader. Use ``fit`` for validated training.
-                Implicit validation compatibility comes from the DataPack.
             epochs: Positive epoch count or resume target.
             verbose: ``0`` for silent, ``1`` for progress bars, or ``2`` for summaries.
             resume_from: Optional full checkpoint restored before data resolution.
@@ -97,15 +91,19 @@ class TrainingMixin(BatteryStateMixin):
             ValueError: If loaders, DataPack datasets, handlers, optimizer, resume
                 mode, or checkpoint state are incompatible.
         """
-        return self._run_training_workflow(
+        result = self._run_training_workflow(
             train_loader,
-            val_loader,
+            None,
             epochs,
             verbose,
             resume_from=resume_from,
             resume_epochs_mode=resume_epochs_mode,
-            warn_for_validation=True,
+            run_validation=False,
         )
+        return {
+            "train_loss": result["train_loss"],
+            "train_metrics": result["train_metrics"],
+        }
 
     def _run_training_workflow(  # noqa: PLR0913
         self,
@@ -116,7 +114,7 @@ class TrainingMixin(BatteryStateMixin):
         *,
         resume_from: str | Path | None,
         resume_epochs_mode: str,
-        warn_for_validation: bool,
+        run_validation: bool,
     ) -> FitResult:
         """Resolve loaders and run the shared training engine."""
         if epochs <= 0:
@@ -136,7 +134,6 @@ class TrainingMixin(BatteryStateMixin):
                 epochs,
                 verbose,
                 resume_epochs_mode=resume_epochs_mode,
-                warn_for_validation=warn_for_validation,
             )
         if val_loader is not None:
             msg = (
@@ -146,17 +143,20 @@ class TrainingMixin(BatteryStateMixin):
             raise ValueError(msg)
         with self._data_workflow("fit") as workflow:
             train_loaders = workflow.loaders.loaders_for_phase("train")
-            validation_loaders = workflow.loaders.loaders_for_phase("validation")
+            validation_loaders = (
+                workflow.loaders.loaders_for_phase("validation")
+                if run_validation
+                else {}
+            )
             return self._train_with_loaders(
                 next(iter(train_loaders.values())),
                 next(iter(validation_loaders.values()), None),
                 epochs,
                 verbose,
                 resume_epochs_mode=resume_epochs_mode,
-                warn_for_validation=warn_for_validation,
             )
 
-    def _train_with_loaders(  # noqa: PLR0912, PLR0913, PLR0915
+    def _train_with_loaders(  # noqa: PLR0912, PLR0915
         self,
         train_loader: DataLoader,
         val_loader: DataLoader | None = None,
@@ -164,7 +164,6 @@ class TrainingMixin(BatteryStateMixin):
         verbose: int = 1,
         *,
         resume_epochs_mode: str = "total",
-        warn_for_validation: bool = False,
     ) -> FitResult:
         """Train the model for one or more epochs.
 
@@ -181,8 +180,6 @@ class TrainingMixin(BatteryStateMixin):
                 ``resume_epochs_mode``.
             verbose: ``0`` for silent, ``1`` for progress bars, or ``2`` for summaries.
             resume_epochs_mode: ``"total"`` or ``"additional"``.
-            warn_for_validation: Whether to warn when the compatibility validation
-                behavior of ``train`` actually runs.
 
         Returns:
             Per-epoch loss histories and named metric histories. Validation entries
@@ -280,21 +277,6 @@ class TrainingMixin(BatteryStateMixin):
             self._event_handler.call(Event.AFTER_TRAIN_EPOCH, after_epoch_context)
 
             if val_loader:
-                if warn_for_validation:
-                    # A future version will make train() training-only and will no
-                    # longer run validation.
-                    warning_message = (
-                        "Validation through Battery.train() is deprecated and will "
-                        "be removed from train() in a future version. Use "
-                        "Battery.fit() for combined training and validation."
-                    )
-                    logger.warning(warning_message)
-                    warnings.warn(
-                        warning_message,
-                        DeprecationWarning,
-                        stacklevel=3,
-                    )
-                    warn_for_validation = False
                 logger.debug("Validation phase started: epoch=%d", epoch)
                 before_val_context: EventContext = {
                     "battery": as_battery(self),
@@ -528,7 +510,6 @@ class TrainingMixin(BatteryStateMixin):
                 "batch": batch,
                 "batch_idx": batch_idx,
                 "epoch": epoch,
-                "loss": loss.item(),
                 "train_loss": loss.item(),
                 "train_metrics": batch_metrics,
                 "optimizer_step": optimizer_step,

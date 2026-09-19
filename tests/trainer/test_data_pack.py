@@ -157,7 +157,7 @@ def test_data_pack_drives_all_battery_workflows() -> None:
 
     assert battery.data_pack is data_pack
 
-    train_result = battery.train(epochs=1, verbose=0)
+    train_result = battery.fit(epochs=1, verbose=0)
     test_result = battery.test(verbose=0)
     predict_result = cast(
         "dict[str, Any]",
@@ -378,7 +378,7 @@ def test_explicit_validation_loader_cannot_mix_with_implicit_training() -> None:
     loader = DataLoader(data_pack.dataset, batch_size=2)
 
     with pytest.raises(ValueError, match="cannot be combined"):
-        _battery(data_pack).train(val_loader=loader, verbose=0)
+        _battery(data_pack).fit(val_loader=loader, verbose=0)
 
 
 def test_missing_data_pack_produces_actionable_error() -> None:

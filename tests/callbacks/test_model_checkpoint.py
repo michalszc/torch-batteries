@@ -56,18 +56,14 @@ class TestModelCheckpoint:
         ):
             ModelCheckpoint(phase="invalid", metric="accuracy")  # type: ignore[arg-type]
 
-    def test_deprecated_stage_alias(self, caplog: pytest.LogCaptureFixture) -> None:
-        """The deprecated stage keyword resolves to the monitoring phase."""
-        with pytest.warns(DeprecationWarning, match="'stage' is deprecated"):
-            checkpoint = ModelCheckpoint(stage="validation", metric="accuracy")
-
-        assert checkpoint._phase == "validation"  # noqa: SLF001
-        assert "'stage' is deprecated; use 'phase' instead" in caplog.text
+    def test_rejects_removed_stage_alias(self) -> None:
+        with pytest.raises(TypeError, match="unexpected keyword argument 'stage'"):
+            ModelCheckpoint(stage="validation", metric="accuracy")  # type: ignore[call-arg]
 
     def test_rejects_phase_and_stage(self) -> None:
-        """Canonical and deprecated monitoring keywords are mutually exclusive."""
-        with pytest.raises(TypeError, match="cannot both be provided"):
-            ModelCheckpoint(phase="train", stage="validation", metric="accuracy")
+        """The removed stage keyword is unavailable alongside phase."""
+        with pytest.raises(TypeError, match="unexpected keyword argument 'stage'"):
+            ModelCheckpoint(phase="train", stage="validation", metric="accuracy")  # type: ignore[call-arg]
 
     def test_requires_phase(self) -> None:
         """A monitoring phase remains required when the alias is omitted."""

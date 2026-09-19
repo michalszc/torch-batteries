@@ -185,8 +185,8 @@ class ExperimentTrackingCallback(Callback):
         metrics: dict[str, float] = {
             "epoch": float(self._current_epoch),
         }
-        if ctx.get("loss") is not None:
-            metrics["loss"] = float(ctx["loss"])
+        if ctx.get("train_loss") is not None:
+            metrics["loss"] = float(ctx["train_loss"])
 
         if ctx.get("train_metrics"):
             train_metrics = ctx["train_metrics"]

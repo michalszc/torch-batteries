@@ -77,7 +77,6 @@ class EvaluationMixin(BatteryStateMixin):
             "model": self._model,
             "optimizer": self._optimizer,
             "epoch": 1,
-            "loss": val_metrics["loss"],
             "val_loss": val_metrics["loss"],
             "val_metrics": val_metrics,
         }
@@ -234,7 +233,6 @@ class EvaluationMixin(BatteryStateMixin):
             "model": self._model,
             "optimizer": self._optimizer,
             "epoch": 1,
-            "loss": test_loss,
             "test_loss": test_loss,
             "test_metrics": test_metrics_context,
             **dataset_identity_context(dataset_name),
@@ -245,7 +243,6 @@ class EvaluationMixin(BatteryStateMixin):
             "battery": as_battery(self),
             "model": self._model,
             "optimizer": self._optimizer,
-            "loss": test_loss,
             "test_loss": test_loss,
             "test_metrics": test_metrics_context,
             **dataset_identity_context(dataset_name),
@@ -324,7 +321,6 @@ class EvaluationMixin(BatteryStateMixin):
             "batch": batch,
             "batch_idx": batch_idx,
             "epoch": 1,
-            "loss": loss.item(),
             "test_loss": loss.item(),
             "test_metrics": batch_metrics,
             **dataset_identity_context(dataset_name),
@@ -425,7 +421,6 @@ class EvaluationMixin(BatteryStateMixin):
                     "batch": batch,
                     "batch_idx": batch_idx,
                     "epoch": epoch,
-                    "loss": loss.item(),
                     "val_loss": loss.item(),
                     "val_metrics": batch_metrics,
                 }
@@ -453,7 +448,6 @@ class EvaluationMixin(BatteryStateMixin):
             "battery": as_battery(self),
             "model": self._model,
             "epoch": epoch,
-            "loss": val_metrics["loss"],
             "val_loss": val_metrics["loss"],
             "val_metrics": val_metrics,
         }

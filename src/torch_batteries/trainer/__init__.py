@@ -7,8 +7,7 @@
 - **`StepOutput`** — explicit loss, predictions, targets, and manual metrics returned
   from a train, validation, or test step.
 - **`FitResult`** — per-epoch training and optional validation histories.
-- **`TrainResult`** — per-epoch training histories with temporary validation
-  compatibility fields.
+- **`TrainResult`** — per-epoch training histories.
 - **`ValidationResult`** — aggregate standalone validation loss and metrics.
 - **`TestResult`** — aggregate test loss and metrics.
 - **`PredictResult`** — collected or recursively concatenated prediction output.

@@ -264,7 +264,6 @@ PUBLIC_PARAMETERS: dict[str, dict[str, object]] = {
     },
     "torch_batteries.trainer.Battery.train": {
         "train_loader": None,
-        "val_loader": None,
         "epochs": 1,
         "verbose": 1,
         "resume_from": None,
@@ -322,12 +321,6 @@ PUBLIC_KEYWORD_ONLY_PARAMETERS: dict[str, set[str]] = {
     "torch_batteries.trainer.Battery.predict_iter": {"move_to_cpu", "dataset"},
 }
 
-DEPRECATED_PARAMETERS: dict[str, set[str]] = {
-    "torch_batteries.trainer.Battery.train": {"val_loader"},
-    "torch_batteries.callbacks.EarlyStopping": {"stage"},
-    "torch_batteries.callbacks.LearningRateScheduler": {"stage"},
-    "torch_batteries.callbacks.ModelCheckpoint": {"stage"},
-}
 
 REFERENCE_PAGES: dict[str, str] = {
     "torch_batteries.trainer": "reference/trainer/index.html",

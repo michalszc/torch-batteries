@@ -197,7 +197,7 @@ class TestBattery:
         with pytest.raises(ValueError, match="Training loader must not be empty"):
             battery.train(empty_loader)
         with pytest.raises(ValueError, match="Validation loader must not be empty"):
-            battery.train(loader, empty_loader)
+            battery.fit(loader, empty_loader)
         with pytest.raises(ValueError, match="Test loader must not be empty"):
             battery.test(empty_loader)
         with pytest.raises(ValueError, match="Prediction loader must not be empty"):
@@ -305,7 +305,7 @@ class TestBattery:
 
         def run_workflow() -> None:
             if workflow == "validation":
-                battery.train(loader, loader, verbose=0)
+                battery.fit(loader, loader, verbose=0)
             elif workflow == "test":
                 battery.test(loader, verbose=0)
             else:
@@ -366,9 +366,8 @@ class TestBattery:
 
         assert isinstance(result, dict)
         assert "train_loss" in result
-        assert "val_loss" in result
+        assert "val_loss" not in result
         assert len(result["train_loss"]) == 2  # 2 epochs
-        assert len(result["val_loss"]) == 0  # no validation loader
 
     @patch("torch_batteries.utils.progress.base.Progress.end_phase")
     def test_train_with_validation(self, mock_end_phase: MagicMock) -> None:
@@ -383,7 +382,7 @@ class TestBattery:
         train_loader = self.create_simple_data_loader(batch_size=2, num_samples=4)
         val_loader = self.create_simple_data_loader(batch_size=2, num_samples=4)
 
-        result = battery.train(train_loader, val_loader, epochs=1, verbose=0)
+        result = battery.fit(train_loader, val_loader, epochs=1, verbose=0)
 
         assert len(result["train_loss"]) == 1
         assert len(result["val_loss"]) == 1
@@ -438,7 +437,7 @@ class TestBattery:
         train_loader = self.create_simple_data_loader(batch_size=2, num_samples=4)
         val_loader = self.create_simple_data_loader(batch_size=2, num_samples=4)
 
-        result = battery.train(train_loader, val_loader, epochs=2, verbose=0)
+        result = battery.fit(train_loader, val_loader, epochs=2, verbose=0)
 
         after_train = recorder.after_train[-1]
         assert after_train["history_train_loss"] == result["train_loss"]
@@ -469,7 +468,7 @@ class TestBattery:
         train_loader = self.create_simple_data_loader(batch_size=2, num_samples=4)
         val_loader = self.create_simple_data_loader(batch_size=2, num_samples=4)
 
-        battery.train(train_loader, val_loader, epochs=2, verbose=0)
+        battery.fit(train_loader, val_loader, epochs=2, verbose=0)
 
         assert len(recorder.before_validation[0]["history_train_loss"]) == 1
         assert recorder.before_validation[0]["history_val_loss"] == []
@@ -488,15 +487,16 @@ class TestBattery:
         train_loader = self.create_simple_data_loader(batch_size=2, num_samples=4)
         val_loader = self.create_simple_data_loader(batch_size=2, num_samples=4)
 
-        battery.train(train_loader, val_loader, epochs=1, verbose=0)
+        battery.fit(train_loader, val_loader, epochs=1, verbose=0)
 
         train_step_context = recorder.after_train_step[0]
-        assert train_step_context["train_loss"] == train_step_context["loss"]
-        assert train_step_context["train_metrics"]["loss"] == train_step_context["loss"]
+        assert (
+            train_step_context["train_metrics"]["loss"]
+            == train_step_context["train_loss"]
+        )
 
         val_step_context = recorder.after_validation_step[0]
-        assert val_step_context["val_loss"] == val_step_context["loss"]
-        assert val_step_context["val_metrics"]["loss"] == val_step_context["loss"]
+        assert val_step_context["val_metrics"]["loss"] == val_step_context["val_loss"]
 
     def test_validate_epoch_without_handler_raises_error(self) -> None:
         """Test validation without validation step handler raises error."""
@@ -527,7 +527,7 @@ class TestBattery:
             ValueError,
             match=r"No method decorated with @charge\(Event.VALIDATION_STEP\)",
         ):
-            battery.train(train_loader, val_loader, epochs=1)
+            battery.fit(train_loader, val_loader, epochs=1)
 
     def test_test_without_handler_raises_error(self) -> None:
         """Test testing without test step handler raises ValueError."""
@@ -571,12 +571,15 @@ class TestBattery:
         battery.test(test_loader, verbose=0)
 
         test_step_context = recorder.after_test_step[0]
-        assert test_step_context["test_loss"] == test_step_context["loss"]
-        assert test_step_context["test_metrics"]["loss"] == test_step_context["loss"]
+        assert (
+            test_step_context["test_metrics"]["loss"] == test_step_context["test_loss"]
+        )
 
         after_test_context = recorder.after_test[-1]
-        assert after_test_context["test_loss"] == after_test_context["loss"]
-        assert after_test_context["test_metrics"]["loss"] == after_test_context["loss"]
+        assert (
+            after_test_context["test_metrics"]["loss"]
+            == after_test_context["test_loss"]
+        )
 
     def test_automatic_metrics_use_single_forward_per_phase(self) -> None:
         """Automatic metrics reuse predictions returned by each step."""
@@ -595,7 +598,7 @@ class TestBattery:
         battery = Battery(model, optimizer=optimizer, metrics={"mae": mae})
         loader = self.create_simple_data_loader(batch_size=2, num_samples=4)
 
-        battery.train(loader, loader, epochs=1, verbose=0)
+        battery.fit(loader, loader, epochs=1, verbose=0)
         assert model.forward_calls == 4
 
         model.forward_calls = 0
@@ -730,7 +733,7 @@ class TestBattery:
             metrics={"mae": mae},
         )
 
-        with pytest.raises(ValueError, match="must return StepOutput"):
+        with pytest.raises(TypeError, match="must return StepOutput"):
             battery.train(self.create_simple_data_loader(), verbose=0)
 
     def test_automatic_metrics_reject_incomplete_step_output(self) -> None:
@@ -786,8 +789,8 @@ class TestBattery:
 
         assert result["train_metrics"]["mae"] == [123.0]
 
-    def test_legacy_tuple_metrics_remain_supported(self) -> None:
-        """Manual tuple metrics remain valid without automatic metrics."""
+    def test_tuple_manual_metrics(self) -> None:
+        """Tuple step metrics remain valid without automatic metrics."""
 
         class TupleMetricModel(nn.Module):
             def __init__(self) -> None:
@@ -812,15 +815,22 @@ class TestBattery:
     @pytest.mark.parametrize(
         ("step_result", "error_type", "message"),
         [
-            (1.0, TypeError, "loss must be a torch.Tensor"),
-            (torch.ones(2), ValueError, "loss must be a scalar tensor"),
+            (1.0, TypeError, "must return StepOutput"),
             (
-                (torch.tensor(1.0), {"bad": torch.ones(2)}),
+                StepOutput(loss=torch.ones(2)),
+                ValueError,
+                "loss must be a scalar tensor",
+            ),
+            (
+                StepOutput(loss=torch.tensor(1.0), metrics={"bad": torch.ones(2)}),
                 ValueError,
                 "must be scalar",
             ),
             (
-                (torch.tensor(1.0), {"bad": "not-numeric"}),
+                StepOutput(
+                    loss=torch.tensor(1.0),
+                    metrics={"bad": "not-numeric"},  # type: ignore[dict-item]
+                ),
                 TypeError,
                 "must be numeric",
             ),
@@ -829,7 +839,7 @@ class TestBattery:
     def test_invalid_step_results_raise_clear_errors(
         self, step_result: object, error_type: type[Exception], message: str
     ) -> None:
-        """Malformed legacy step results raise explicit errors."""
+        """Malformed step results raise explicit errors."""
 
         class InvalidResultModel(nn.Module):
             def __init__(self) -> None:
@@ -979,10 +989,8 @@ class TestBattery:
             (torch.tensor(1.0), {}, "extra"),
         ],
     )
-    def test_malformed_legacy_step_tuple_is_rejected(
-        self, result: tuple[object, ...]
-    ) -> None:
-        """Legacy tuple results must contain exactly loss and metric mapping."""
+    def test_malformed_step_tuple_is_rejected(self, result: tuple[object, ...]) -> None:
+        """Malformed tuple results are rejected."""
         battery = Battery(SimpleModel())
 
         with pytest.raises(TypeError, match="must be \\(loss, metrics_dict\\)"):

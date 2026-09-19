@@ -166,7 +166,7 @@ class TestExperimentTrackingCallback:
         callback.on_train_start(ctx)
 
         # Simulate training step
-        ctx["loss"] = 0.5
+        ctx["train_loss"] = 0.5
         ctx["epoch"] = 1
         callback.on_epoch_start(ctx)
         callback.on_train_step_end(ctx)
@@ -187,7 +187,7 @@ class TestExperimentTrackingCallback:
         ctx = EventContext()
         callback.on_train_start(ctx)
 
-        ctx["loss"] = 0.5
+        ctx["train_loss"] = 0.5
         ctx["epoch"] = 1
         callback.on_epoch_start(ctx)
         ctx["train_metrics"] = {"accuracy": 0.95, "f1": 0.92}
@@ -207,7 +207,7 @@ class TestExperimentTrackingCallback:
 
         ctx = EventContext()
         callback.on_train_start(ctx)
-        ctx["loss"] = 0.5
+        ctx["train_loss"] = 0.5
 
         # First step - not logged (step 1 % 3 != 0)
         callback.on_train_step_end(ctx)
@@ -346,9 +346,9 @@ class TestExperimentTrackingCallback:
         callback.on_epoch_start(ctx)
 
         # Training steps
-        ctx["loss"] = 0.5
+        ctx["train_loss"] = 0.5
         callback.on_train_step_end(ctx)
-        ctx["loss"] = 0.4
+        ctx["train_loss"] = 0.4
         callback.on_train_step_end(ctx)
 
         # Validation
@@ -360,9 +360,9 @@ class TestExperimentTrackingCallback:
         callback.on_epoch_start(ctx)
 
         # Training steps
-        ctx["loss"] = 0.3
+        ctx["train_loss"] = 0.3
         callback.on_train_step_end(ctx)
-        ctx["loss"] = 0.2
+        ctx["train_loss"] = 0.2
         callback.on_train_step_end(ctx)
 
         # Validation
@@ -399,7 +399,7 @@ class TestExperimentTrackingCallback:
         ctx["epoch"] = 1
         callback.on_epoch_start(ctx)
         for _ in range(3):
-            ctx["loss"] = 0.5
+            ctx["train_loss"] = 0.5
             callback.on_train_step_end(ctx)
 
         assert callback.global_step == 3
@@ -408,7 +408,7 @@ class TestExperimentTrackingCallback:
         ctx["epoch"] = 2
         callback.on_epoch_start(ctx)
         for _ in range(3):
-            ctx["loss"] = 0.4
+            ctx["train_loss"] = 0.4
             callback.on_train_step_end(ctx)
 
         assert callback.global_step == 6

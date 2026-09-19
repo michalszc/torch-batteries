@@ -117,7 +117,7 @@ class Battery(CheckpointMixin, TrainingMixin, EvaluationMixin, PredictionMixin):
         self._optimizer_step_idx = 0
         self._pending_loader_generator_states: dict[str, dict[str, torch.Tensor]] = {}
         self._resume_loaded = False
-        self._train_results: TrainResult = {
+        self._train_results: FitResult = {
             "train_loss": [],
             "val_loss": [],
             "train_metrics": {},
@@ -279,11 +279,9 @@ class Battery(CheckpointMixin, TrainingMixin, EvaluationMixin, PredictionMixin):
         """
         CheckpointMixin.load_checkpoint(self, path)
 
-    def train(  # noqa: PLR0913
+    def train(
         self,
         train_loader: DataLoader | None = None,
-        # Deprecated compatibility parameter; use fit(..., val_loader=...).
-        val_loader: DataLoader | None = None,
         epochs: int = 1,
         verbose: int = 1,
         *,
@@ -292,13 +290,10 @@ class Battery(CheckpointMixin, TrainingMixin, EvaluationMixin, PredictionMixin):
     ) -> TrainResult:
         """Train with explicit loaders or the attached DataPack.
 
-        Validation through this method is deprecated. Use ``fit`` for combined
-        training and validation. Calls without validation data do not warn.
+        Use ``fit`` for combined training and validation.
 
         Args:
             train_loader: Optional sized, non-empty training loader.
-            val_loader: Deprecated. Optional validation loader for direct-loader
-                compatibility. Use ``fit`` for validated training.
             epochs: Positive epoch count or resume target.
             verbose: ``0`` for silent, ``1`` for bars, or ``2`` for summaries.
             resume_from: Optional full checkpoint restored before data setup.
@@ -311,7 +306,6 @@ class Battery(CheckpointMixin, TrainingMixin, EvaluationMixin, PredictionMixin):
             return TrainingMixin.train(
                 self,
                 train_loader,
-                val_loader,
                 epochs,
                 verbose,
                 resume_from=resume_from,
@@ -586,22 +580,22 @@ class Battery(CheckpointMixin, TrainingMixin, EvaluationMixin, PredictionMixin):
             manual_metrics = self._normalize_step_metrics(result.metrics, phase)
             return loss, manual_metrics, result.predictions, result.targets
 
-        if self._metrics:
-            msg = (
-                f"{phase} step must return StepOutput with predictions and targets "
-                "when Battery metrics are configured."
-            )
-            raise ValueError(msg)
-
         if isinstance(result, tuple):
             if len(result) != 2 or not isinstance(result[1], dict):
                 msg = f"{phase} step tuple must be (loss, metrics_dict)."
                 raise TypeError(msg)
+            if self._metrics:
+                msg = (
+                    f"{phase} step must return StepOutput with predictions and "
+                    "targets when Battery metrics are configured."
+                )
+                raise ValueError(msg)
             loss = self._validate_loss(result[0], phase)
             metrics = self._normalize_step_metrics(result[1], phase)
             return loss, metrics, None, None
 
-        return self._validate_loss(result, phase), {}, None, None
+        msg = f"{phase} step must return StepOutput or (loss, metrics_dict)."
+        raise TypeError(msg)
 
     @staticmethod
     def _validate_loader(dataloader: object, name: str) -> None:

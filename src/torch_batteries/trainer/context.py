@@ -1,7 +1,7 @@
 """Helpers for building trainer event contexts."""
 
 from torch_batteries.events import EventContext
-from torch_batteries.trainer.types import TrainResult
+from torch_batteries.trainer.types import FitResult
 
 
 def dataset_identity_context(dataset_name: str | None) -> EventContext:
@@ -15,7 +15,7 @@ def dataset_identity_context(dataset_name: str | None) -> EventContext:
     return {"dataset_name": dataset_name}
 
 
-def copy_history_context(results: TrainResult) -> EventContext:
+def copy_history_context(results: FitResult) -> EventContext:
     """Build a copied history context from accumulated train results.
 
     Args:

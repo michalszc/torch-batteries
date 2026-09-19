@@ -17,7 +17,7 @@ if TYPE_CHECKING:
     from torch_batteries.data.handler import DataPackHandler
     from torch_batteries.data.types import DataStage
     from torch_batteries.events import EventHandler
-    from torch_batteries.trainer.types import TrainResult
+    from torch_batteries.trainer.types import FitResult
     from torch_batteries.utils.metrics import Metric, PhaseMetricManager
 
     from .core import Battery
@@ -41,7 +41,7 @@ if TYPE_CHECKING:
         _pending_loader_generator_states: dict[str, dict[str, torch.Tensor]]
         _resume_loaded: bool
         _stop_training: bool
-        _train_results: TrainResult
+        _train_results: FitResult
 
         def _data_workflow(
             self,

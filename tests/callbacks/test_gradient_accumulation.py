@@ -7,7 +7,7 @@ import torch
 from torch import nn
 from torch.utils.data import DataLoader, TensorDataset
 
-from torch_batteries import Battery, Event, EventContext, charge
+from torch_batteries import Battery, Event, EventContext, StepOutput, charge
 from torch_batteries.callbacks import GradientAccumulation
 
 
@@ -18,9 +18,11 @@ class _Model(nn.Module):
         nn.init.constant_(self.layer.weight, 1.0)
 
     @charge(Event.TRAIN_STEP)
-    def training_step(self, context: EventContext) -> torch.Tensor:
+    def training_step(self, context: EventContext) -> StepOutput:
         inputs, targets = cast("tuple[torch.Tensor, torch.Tensor]", context["batch"])
-        return cast("torch.Tensor", ((self.layer(inputs) - targets) ** 2).mean())
+        return StepOutput(
+            loss=cast("torch.Tensor", ((self.layer(inputs) - targets) ** 2).mean())
+        )
 
 
 class _StepRecorder:
