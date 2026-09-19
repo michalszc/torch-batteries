@@ -221,10 +221,11 @@ def test_multiple_test_and_prediction_datasets_run_independently() -> None:
 
     assert test_results["test_metrics"]["in_domain:samples"] == 4.0
     assert test_results["test_metrics"]["out_of_domain:samples"] == 2.0
+    assert test_results["test_metrics"]["samples"] == 6.0
     assert set(prediction_results["predictions"]) == {"in_domain", "out_of_domain"}
     assert prediction_results["predictions"]["in_domain"].shape == (4, 1)
     assert prediction_results["predictions"]["out_of_domain"].shape == (2, 1)
-    assert metric.reset_calls == 2
+    assert metric.reset_calls == 1
     assert data_pack.loader_datasets.count("in_domain") == 2
     assert data_pack.loader_datasets.count("out_of_domain") == 2
     assert data_pack.generator_seeds == [11] * 7

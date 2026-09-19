@@ -69,7 +69,7 @@ from .trainer import (
     TrainResult,
     ValidationResult,
 )
-from .utils.metrics import CollectedMetric, StatefulMetric
+from .utils.metrics import CollectedMetric, MetricSpec, StatefulMetric
 
 __all__ = [
     "BatchScheduleConfig",
@@ -84,6 +84,7 @@ __all__ = [
     "Event",
     "EventContext",
     "FitResult",
+    "MetricSpec",
     "OptimizationStep",
     "PredictResult",
     "ResolvedData",

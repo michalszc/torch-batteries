@@ -13,6 +13,7 @@ from torch_batteries.trainer.types import TestResult, ValidationResult
 from torch_batteries.utils.batch import get_batch_size
 from torch_batteries.utils.device import move_to_device
 from torch_batteries.utils.logging import get_logger
+from torch_batteries.utils.metrics import PhaseMetricManager
 from torch_batteries.utils.metrics._dataset_totals import DatasetMetricTotals
 from torch_batteries.utils.progress import Phase, Progress, ProgressFactory
 
@@ -143,14 +144,15 @@ class EvaluationMixin(BatteryStateMixin):
             return self._test_with_loader(test_loader, verbose)[0]
         with self._data_workflow("test", dataset_name=dataset) as workflow:
             test_loaders = workflow.loaders.loaders_for_phase("test")
-            results = {
-                name: self._test_with_loader(
+            results: dict[str, tuple[TestResult, int]] = {}
+            for index, (name, loader) in enumerate(test_loaders.items()):
+                results[name] = self._test_with_loader(
                     loader,
                     verbose,
                     dataset_name=name,
+                    reset_metrics=index == 0,
+                    named_metrics=len(test_loaders) > 1,
                 )
-                for name, loader in test_loaders.items()
-            }
             if len(results) == 1:
                 return next(iter(results.values()))[0]
             total_samples = sum(samples for _, samples in results.values())
@@ -168,10 +170,22 @@ class EvaluationMixin(BatteryStateMixin):
             metrics.update(
                 {name: value for name, value in aggregate.items() if ":" in name}
             )
-            return {
+            metrics.update(self._manager_for_phase("test").compute())
+            aggregate_result: TestResult = {
                 "test_loss": metrics.pop("loss"),
                 "test_metrics": metrics,
             }
+            aggregate_context: EventContext = {
+                "battery": as_battery(self),
+                "model": self._model,
+                "optimizer": self._optimizer,
+                "epoch": 1,
+                "test_loss": aggregate_result["test_loss"],
+                "test_metrics": {"loss": aggregate_result["test_loss"], **metrics},
+            }
+            self._event_handler.call(Event.AFTER_TEST_EPOCH, aggregate_context)
+            self._event_handler.call(Event.AFTER_TEST, aggregate_context)
+            return aggregate_result
 
     def _test_with_loader(
         self,
@@ -179,6 +193,8 @@ class EvaluationMixin(BatteryStateMixin):
         verbose: int = 1,
         *,
         dataset_name: str | None = None,
+        reset_metrics: bool = True,
+        named_metrics: bool = False,
     ) -> tuple[TestResult, int]:
         """Evaluate the model once without gradient tracking.
 
@@ -189,6 +205,9 @@ class EvaluationMixin(BatteryStateMixin):
         Args:
             test_loader: Sized, non-empty test loader.
             verbose: ``0`` for silent, ``1`` for a progress bar, or ``2`` for a summary.
+            dataset_name: Name included in dataset-specific event contexts.
+            reset_metrics: Reset aggregate metric state before this loader.
+            named_metrics: Maintain isolated metric state for this dataset.
 
         Returns:
             Average test loss and, when present, named test metrics.
@@ -232,7 +251,16 @@ class EvaluationMixin(BatteryStateMixin):
         progress = ProgressFactory.create(verbose=verbose, total_epochs=1)
         progress.start_epoch(1)
         progress.start_phase(Phase.TEST, total_batches=len(test_loader))
-        self._metric_manager.reset()
+        metric_manager = self._manager_for_phase("test")
+        if reset_metrics:
+            metric_manager.reset()
+        dataset_manager = (
+            self._manager_for_dataset("test", dataset_name)
+            if named_metrics and dataset_name is not None
+            else None
+        )
+        if dataset_manager is not None:
+            dataset_manager.reset()
         manual_metric_names: set[str] = set()
         total_samples = 0
         logger.debug("Test phase started: epoch=1")
@@ -246,6 +274,8 @@ class EvaluationMixin(BatteryStateMixin):
                         progress,
                         manual_metric_names,
                         dataset_name=dataset_name,
+                        dataset_manager=dataset_manager,
+                        named_metrics=named_metrics,
                     )
         except BaseException:
             progress.abort()
@@ -268,7 +298,11 @@ class EvaluationMixin(BatteryStateMixin):
         test_metrics_context.update(
             {
                 name: value
-                for name, value in self._metric_manager.compute().items()
+                for name, value in (
+                    dataset_manager.compute()
+                    if dataset_manager is not None
+                    else metric_manager.compute()
+                ).items()
                 if name not in manual_metric_names
             }
         )
@@ -306,7 +340,7 @@ class EvaluationMixin(BatteryStateMixin):
         logger.info("Testing completed")
         return results, total_samples
 
-    def _test_batch(
+    def _test_batch(  # noqa: PLR0913
         self,
         batch_data: Any,
         batch_idx: int,
@@ -314,6 +348,8 @@ class EvaluationMixin(BatteryStateMixin):
         manual_metric_names: set[str],
         *,
         dataset_name: str | None = None,
+        dataset_manager: PhaseMetricManager | None = None,
+        named_metrics: bool = False,
     ) -> int:
         """Process one test batch."""
         batch = move_to_device(batch_data, self._device)
@@ -343,10 +379,16 @@ class EvaluationMixin(BatteryStateMixin):
             result, "Test"
         )
         automatic_metrics = (
-            self._metric_manager.update(predictions, targets)
+            self._manager_for_phase("test").update(predictions, targets)
             if predictions is not None and targets is not None
             else {}
         )
+        if (
+            predictions is not None
+            and targets is not None
+            and dataset_manager is not None
+        ):
+            dataset_manager.update(predictions, targets)
         manual_metric_names.update(step_metrics)
         batch_metrics = {
             "loss": loss.item(),
@@ -367,7 +409,17 @@ class EvaluationMixin(BatteryStateMixin):
             "batch_idx": batch_idx,
             "epoch": 1,
             "test_loss": loss.item(),
-            "test_metrics": batch_metrics,
+            "test_metrics": (
+                {
+                    **batch_metrics,
+                    **{
+                        f"{dataset_name}:{name}": value
+                        for name, value in batch_metrics.items()
+                    },
+                }
+                if named_metrics
+                else batch_metrics
+            ),
             **dataset_identity_context(dataset_name),
         }
         self._event_handler.call(Event.AFTER_TEST_STEP, after_step_context)
@@ -420,7 +472,15 @@ class EvaluationMixin(BatteryStateMixin):
         progress.start_phase(
             Phase.VALIDATION, total_batches=sum(map(len, loaders.values()))
         )
-        self._metric_manager.reset()
+        metric_manager = self._manager_for_phase("validation")
+        metric_manager.reset()
+        dataset_managers = (
+            {name: self._manager_for_dataset("validation", name) for name in loaders}
+            if len(loaders) > 1
+            else {}
+        )
+        for manager in dataset_managers.values():
+            manager.reset()
         manual_metric_names: set[str] = set()
         dataset_totals = DatasetMetricTotals()
 
@@ -461,10 +521,12 @@ class EvaluationMixin(BatteryStateMixin):
                     result, "Validation"
                 )
                 automatic_metrics = (
-                    self._metric_manager.update(predictions, targets)
+                    metric_manager.update(predictions, targets)
                     if predictions is not None and targets is not None
                     else {}
                 )
+                if predictions is not None and targets is not None and dataset_managers:
+                    dataset_managers[dataset_name].update(predictions, targets)
                 manual_metric_names.update(step_metrics)
                 batch_metrics = {
                     "loss": loss.item(),
@@ -485,7 +547,17 @@ class EvaluationMixin(BatteryStateMixin):
                     "batch_idx": batch_idx,
                     "epoch": epoch,
                     "val_loss": loss.item(),
-                    "val_metrics": batch_metrics,
+                    "val_metrics": (
+                        {
+                            **batch_metrics,
+                            **{
+                                f"{dataset_name}:{name}": value
+                                for name, value in batch_metrics.items()
+                            },
+                        }
+                        if len(loaders) > 1
+                        else batch_metrics
+                    ),
                     **dataset_identity_context(
                         dataset_name if named_datasets else None
                     ),
@@ -505,12 +577,20 @@ class EvaluationMixin(BatteryStateMixin):
         val_metrics.update(
             {
                 name: value
-                for name, value in self._metric_manager.compute().items()
+                for name, value in metric_manager.compute().items()
                 if name not in manual_metric_names
             }
         )
         if len(loaders) > 1:
             val_metrics.update(dataset_totals.compute())
+            for dataset_name, manager in dataset_managers.items():
+                val_metrics.update(
+                    {
+                        f"{dataset_name}:{name}": value
+                        for name, value in manager.compute().items()
+                        if name not in manual_metric_names
+                    }
+                )
 
         # Trigger AFTER_VALIDATION_EPOCH event
         after_val_epoch_context: EventContext = {

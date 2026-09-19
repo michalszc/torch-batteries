@@ -499,7 +499,15 @@ class TrainingMixin(BatteryStateMixin):
 
         total_batches = sum(map(len, loaders.values()))
         progress.start_phase(Phase.TRAIN, total_batches=total_batches)
-        self._metric_manager.reset()
+        metric_manager = self._manager_for_phase("train")
+        metric_manager.reset()
+        dataset_managers = (
+            {name: self._manager_for_dataset("train", name) for name in loaders}
+            if len(loaders) > 1
+            else {}
+        )
+        for manager in dataset_managers.values():
+            manager.reset()
         manual_metric_names: set[str] = set()
         dataset_totals = DatasetMetricTotals()
         logger.debug("Training phase started: epoch=%d", epoch)
@@ -541,10 +549,12 @@ class TrainingMixin(BatteryStateMixin):
                 result, "Training"
             )
             automatic_metrics = (
-                self._metric_manager.update(predictions, targets)
+                metric_manager.update(predictions, targets)
                 if predictions is not None and targets is not None
                 else {}
             )
+            if predictions is not None and targets is not None and dataset_managers:
+                dataset_managers[dataset_name].update(predictions, targets)
             manual_metric_names.update(step_metrics)
 
             self._run_optimization(loss, optimization_plan, before_step_context)
@@ -570,7 +580,17 @@ class TrainingMixin(BatteryStateMixin):
                 "batch_idx": batch_idx,
                 "epoch": epoch,
                 "train_loss": loss.item(),
-                "train_metrics": batch_metrics,
+                "train_metrics": (
+                    {
+                        **batch_metrics,
+                        **{
+                            f"{dataset_name}:{name}": value
+                            for name, value in batch_metrics.items()
+                        },
+                    }
+                    if len(loaders) > 1
+                    else batch_metrics
+                ),
                 "optimizer_step": optimizer_step,
                 "optimizer_step_idx": self._optimizer_step_idx,
                 "optimization_plan": optimization_plan,
@@ -589,12 +609,20 @@ class TrainingMixin(BatteryStateMixin):
         train_metrics.update(
             {
                 name: value
-                for name, value in self._metric_manager.compute().items()
+                for name, value in metric_manager.compute().items()
                 if name not in manual_metric_names
             }
         )
         if len(loaders) > 1:
             train_metrics.update(dataset_totals.compute())
+            for dataset_name, manager in dataset_managers.items():
+                train_metrics.update(
+                    {
+                        f"{dataset_name}:{name}": value
+                        for name, value in manager.compute().items()
+                        if name not in manual_metric_names
+                    }
+                )
         logger.debug(
             "Training phase completed: epoch=%d, metrics=%s",
             epoch,

@@ -19,6 +19,7 @@ from torch_batteries import (
     StepOutput,
     charge,
 )
+from torch_batteries.callbacks import EarlyStopping
 
 
 class NamedPack(DataPack):
@@ -99,6 +100,35 @@ class NamedModel(nn.Module):
         return context["batch"][0]
 
 
+class AutomaticNamedModel(NamedModel):
+    def _step(self, context: EventContext, phase: str) -> StepOutput:
+        output = super()._step(context, phase)
+        values = context["batch"][0]
+        output.predictions = values
+        output.targets = torch.zeros_like(values)
+        return output
+
+
+class SampleCountMetric:
+    def __init__(self) -> None:
+        self.samples = 0
+
+    def reset(self) -> None:
+        self.samples = 0
+
+    def update(self, predictions: torch.Tensor, targets: torch.Tensor) -> None:
+        self.samples += predictions.shape[0]
+
+    def compute(self) -> float:
+        return float(self.samples)
+
+    def state_dict(self) -> dict[str, int]:
+        return {"samples": self.samples}
+
+    def load_state_dict(self, state: dict[str, int]) -> None:
+        self.samples = state["samples"]
+
+
 def _battery(
     mode: Literal["round_robin", "interleave"] = "round_robin",
 ) -> tuple[Battery, NamedModel]:
@@ -137,6 +167,21 @@ def test_seeded_interleave_is_reproducible_and_exhaustive() -> None:
     assert first_model.train_order == second_model.train_order
     assert first_model.train_order.count("small") == 3
     assert first_model.train_order.count("large") == 2
+
+
+def test_callbacks_monitor_exact_aggregate_or_dataset_metric_key() -> None:
+    for key, expected in (("loss", 23 / 11), ("small:loss", 1.0)):
+        model = NamedModel()
+        stopping = EarlyStopping(phase="train", metric=key, patience=2)
+        battery = Battery(
+            model,
+            device="cpu",
+            optimizer=torch.optim.SGD(model.parameters(), lr=0.01),
+            callbacks=[stopping],
+            data_pack=NamedPack(),
+        )
+        battery.train(verbose=0)
+        assert stopping.best_score == pytest.approx(expected)
 
 
 def test_single_named_dataset_uses_unprefixed_metrics() -> None:
@@ -190,6 +235,55 @@ def test_test_and_prediction_use_flat_results_and_selection() -> None:
         verbose=0, dataset="small", concatenate=True
     )["predictions"]
     assert selected_predictions.shape == (5, 1)
+
+
+def test_stateful_metrics_have_aggregate_and_isolated_dataset_state(
+    tmp_path: Any,
+) -> None:
+    model = AutomaticNamedModel()
+    battery = Battery(
+        model,
+        device="cpu",
+        optimizer=torch.optim.SGD(model.parameters(), lr=0.01),
+        data_pack=NamedPack(),
+        metrics={
+            "train": {"samples": SampleCountMetric()},
+            "validation": {"samples": SampleCountMetric()},
+            "test": {"samples": SampleCountMetric()},
+        },
+    )
+
+    history = battery.fit(verbose=0)
+    test = battery.test(verbose=0)
+    for metrics in (history["train_metrics"], history["val_metrics"]):
+        assert metrics["samples"] == [11.0]
+        assert metrics["small:samples"] == [5.0]
+        assert metrics["large:samples"] == [6.0]
+    assert test["test_metrics"]["samples"] == 11.0
+    assert test["test_metrics"]["small:samples"] == 5.0
+    assert test["test_metrics"]["large:samples"] == 6.0
+
+    checkpoint = tmp_path / "metrics.pth"
+    battery.save_checkpoint(checkpoint)
+    metric_states = torch.load(checkpoint, weights_only=True)["metrics"]
+    assert set(metric_states["phases"]) == {"train", "validation", "test"}
+    assert set(metric_states["datasets"]["train"]) == {"small", "large"}
+    assert metric_states["phases"]["test"]["samples"] == {"samples": 11}
+
+    restored_model = AutomaticNamedModel()
+    restored = Battery(
+        restored_model,
+        device="cpu",
+        optimizer=torch.optim.SGD(restored_model.parameters(), lr=0.01),
+        data_pack=NamedPack(),
+        metrics={
+            "train": {"samples": SampleCountMetric()},
+            "validation": {"samples": SampleCountMetric()},
+            "test": {"samples": SampleCountMetric()},
+        },
+    )
+    restored.load_checkpoint(checkpoint)
+    assert restored._checkpoint_metric_states() == metric_states  # noqa: SLF001
 
 
 def test_named_loader_generator_states_resume_per_dataset(tmp_path: Any) -> None:

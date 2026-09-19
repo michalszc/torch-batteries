@@ -4,6 +4,8 @@ from dataclasses import dataclass, field
 
 import torch
 
+type StructuredTensors = torch.Tensor | dict[str, torch.Tensor]
+
 
 @dataclass(slots=True)
 class StepOutput:
@@ -17,6 +19,6 @@ class StepOutput:
     """
 
     loss: torch.Tensor
-    predictions: torch.Tensor | None = None
-    targets: torch.Tensor | None = None
+    predictions: StructuredTensors | None = None
+    targets: StructuredTensors | None = None
     metrics: dict[str, float | torch.Tensor] = field(default_factory=dict)
