@@ -1,6 +1,10 @@
 """Experiment tracking callback for automatic logging."""
 
+from dataclasses import replace
 from typing import Any
+
+from torch import nn
+from torch.optim import Optimizer
 
 from torch_batteries.callbacks.base import Callback
 from torch_batteries.events import Event, EventContext, charge
@@ -144,16 +148,31 @@ class ExperimentTrackingCallback(Callback):
         return current_epoch, global_step
 
     @charge(Event.BEFORE_TRAIN)
-    def on_train_start(self, _: EventContext) -> None:
+    def on_train_start(self, context: EventContext) -> None:
         """
         Initialize tracker and log configuration.
 
         Args:
-            _: Event context, unused by this handler.
+            context: Training context containing the model and optimizer.
         """
-        self.tracker.init(
-            run=self.run if self.run is not None else Run(),
-        )
+        run = self.run if self.run is not None else Run()
+        defaults: dict[str, Any] = {}
+        model = context.get("model")
+        if isinstance(model, nn.Module):
+            defaults["model"] = str(model)
+            defaults["parameter_count"] = sum(p.numel() for p in model.parameters())
+        optimizer = context.get("optimizer")
+        if isinstance(optimizer, Optimizer):
+            defaults["optimizer"] = type(optimizer).__name__
+            defaults["optimizer_settings"] = {
+                key: value
+                if isinstance(value, (str, int, float, bool, type(None)))
+                else str(value)
+                for key, value in optimizer.defaults.items()
+            }
+        if defaults:
+            run = replace(run, config={**defaults, **run.config})
+        self.tracker.init(run=run)
 
         logger.info("Experiment tracking started")
 
