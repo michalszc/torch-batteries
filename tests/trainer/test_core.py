@@ -1049,6 +1049,7 @@ class TestBattery:
 
         assert len(result["train_loss"]) == 1
         assert battery.stop_training is True
+        assert result["stop_reason"] == "requested"
 
     def test_validation_epoch_defensively_checks_for_handler(self) -> None:
         """The epoch executor validates its handler independently."""

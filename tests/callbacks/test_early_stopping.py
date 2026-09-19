@@ -219,6 +219,11 @@ class TestEarlyStopping:
         early_stopping.run_on_validation_end(context)
         assert early_stopping._epochs_no_improve == 3  # noqa: SLF001
         assert early_stopping.best_score == 0.75
+        assert battery.stop_training is True
+        assert battery._stop_reason == (  # noqa: SLF001
+            "Early stopping: validation metric 'accuracy' did not improve "
+            "for 3 checks (best=0.75, latest=0.68)"
+        )
 
     def test_restore_best_weights(self) -> None:
         """Test that best weights are restored when restore_best_weights is True."""

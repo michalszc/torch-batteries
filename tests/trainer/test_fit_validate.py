@@ -75,6 +75,13 @@ class ValidationRecorder:
         self._record(Event.AFTER_VALIDATION, context)
 
 
+class StopAfterEpoch:
+    @charge(Event.AFTER_TRAIN_EPOCH)
+    def stop(self, context: EventContext) -> None:
+        if context["epoch"] == 2:
+            context["battery"].request_stop("manual_limit")
+
+
 class ValidationDataPack(DataPack):
     def __init__(self, *, include_validation: bool = True) -> None:
         self.dataset = _loader().dataset
@@ -150,6 +157,52 @@ def test_train_only_runs_training() -> None:
     battery, _ = _battery()
     result: TrainResult = battery.train(_loader(), verbose=0)
     assert len(result["train_loss"]) == 1
+    assert result["epochs_completed"] == 1
+    assert result["optimizer_steps"] == 2
+    assert result["stopped_early"] is False
+    assert result["stop_reason"] is None
+
+
+def test_validation_cadence_and_cumulative_metadata(tmp_path: Path) -> None:
+    battery, model = _battery()
+    first = battery.fit(
+        _loader(), _loader(), epochs=3, verbose=0, validate_every_n_epochs=2
+    )
+    assert len(first["train_loss"]) == 3
+    assert len(first["val_loss"]) == 1
+    assert model.validation_grad_states == [False, False]
+    assert (first["epochs_completed"], first["optimizer_steps"]) == (3, 6)
+
+    checkpoint = tmp_path / "cadence.pth"
+    battery.save_checkpoint(checkpoint)
+    restored, _ = _battery()
+    resumed = restored.fit(
+        _loader(),
+        _loader(),
+        epochs=5,
+        verbose=0,
+        resume_from=checkpoint,
+        validate_every_n_epochs=2,
+    )
+    assert len(resumed["train_loss"]) == 5
+    assert len(resumed["val_loss"]) == 2
+    assert (resumed["epochs_completed"], resumed["optimizer_steps"]) == (5, 10)
+
+
+def test_stop_reason_is_reported() -> None:
+    battery, _ = _battery(callbacks=[StopAfterEpoch()])
+    result = battery.fit(_loader(), epochs=5, verbose=0)
+    assert result["epochs_completed"] == 2
+    assert result["optimizer_steps"] == 4
+    assert result["stopped_early"] is True
+    assert result["stop_reason"] == "manual_limit"
+
+
+@pytest.mark.parametrize("cadence", [0, -1, 1.5, True])
+def test_fit_rejects_invalid_validation_cadence(cadence: object) -> None:
+    battery, _ = _battery()
+    with pytest.raises(ValueError, match="validate_every_n_epochs"):
+        battery.fit(_loader(), verbose=0, validate_every_n_epochs=cadence)  # type: ignore[arg-type]
 
 
 def test_train_rejects_validation_loader() -> None:

@@ -44,6 +44,7 @@ if TYPE_CHECKING:
         _pending_loader_generator_states: dict[str, dict[str, torch.Tensor]]
         _resume_loaded: bool
         _stop_training: bool
+        _stop_reason: str | None
         _train_results: FitResult
 
         def _data_workflow(

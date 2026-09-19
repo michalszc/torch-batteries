@@ -378,7 +378,7 @@ class CheckpointMixin(BatteryStateMixin):
             raise TypeError(msg)
         return cast("dict[str, dict[str, torch.Tensor]]", states)
 
-    def _validate_checkpoint_components(
+    def _validate_checkpoint_components(  # noqa: PLR0915
         self,
         payload: dict[str, Any],
     ) -> tuple[list[Callback], dict[str, Any] | None]:
@@ -458,10 +458,21 @@ class CheckpointMixin(BatteryStateMixin):
             logger.error("Checkpoint training results are not a dictionary.")
             msg = "Invalid training history in checkpoint."
             raise TypeError(msg)
+        self._validate_checkpoint_stop_state(payload)
 
         self._validate_global_rng_state(payload["rng_state"])
         self._validate_loader_generator_states(payload["loader_generator_states"])
         return callbacks, data_pack_state
+
+    @staticmethod
+    def _validate_checkpoint_stop_state(payload: dict[str, Any]) -> None:
+        """Validate serialized stop metadata."""
+        if not isinstance(payload["stop_training"], bool) or (
+            payload["stop_reason"] is not None
+            and not isinstance(payload["stop_reason"], str)
+        ):
+            msg = "Invalid stop state in training checkpoint."
+            raise TypeError(msg)
 
     def _checkpoint_snapshot(self, callbacks: list[Callback]) -> dict[str, Any]:
         """Capture every mutable checkpoint participant before restoration."""
@@ -498,6 +509,7 @@ class CheckpointMixin(BatteryStateMixin):
             ),
             "resume_loaded": self._resume_loaded,
             "stop_training": self._stop_training,
+            "stop_reason": self._stop_reason,
             "rng_state": rng_state,
         }
 
@@ -509,6 +521,8 @@ class CheckpointMixin(BatteryStateMixin):
         self._last_completed_epoch = payload["epoch"]
         self._optimizer_step_idx = payload["optimizer_step_idx"]
         self._train_results = cast("FitResult", copy.deepcopy(payload["results"]))
+        self._stop_training = payload["stop_training"]
+        self._stop_reason = payload["stop_reason"]
         loader_states = self._validate_loader_generator_states(
             payload["loader_generator_states"]
         )
@@ -577,6 +591,7 @@ class CheckpointMixin(BatteryStateMixin):
             )
             self._resume_loaded = snapshot["resume_loaded"]
             self._stop_training = snapshot["stop_training"]
+            self._stop_reason = snapshot["stop_reason"]
 
         self._rollback_action("Battery state", restore_internal_state)
         self._rollback_action(
@@ -623,6 +638,8 @@ class CheckpointMixin(BatteryStateMixin):
             "epoch": self._last_completed_epoch,
             "optimizer_step_idx": self._optimizer_step_idx,
             "results": copy.deepcopy(self._train_results),
+            "stop_training": self._stop_training,
+            "stop_reason": self._stop_reason,
             "data_pack": self._checkpoint_data_pack(),
             "rng_state": self._capture_global_rng_state(),
             "loader_generator_states": copy.deepcopy(self._loader_generator_states),
@@ -758,6 +775,8 @@ class CheckpointMixin(BatteryStateMixin):
             "epoch",
             "optimizer_step_idx",
             "results",
+            "stop_training",
+            "stop_reason",
             "rng_state",
             "loader_generator_states",
             "data_pack",

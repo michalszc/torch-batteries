@@ -87,6 +87,7 @@ class Battery(CheckpointMixin, TrainingMixin, EvaluationMixin, PredictionMixin):
         "_pending_loader_generator_states",
         "_phase_metrics",
         "_resume_loaded",
+        "_stop_reason",
         "_stop_training",
         "_train_results",
     )
@@ -116,6 +117,7 @@ class Battery(CheckpointMixin, TrainingMixin, EvaluationMixin, PredictionMixin):
             DataPackHandler(data_pack) if data_pack is not None else None
         )
         self._stop_training = False
+        self._stop_reason: str | None = None
         self._last_completed_epoch = 0
         self._loader_generator_states: dict[str, dict[str, torch.Tensor]] = {}
         self._optimizer_step_idx = 0
@@ -126,6 +128,10 @@ class Battery(CheckpointMixin, TrainingMixin, EvaluationMixin, PredictionMixin):
             "val_loss": [],
             "train_metrics": {},
             "val_metrics": {},
+            "epochs_completed": 0,
+            "optimizer_steps": 0,
+            "stopped_early": False,
+            "stop_reason": None,
         }
         setup_context: EventContext = {
             "battery": self,
@@ -260,6 +266,19 @@ class Battery(CheckpointMixin, TrainingMixin, EvaluationMixin, PredictionMixin):
     def stop_training(self, value: bool) -> None:
         """Set the stop_training flag."""
         self._stop_training = value
+        self._stop_reason = "requested" if value else None
+
+    def request_stop(self, reason: str) -> None:
+        """Request training stop after the current epoch.
+
+        Args:
+            reason: Non-empty reason reported in the run result.
+        """
+        if not isinstance(reason, str) or not reason.strip():
+            msg = "Stop reason must be a non-empty string."
+            raise ValueError(msg)
+        self._stop_training = True
+        self._stop_reason = reason
 
     def _ensure_configuration_mutable(self, name: str) -> None:
         """Reject configuration assignment from inside an event dispatch."""
@@ -375,6 +394,7 @@ class Battery(CheckpointMixin, TrainingMixin, EvaluationMixin, PredictionMixin):
         *,
         resume_from: str | Path | None = None,
         resume_epochs_mode: str = "total",
+        validate_every_n_epochs: int = 1,
     ) -> FitResult:
         """Train with optional per-epoch validation.
 
@@ -385,6 +405,7 @@ class Battery(CheckpointMixin, TrainingMixin, EvaluationMixin, PredictionMixin):
             verbose: ``0`` for silent, ``1`` for bars, or ``2`` for summaries.
             resume_from: Optional full checkpoint restored before data setup.
             resume_epochs_mode: ``"total"`` or ``"additional"``.
+            validate_every_n_epochs: Run validation on absolute epoch multiples.
 
         Returns:
             Per-epoch training histories and optional validation histories. Validation
@@ -399,6 +420,7 @@ class Battery(CheckpointMixin, TrainingMixin, EvaluationMixin, PredictionMixin):
                 verbose,
                 resume_from=resume_from,
                 resume_epochs_mode=resume_epochs_mode,
+                validate_every_n_epochs=validate_every_n_epochs,
             )
 
     def validate(

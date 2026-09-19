@@ -86,6 +86,7 @@ PUBLIC_MEMBERS: dict[str, set[str]] = {
         "metrics",
         "metric_error_policy",
         "stop_training",
+        "request_stop",
         "save_checkpoint",
         "load_checkpoint",
         "train",
@@ -280,6 +281,7 @@ PUBLIC_PARAMETERS: dict[str, dict[str, object]] = {
         "verbose": 1,
         "resume_from": None,
         "resume_epochs_mode": "total",
+        "validate_every_n_epochs": 1,
     },
     "torch_batteries.trainer.Battery.validate": {"val_loader": None, "verbose": 1},
     "torch_batteries.trainer.Battery.test": {
@@ -315,6 +317,7 @@ PUBLIC_KEYWORD_ONLY_PARAMETERS: dict[str, set[str]] = {
     "torch_batteries.trainer.Battery.fit": {
         "resume_from",
         "resume_epochs_mode",
+        "validate_every_n_epochs",
     },
     "torch_batteries.trainer.Battery.test": {"dataset"},
     "torch_batteries.trainer.Battery.predict": {

@@ -44,6 +44,7 @@ class TrainingMixin(BatteryStateMixin):
         *,
         resume_from: str | Path | None = None,
         resume_epochs_mode: str = "total",
+        validate_every_n_epochs: int = 1,
     ) -> FitResult:
         """Fit the model with optional per-epoch validation.
 
@@ -54,6 +55,7 @@ class TrainingMixin(BatteryStateMixin):
             verbose: ``0`` for silent, ``1`` for bars, or ``2`` for summaries.
             resume_from: Optional full checkpoint restored before data setup.
             resume_epochs_mode: ``"total"`` or ``"additional"``.
+            validate_every_n_epochs: Run validation on absolute epoch multiples.
 
         Returns:
             Per-epoch training and optional validation histories.
@@ -66,6 +68,7 @@ class TrainingMixin(BatteryStateMixin):
             resume_from=resume_from,
             resume_epochs_mode=resume_epochs_mode,
             run_validation=True,
+            validate_every_n_epochs=validate_every_n_epochs,
         )
 
     def train(
@@ -106,10 +109,15 @@ class TrainingMixin(BatteryStateMixin):
             resume_from=resume_from,
             resume_epochs_mode=resume_epochs_mode,
             run_validation=False,
+            validate_every_n_epochs=1,
         )
         return {
             "train_loss": result["train_loss"],
             "train_metrics": result["train_metrics"],
+            "epochs_completed": result["epochs_completed"],
+            "optimizer_steps": result["optimizer_steps"],
+            "stopped_early": result["stopped_early"],
+            "stop_reason": result["stop_reason"],
         }
 
     def _run_training_workflow(  # noqa: PLR0913
@@ -122,10 +130,18 @@ class TrainingMixin(BatteryStateMixin):
         resume_from: str | Path | None,
         resume_epochs_mode: str,
         run_validation: bool,
+        validate_every_n_epochs: int,
     ) -> FitResult:
         """Resolve loaders and run the shared training engine."""
         if epochs <= 0:
             msg = "epochs must be greater than zero."
+            raise ValueError(msg)
+        if (
+            isinstance(validate_every_n_epochs, bool)
+            or not isinstance(validate_every_n_epochs, int)
+            or validate_every_n_epochs < 1
+        ):
+            msg = "validate_every_n_epochs must be a positive integer."
             raise ValueError(msg)
         if resume_epochs_mode not in {"total", "additional"}:
             logger.error("Unsupported resume epochs mode: %s", resume_epochs_mode)
@@ -141,6 +157,7 @@ class TrainingMixin(BatteryStateMixin):
                 epochs,
                 verbose,
                 resume_epochs_mode=resume_epochs_mode,
+                validate_every_n_epochs=validate_every_n_epochs,
             )
         if val_loader is not None:
             msg = (
@@ -161,6 +178,7 @@ class TrainingMixin(BatteryStateMixin):
                 epochs,
                 verbose,
                 resume_epochs_mode=resume_epochs_mode,
+                validate_every_n_epochs=validate_every_n_epochs,
                 train_schedule=workflow.datasets.train_batch_schedule,
                 validation_schedule=workflow.datasets.validation_batch_schedule,
                 named_train=isinstance(workflow.loaders.train, Mapping),
@@ -175,6 +193,7 @@ class TrainingMixin(BatteryStateMixin):
         verbose: int = 1,
         *,
         resume_epochs_mode: str = "total",
+        validate_every_n_epochs: int = 1,
         train_schedule: BatchScheduleConfig | None = None,
         validation_schedule: BatchScheduleConfig | None = None,
         named_train: bool = False,
@@ -223,6 +242,7 @@ class TrainingMixin(BatteryStateMixin):
             )
         resumed = self._resume_loaded
         self._stop_training = False
+        self._stop_reason = None
         if not resumed:
             self._optimizer_step_idx = 0
             self._last_completed_epoch = 0
@@ -231,6 +251,10 @@ class TrainingMixin(BatteryStateMixin):
                 "val_loss": [],
                 "train_metrics": {},
                 "val_metrics": {},
+                "epochs_completed": 0,
+                "optimizer_steps": 0,
+                "stopped_early": False,
+                "stop_reason": None,
             }
         logger.info(
             "Training started: epochs=%d, train_batches=%d, validation=%s",
@@ -300,6 +324,8 @@ class TrainingMixin(BatteryStateMixin):
                         results["train_metrics"][key] = []
                     results["train_metrics"][key].append(value)
             self._last_completed_epoch = epoch
+            results["epochs_completed"] = epoch
+            results["optimizer_steps"] = self._optimizer_step_idx
             self._train_results = copy.deepcopy(results)
 
             after_epoch_context: EventContext = {
@@ -312,7 +338,7 @@ class TrainingMixin(BatteryStateMixin):
             }
             self._event_handler.call(Event.AFTER_TRAIN_EPOCH, after_epoch_context)
 
-            if validation_loaders:
+            if validation_loaders and epoch % validate_every_n_epochs == 0:
                 logger.debug("Validation phase started: epoch=%d", epoch)
                 before_val_context: EventContext = {
                     "battery": as_battery(self),
@@ -375,6 +401,11 @@ class TrainingMixin(BatteryStateMixin):
             last_epoch = epoch
 
         progress.end_training()
+
+        results["epochs_completed"] = self._last_completed_epoch
+        results["optimizer_steps"] = self._optimizer_step_idx
+        results["stopped_early"] = self._stop_training
+        results["stop_reason"] = self._stop_reason
 
         after_train_context: EventContext = {
             "battery": as_battery(self),

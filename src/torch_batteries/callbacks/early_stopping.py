@@ -271,7 +271,11 @@ class EarlyStopping(Callback):
                 self._patience,
             )
             if self._epochs_no_improve >= self._patience:
-                battery.stop_training = True
+                battery.request_stop(
+                    f"Early stopping: {self._phase} metric '{self._metric}' "
+                    f"did not improve for {self._epochs_no_improve} checks "
+                    f"(best={self._best_score}, latest={current_score})"
+                )
                 logger.info(
                     "Early stopping applied. No improvement in '%s' for %d epochs.",
                     self._metric,
