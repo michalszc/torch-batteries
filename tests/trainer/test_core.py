@@ -714,9 +714,9 @@ class TestBattery:
         assert "mae" in result["train_metrics"]
 
     def test_automatic_metrics_require_explicit_step_output(self) -> None:
-        """Legacy step returns cannot drive automatic metrics safely."""
+        """A loss-only step cannot drive automatic metrics without predictions."""
 
-        class LegacyModel(nn.Module):
+        class LossOnlyModel(nn.Module):
             def __init__(self) -> None:
                 super().__init__()
                 self.linear = nn.Linear(10, 1)
@@ -726,14 +726,14 @@ class TestBattery:
                 x, targets = context["batch"]
                 return nn.functional.mse_loss(self.linear(x), targets)
 
-        model = LegacyModel()
+        model = LossOnlyModel()
         battery = Battery(
             model,
             optimizer=optim.SGD(model.parameters(), lr=0.01),
             metrics={"mae": mae},
         )
 
-        with pytest.raises(TypeError, match="must return StepOutput"):
+        with pytest.raises(ValueError, match="must return StepOutput"):
             battery.train(self.create_simple_data_loader(), verbose=0)
 
     def test_automatic_metrics_reject_incomplete_step_output(self) -> None:

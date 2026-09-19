@@ -143,6 +143,42 @@ def test_fit_runs_optional_validation_without_compatibility_warning(
     assert "Validation through Battery.train()" not in caplog.text
 
 
+def test_loss_only_step_returns_work_across_all_phases() -> None:
+    class LossOnlyModel(nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.layer = nn.Linear(1, 1)
+
+        def loss(self, context: EventContext) -> torch.Tensor:
+            inputs, targets = cast(
+                "tuple[torch.Tensor, torch.Tensor]", context["batch"]
+            )
+            return nn.functional.mse_loss(self.layer(inputs), targets)
+
+        @charge(Event.TRAIN_STEP)
+        def train_step(self, context: EventContext) -> torch.Tensor:
+            return self.loss(context)
+
+        @charge(Event.VALIDATION_STEP)
+        def validation_step(self, context: EventContext) -> torch.Tensor:
+            return self.loss(context)
+
+        @charge(Event.TEST_STEP)
+        def test_step(self, context: EventContext) -> torch.Tensor:
+            return self.loss(context)
+
+    model = LossOnlyModel()
+    battery = Battery(
+        model, optimizer=torch.optim.SGD(model.parameters(), lr=0.01), device="cpu"
+    )
+    fit_result = battery.fit(_loader(), _loader(), verbose=0)
+    test_result = battery.test(_loader(), verbose=0)
+    assert len(fit_result["train_loss"]) == 1
+    assert len(fit_result["val_loss"]) == 1
+    assert isinstance(test_result["test_loss"], float)
+    assert "test_metrics" not in test_result
+
+
 def test_fit_without_validation_returns_empty_validation_histories() -> None:
     battery, _ = _battery()
 

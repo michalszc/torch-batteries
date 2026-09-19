@@ -604,6 +604,15 @@ class Battery(CheckpointMixin, TrainingMixin, EvaluationMixin, PredictionMixin):
             manual_metrics = self._normalize_step_metrics(result.metrics, phase)
             return loss, manual_metrics, result.predictions, result.targets
 
+        if isinstance(result, torch.Tensor):
+            if configured_metrics:
+                msg = (
+                    f"{phase} step must return StepOutput with predictions and "
+                    "targets when Battery metrics are configured."
+                )
+                raise ValueError(msg)
+            return self._validate_loss(result, phase), {}, None, None
+
         if isinstance(result, tuple):
             if len(result) != 2 or not isinstance(result[1], dict):
                 msg = f"{phase} step tuple must be (loss, metrics_dict)."
@@ -618,7 +627,10 @@ class Battery(CheckpointMixin, TrainingMixin, EvaluationMixin, PredictionMixin):
             metrics = self._normalize_step_metrics(result[1], phase)
             return loss, metrics, None, None
 
-        msg = f"{phase} step must return StepOutput or (loss, metrics_dict)."
+        msg = (
+            f"{phase} step must return StepOutput, a scalar loss tensor, "
+            "or (loss, metrics_dict)."
+        )
         raise TypeError(msg)
 
     @staticmethod
