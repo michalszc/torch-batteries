@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-PROJECT_ROOT = Path(__file__).parents[1]
+PROJECT_ROOT = Path(__file__).parents[3]
 VALIDATOR = PROJECT_ROOT / "scripts" / "validate_version.sh"
 VERSION = "0.9.0"
 

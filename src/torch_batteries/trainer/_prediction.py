@@ -117,6 +117,9 @@ class PredictionMixin(BatteryStateMixin):
             raise ValueError(msg)
 
         self._validate_loader(data_loader, "Prediction")
+        self._restore_loader_generator_state(
+            "predict", data_loader, dataset_name=dataset_name
+        )
         logger.info("Prediction started: batches=%d", len(data_loader))
         logger.debug(
             "Prediction output options selected: move_to_cpu=%s, concatenate=%s",
@@ -166,6 +169,10 @@ class PredictionMixin(BatteryStateMixin):
         except BaseException:
             progress.abort()
             raise
+
+        self._capture_loader_generator_state(
+            "predict", data_loader, dataset_name=dataset_name
+        )
 
         progress.end_phase()
         progress.end_epoch()
@@ -295,6 +302,9 @@ class PredictionMixin(BatteryStateMixin):
             )
             raise ValueError(msg)
         self._validate_loader(data_loader, "Prediction")
+        self._restore_loader_generator_state(
+            "predict", data_loader, dataset_name=dataset_name
+        )
         logger.info(
             "Streaming prediction started: batches=%d, move_to_cpu=%s",
             len(data_loader),
@@ -346,6 +356,9 @@ class PredictionMixin(BatteryStateMixin):
                     processed_batches += 1
                     if prediction is not None:
                         yield prediction
+            self._capture_loader_generator_state(
+                "predict", data_loader, dataset_name=dataset_name
+            )
             progress.end_phase()
             progress.end_epoch()
             completion_context: EventContext = {

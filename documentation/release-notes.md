@@ -1,5 +1,29 @@
 # Release Notes
 
+## 0.12.0 — 2026-09-10
+
+- Added compatibility contracts that detect removal or incompatible changes to the
+  documented public API and verify that protected endpoints remain in the generated
+  reference documentation.
+- Verified optional `torch.compile` use across training, validation, testing,
+  prediction, automatic metrics, optimizer parameters, and checkpoint restoration.
+- Added strict-by-default metric lifecycle errors with the optional
+  `metric_error_policy="warn"` policy, protected runtime configuration from mutation
+  inside events, and made missing monitored metrics fail consistently.
+- Added `TerminateOnNonFinite` for selected loss and metric checks before unsafe
+  training operations and across evaluation phase results.
+- Added `Event.ON_EXCEPTION` for escaping workflow failures and failure-aware
+  experiment-tracker cleanup without final model artifact logging.
+- Introduced schema-version-3 checkpoints with Python, PyTorch CPU, available CUDA
+  and MPS, optional NumPy, and DataLoader generator RNG state while retaining schema
+  1 and 2 loading.
+- Made full and raw-model checkpoint restoration transactional, with complete
+  callback-state preflight, component rollback, and preservation of the original
+  load failure.
+- Clarified scalar batch-mean loss aggregation, DataPack generator behavior, and the
+  optional compile-before-`Battery` usage order in
+  [PR #24](https://github.com/michalszc/torch-batteries/pull/24).
+
 ## 0.11.0 — 2026-08-17
 
 - Added `Battery.fit()` for training with optional per-epoch validation and

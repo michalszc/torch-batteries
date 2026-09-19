@@ -90,6 +90,14 @@ class _MetricModel(nn.Module):
         return self._step(context)
 
 
+def _run_metric_until_failure(manager: PhaseMetricManager, failure: str) -> None:
+    manager.reset()
+    if failure != "reset":
+        manager.update(torch.ones(1), torch.zeros(1))
+    if failure == "compute":
+        manager.compute()
+
+
 def test_stateful_metric_protocol_and_phase_reset() -> None:
     metric = _PhaseMean()
     assert isinstance(metric, StatefulMetric)
@@ -157,22 +165,77 @@ def test_collected_metric_direct_lifecycle() -> None:
 
 
 @pytest.mark.parametrize("failure", ["reset", "update", "compute"])
-def test_stateful_metric_failures_are_skipped(failure: str) -> None:
+def test_stateful_metric_failures_raise_by_default(
+    failure: str, caplog: pytest.LogCaptureFixture
+) -> None:
     manager = PhaseMetricManager({"controlled": _ControlledMetric(failure)})
+
+    with pytest.raises(RuntimeError):
+        _run_metric_until_failure(manager, failure)
+
+    assert f"Failed to {failure} metric 'controlled'." in caplog.text
+
+
+@pytest.mark.parametrize("failure", ["reset", "update", "compute"])
+def test_warn_policy_skips_stateful_metric_failure(failure: str) -> None:
+    manager = PhaseMetricManager(
+        {"controlled": _ControlledMetric(failure)},
+        metric_error_policy="warn",
+    )
 
     manager.reset()
     manager.update(torch.ones(1), torch.zeros(1))
-
     assert manager.compute() == {}
 
 
-def test_invalid_callable_metric_result_is_skipped() -> None:
+def test_invalid_callable_metric_result_raises_by_default() -> None:
     manager = PhaseMetricManager(
         {"invalid": cast("Any", lambda predictions, targets: "not-numeric")}
     )
     manager.reset()
 
+    with pytest.raises(TypeError, match="must return a numeric value"):
+        manager.update(torch.ones(1), torch.zeros(1))
+
+
+def test_warn_policy_skips_invalid_callable_metric_result() -> None:
+    manager = PhaseMetricManager(
+        {"invalid": cast("Any", lambda predictions, targets: "not-numeric")},
+        metric_error_policy="warn",
+    )
+    manager.reset()
+
     assert manager.update(torch.ones(1), torch.zeros(1)) == {}
+
+
+def test_metric_error_policy_validation_and_battery_property() -> None:
+    with pytest.raises(ValueError, match="metric_error_policy"):
+        PhaseMetricManager({}, metric_error_policy=cast("Any", "ignore"))
+    with pytest.raises(ValueError, match="metric_error_policy"):
+        Battery(_MetricModel(), metric_error_policy=cast("Any", "ignore"))
+
+    battery = Battery(_MetricModel(), metric_error_policy="warn")
+
+    assert battery.metric_error_policy == "warn"
+    battery.metric_error_policy = "raise"
+    assert battery.metric_error_policy == "raise"
+    with pytest.raises(ValueError, match="metric_error_policy"):
+        battery.metric_error_policy = cast("Any", "ignore")
+    assert battery.metric_error_policy == "raise"
+
+
+def test_replacing_battery_metrics_preserves_warn_policy() -> None:
+    battery = Battery(_MetricModel())
+    battery.metrics = {"controlled": _ControlledMetric("update")}
+    battery.metric_error_policy = "warn"
+    loader = DataLoader(
+        TensorDataset(torch.ones(1, 1), torch.zeros(1, 1)),
+        batch_size=1,
+    )
+
+    result = battery.validate(loader, verbose=0)
+
+    assert result == {"val_loss": 1.0}
 
 
 def test_metric_checkpoint_state_round_trip_and_validation() -> None:

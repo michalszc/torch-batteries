@@ -23,6 +23,10 @@ class Callback:
         logger.debug("Callback %s has no resumable state.", type(self).__name__)
         return {}
 
+    def _validate_checkpoint_state(self, state_dict: dict[str, Any]) -> object:
+        """Accept checkpoint state when no fixed configuration is declared."""
+        return state_dict
+
     def load_state_dict(self, state_dict: dict[str, Any]) -> None:
         """Restore state from a full training checkpoint.
 

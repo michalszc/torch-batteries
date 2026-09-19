@@ -457,6 +457,11 @@ class TestEarlyStopping:
                 "epochs_no_improve": None,
                 "best_weights": None,
             },
+            {
+                "best_score": 1.0,
+                "epochs_no_improve": 0,
+                "best_weights": [],
+            },
         ],
     )
     def test_invalid_state_is_rejected(self, state: dict[str, object]) -> None:
@@ -504,21 +509,40 @@ class TestEarlyStopping:
         )
         assert train_callback.best_score == 0.5
 
-    def test_missing_monitored_metric_is_rejected(self) -> None:
-        """A configured metric must be present in the selected phase."""
+    @pytest.mark.parametrize(
+        ("phase", "metrics_key", "handler_name"),
+        [
+            ("train", "train_metrics", "run_on_epoch_end"),
+            ("validation", "val_metrics", "run_on_validation_end"),
+        ],
+    )
+    def test_missing_monitored_metric_is_rejected(
+        self,
+        phase: str,
+        metrics_key: str,
+        handler_name: str,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """A configured metric must be present in either selected phase."""
         model = torch.nn.Linear(1, 1)
-        callback = EarlyStopping(phase="validation", metric="accuracy")
+        callback = EarlyStopping(
+            phase=phase,  # type: ignore[arg-type]
+            metric="accuracy",
+        )
 
         with pytest.raises(
-            ValueError, match="Metric 'accuracy' not found in validation metrics"
+            ValueError,
+            match=rf"metric 'accuracy'.*phase '{phase}'",
         ):
-            callback.run_on_validation_end(
+            getattr(callback, handler_name)(
                 {
                     "model": model,
                     "battery": Battery(model=model),
-                    "val_metrics": {"loss": 1.0},
+                    metrics_key: {"loss": 1.0},
                 }
             )
+
+        assert f"phase={phase}, metric=accuracy" in caplog.text
 
     def test_later_improvement_replaces_best_weight_snapshot(self) -> None:
         """Best weights follow a later improvement rather than the baseline."""

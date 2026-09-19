@@ -1,0 +1,1 @@
+"""Notebook artifact contract tests."""

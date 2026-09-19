@@ -29,13 +29,16 @@ if TYPE_CHECKING:
         _data_pack: DataPack | None
         _data_pack_handler: DataPackHandler | None
         _device: torch.device
+        _event_dispatch_depth: int
         _event_handler: EventHandler
         _last_completed_epoch: int
+        _loader_generator_states: dict[str, dict[str, torch.Tensor]]
         _metric_manager: PhaseMetricManager
         _metrics: dict[str, Metric]
         _model: nn.Module
         _optimizer: torch.optim.Optimizer | None
         _optimizer_step_idx: int
+        _pending_loader_generator_states: dict[str, dict[str, torch.Tensor]]
         _resume_loaded: bool
         _stop_training: bool
         _train_results: TrainResult
@@ -66,6 +69,22 @@ if TYPE_CHECKING:
         ) -> None: ...
 
         def load_checkpoint(self, path: str | Path) -> None: ...
+
+        def _capture_loader_generator_state(
+            self,
+            phase: str,
+            loader: DataLoader,
+            *,
+            dataset_name: str | None = None,
+        ) -> None: ...
+
+        def _restore_loader_generator_state(
+            self,
+            phase: str,
+            loader: DataLoader,
+            *,
+            dataset_name: str | None = None,
+        ) -> None: ...
 
         def _validate_epoch(
             self,

@@ -176,11 +176,10 @@ completed.
 `dataset_name` is the stable identifier intended for logging and branching.
 
 There is no framework default seed. Define a non-negative integer `seed` attribute on
-the DataPack only when its construction needs deterministic generators. Every event
-receives a fresh generator initialized with the same configured seed. Branch on
-`context["phase"]` and derive another seed explicitly when an application requires
-independent phase streams. A `DataLoaderConfig.generator` overrides the context
-generator.
+the DataPack only when its construction needs deterministic generators.
+`CONFIGURE_DATALOADER` receives a fresh generator initialized with the DataPack seed.
+Return a custom generator when independent phase-specific random streams are required.
+A `DataLoaderConfig.generator` overrides the context generator.
 
 ## Configure DataLoaders
 

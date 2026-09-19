@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-SOURCE_ROOT = Path(__file__).parents[1] / "src" / "torch_batteries"
+SOURCE_ROOT = Path(__file__).parents[3] / "src" / "torch_batteries"
 
 
 def _is_overload(node: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:

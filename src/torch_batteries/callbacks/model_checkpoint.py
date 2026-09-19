@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 import torch
 from torch import nn
@@ -19,7 +19,7 @@ from torch_batteries.events import Event, EventContext, charge
 from torch_batteries.utils.logging import get_logger
 
 from ._model_checkpoint_functions import (
-    _optional_string,
+    _optional_existing_path,
     _serialized_float,
     _string_float_dict,
     _validate_save_weights_only,
@@ -83,6 +83,7 @@ class ModelCheckpoint(Callback):
         if save_top_k < 1:
             msg = "save_top_k must be greater than or equal to one"
             raise ValueError(msg)
+        save_weights_only = _validate_save_weights_only(save_weights_only)
 
         self._phase = phase
         self._metric = metric
@@ -148,26 +149,84 @@ class ModelCheckpoint(Callback):
         Args:
             state_dict: State returned by :meth:`state_dict`.
         """
+        (
+            best_k_models,
+            best_model_path,
+            kth_best_model_path,
+            best_score,
+            kth_best_score,
+        ) = self._validate_checkpoint_state(state_dict)
+        self._best_k_models = best_k_models
+        self._best_model_path = best_model_path
+        self._kth_best_model_path = kth_best_model_path
+        self._best_score = best_score
+        self._kth_best_score = kth_best_score
+        self._refresh_kth_best()
+        logger.info(
+            "Restored model checkpoint state with %d retained models.",
+            len(self._best_k_models),
+        )
+
+    def _validate_checkpoint_state(
+        self, state_dict: dict[str, Any]
+    ) -> tuple[dict[str, float], str | None, str | None, float, float]:
+        """Validate and normalize all checkpoint ranking state without mutation."""
         try:
-            self._best_k_models = _string_float_dict(state_dict["best_k_models"])
-            self._best_model_path = _optional_string(state_dict["best_model_path"])
-            self._kth_best_model_path = _optional_string(
+            best_k_models = _string_float_dict(state_dict["best_k_models"])
+            best_model_path = _optional_existing_path(state_dict["best_model_path"])
+            kth_best_model_path = _optional_existing_path(
                 state_dict["kth_best_model_path"]
             )
-            self._best_score = _serialized_float(state_dict["best_score"])
-            self._kth_best_score = _serialized_float(state_dict["kth_best_score"])
+            best_score = _serialized_float(state_dict["best_score"])
+            kth_best_score = _serialized_float(state_dict["kth_best_score"])
             _validate_save_weights_only(
                 state_dict["save_weights_only"],
                 expected=self._save_weights_only,
             )
-            self._refresh_kth_best()
         except (KeyError, TypeError, ValueError) as error:
             logger.exception("Invalid model checkpoint state.")
             msg = "Invalid ModelCheckpoint checkpoint state."
             raise ValueError(msg) from error
-        logger.info(
-            "Restored model checkpoint state with %d retained models.",
-            len(self._best_k_models),
+        expected_best_path = (
+            min(best_k_models, key=best_k_models.get)  # type: ignore[arg-type]
+            if self._mode == "min" and best_k_models
+            else max(best_k_models, key=best_k_models.get)  # type: ignore[arg-type]
+            if best_k_models
+            else None
+        )
+        expected_kth_path = (
+            max(best_k_models, key=best_k_models.get)  # type: ignore[arg-type]
+            if self._mode == "min" and best_k_models
+            else min(best_k_models, key=best_k_models.get)  # type: ignore[arg-type]
+            if best_k_models
+            else None
+        )
+        expected_empty_score = float("inf") if self._mode == "min" else float("-inf")
+        if (
+            best_model_path != expected_best_path
+            or kth_best_model_path != expected_kth_path
+            or best_score
+            != (
+                best_k_models[expected_best_path]
+                if expected_best_path is not None
+                else expected_empty_score
+            )
+            or kth_best_score
+            != (
+                best_k_models[expected_kth_path]
+                if expected_kth_path is not None
+                else expected_empty_score
+            )
+        ):
+            logger.error("Model checkpoint ranking state is inconsistent.")
+            msg = "Invalid ModelCheckpoint checkpoint state."
+            raise ValueError(msg)
+        return (
+            best_k_models,
+            best_model_path,
+            kth_best_model_path,
+            best_score,
+            kth_best_score,
         )
 
     @charge(Event.AFTER_TRAIN_EPOCH)
@@ -214,11 +273,16 @@ class ModelCheckpoint(Callback):
         """
         current_score = metrics.get(self._metric)
         if current_score is None:
-            logger.warning(
-                "Checkpoint monitor metric '%s' is missing; checkpoint was skipped.",
+            logger.error(
+                "Checkpoint metric is unavailable: phase=%s, metric=%s",
+                self._phase,
                 self._metric,
             )
-            return
+            msg = (
+                f"ModelCheckpoint metric '{self._metric}' is unavailable "
+                f"for phase '{self._phase}'."
+            )
+            raise ValueError(msg)
 
         is_best = self._monitor_op(current_score, self._best_score)
         qualifies = len(self._best_k_models) < self._save_top_k or self._monitor_op(

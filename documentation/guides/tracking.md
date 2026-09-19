@@ -42,6 +42,11 @@ at phase end, records histories and completion counters in the summary, uploads 
 final model artifact, and finishes the run. Its global-step and epoch counters
 participate in full checkpoints.
 
+If an exception escapes a Battery workflow after the tracker initializes,
+``ON_EXCEPTION`` finishes the run with ``exit_code=1``. Failure cleanup does not upload
+a final model artifact. Exceptions raised by cleanup handlers are logged without
+replacing the original workflow failure.
+
 ## Offline development
 
 Use W&B offline mode when credentials or outbound network access are unavailable:

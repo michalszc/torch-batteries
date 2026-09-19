@@ -26,6 +26,16 @@ class MixedPrecision(Callback):
     __slots__ = ("_device", "_effective_precision", "_precision", "_scaler")
 
     def __init__(self, precision: Precision = "amp") -> None:
+        self._validate_precision(precision)
+        self._precision = precision
+        self._effective_precision: Precision = precision
+        self._device = torch.device("cpu")
+        self._scaler = torch.amp.GradScaler("cpu", enabled=False)
+        logger.debug("Mixed precision callback created with mode %s.", precision)
+
+    @staticmethod
+    def _validate_precision(precision: object) -> None:
+        """Validate a precision mode from any configuration source."""
         if precision not in _VALID_PRECISIONS:
             logger.error("Unsupported precision mode: %s", precision)
             msg = (
@@ -33,11 +43,6 @@ class MixedPrecision(Callback):
                 "'bf16-mixed', or 'amp'."
             )
             raise ValueError(msg)
-        self._precision = precision
-        self._effective_precision: Precision = precision
-        self._device = torch.device("cpu")
-        self._scaler = torch.amp.GradScaler("cpu", enabled=False)
-        logger.debug("Mixed precision callback created with mode %s.", precision)
 
     @property
     def precision(self) -> Precision:
@@ -201,6 +206,12 @@ class MixedPrecision(Callback):
         Args:
             state_dict: State returned by :meth:`state_dict`.
         """
+        scaler_state = self._validate_checkpoint_state(state_dict)
+        self._scaler.load_state_dict(scaler_state)
+        logger.info("Mixed precision scaler state restored.")
+
+    def _validate_checkpoint_state(self, state_dict: dict[str, Any]) -> dict[str, Any]:
+        """Validate all mixed-precision checkpoint state without mutation."""
         try:
             saved_precision = state_dict["precision"]
             saved_effective = state_dict["effective_precision"]
@@ -209,6 +220,8 @@ class MixedPrecision(Callback):
             logger.exception("Invalid mixed precision state.")
             msg = "Invalid MixedPrecision checkpoint state."
             raise ValueError(msg) from error
+        self._validate_precision(saved_precision)
+        self._validate_precision(saved_effective)
         if (
             saved_precision != self._precision
             or saved_effective != self._effective_precision
@@ -226,5 +239,4 @@ class MixedPrecision(Callback):
             logger.error("Mixed precision scaler state is not a dictionary.")
             msg = "Invalid MixedPrecision scaler checkpoint state."
             raise TypeError(msg)
-        self._scaler.load_state_dict(scaler_state)
-        logger.info("Mixed precision scaler state restored.")
+        return scaler_state

@@ -8,6 +8,7 @@
 
 - **`EarlyStopping`** — stops training when a monitored metric stops improving.
 - **`ModelCheckpoint`** — retains the best weights-only or full-state checkpoints.
+- **`TerminateOnNonFinite`** — fails on selected NaN or infinite losses and metrics.
 - **`ExperimentTrackingCallback`** — logs training lifecycle data through a tracker.
 
 ## Optimization
@@ -26,6 +27,7 @@ from .gradient_clip import GradientClip
 from .learning_rate_scheduler import LearningRateScheduler
 from .mixed_precision import MixedPrecision
 from .model_checkpoint import ModelCheckpoint
+from .terminate_on_non_finite import TerminateOnNonFinite
 
 __all__ = [
     "Callback",
@@ -36,4 +38,5 @@ __all__ = [
     "LearningRateScheduler",
     "MixedPrecision",
     "ModelCheckpoint",
+    "TerminateOnNonFinite",
 ]

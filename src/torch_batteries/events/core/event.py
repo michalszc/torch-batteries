@@ -62,6 +62,14 @@ class Event(Enum):
         - **Return**: ignored
         - **Default**: no operation
 
+    - `ON_EXCEPTION`: Broadcast exactly once when an exception escapes a public
+      training, validation, testing, or prediction workflow. Handler failures are
+      logged and suppressed, then the original workflow exception is re-raised.
+      Normal streaming-prediction exhaustion and generator closure do not emit it.
+        - **Context**: `battery`, `model`, `optimizer`, `exception`
+        - **Return**: ignored
+        - **Default**: no operation
+
     - `STEP_EXECUTION_CONTEXT`: Context-provider event requested immediately
       before `TRAIN_STEP`, `VALIDATION_STEP`, `TEST_STEP`, and `PREDICT_STEP`.
       Every handler must return a context manager. Context managers enter
@@ -266,6 +274,7 @@ class Event(Enum):
 
     # Optimization extension events
     SETUP = "setup"
+    ON_EXCEPTION = "on_exception"
     STEP_EXECUTION_CONTEXT = "step_execution_context"
     CONFIGURE_TRAIN_STEP = "configure_train_step"
     BEFORE_BACKWARD = "before_backward"

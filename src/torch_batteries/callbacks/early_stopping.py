@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Literal
 
+import torch
+
 from torch_batteries.callbacks._monitor import (
     MonitorPhase,
     require_metric,
@@ -107,18 +109,53 @@ class EarlyStopping(Callback):
         Args:
             state_dict: State returned by :meth:`state_dict`.
         """
-        try:
-            self._best_score = state_dict["best_score"]
-            self._epochs_no_improve = int(state_dict["epochs_no_improve"])
-            self._best_weights = state_dict["best_weights"]
-        except (KeyError, TypeError, ValueError) as error:
-            logger.exception("Invalid early stopping state.")
-            msg = "Invalid EarlyStopping checkpoint state."
-            raise ValueError(msg) from error
+        best_score, epochs_no_improve, best_weights = self._validate_checkpoint_state(
+            state_dict
+        )
+        self._best_score = best_score
+        self._epochs_no_improve = epochs_no_improve
+        self._best_weights = best_weights
         logger.info(
             "Restored early stopping state: best_score=%s, no_improve=%d",
             self._best_score,
             self._epochs_no_improve,
+        )
+
+    def _validate_checkpoint_state(
+        self, state_dict: dict[str, Any]
+    ) -> tuple[float | None, int, dict[str, Any] | None]:
+        """Validate and normalize all early-stopping state without mutation."""
+        try:
+            best_score = state_dict["best_score"]
+            epochs_no_improve = state_dict["epochs_no_improve"]
+            best_weights = state_dict["best_weights"]
+        except KeyError as error:
+            logger.exception("Invalid early stopping state.")
+            msg = "Invalid EarlyStopping checkpoint state."
+            raise ValueError(msg) from error
+        if (
+            (best_score is not None and not isinstance(best_score, (int, float)))
+            or not isinstance(epochs_no_improve, int)
+            or isinstance(epochs_no_improve, bool)
+            or epochs_no_improve < 0
+            or (
+                best_weights is not None
+                and (
+                    not isinstance(best_weights, dict)
+                    or any(
+                        not isinstance(name, str) or not isinstance(value, torch.Tensor)
+                        for name, value in best_weights.items()
+                    )
+                )
+            )
+        ):
+            logger.error("Invalid early stopping state.")
+            msg = "Invalid EarlyStopping checkpoint state."
+            raise ValueError(msg)
+        return (
+            None if best_score is None else float(best_score),
+            epochs_no_improve,
+            best_weights,
         )
 
     @charge(Event.BEFORE_TRAIN)
@@ -187,7 +224,15 @@ class EarlyStopping(Callback):
         """
 
         if self._metric not in metrics:
-            msg = f"Metric '{self._metric}' not found in {self._phase} metrics."
+            logger.error(
+                "Early stopping metric is unavailable: phase=%s, metric=%s",
+                self._phase,
+                self._metric,
+            )
+            msg = (
+                f"EarlyStopping metric '{self._metric}' is unavailable "
+                f"for phase '{self._phase}'."
+            )
             raise ValueError(msg)
 
         current_score = metrics[self._metric]

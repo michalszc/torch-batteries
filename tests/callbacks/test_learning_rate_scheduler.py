@@ -265,6 +265,16 @@ def test_rejects_invalid_scheduler_checkpoint_state() -> None:
                 "stepped_epochs": None,
             }
         )
+    with pytest.raises(TypeError, match="Invalid LearningRateScheduler"):
+        callback.load_state_dict(
+            {
+                "interval": "epoch",
+                "phase": None,
+                "metric": None,
+                "scheduler": {},
+                "stepped_epochs": ["one"],
+            }
+        )
 
 
 def test_scheduler_ignores_events_for_other_routes() -> None:

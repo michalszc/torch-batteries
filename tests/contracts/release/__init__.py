@@ -1,0 +1,1 @@
+"""Release-process contract tests."""

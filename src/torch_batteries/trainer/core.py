@@ -3,7 +3,7 @@
 from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, overload
+from typing import Any, Literal, overload
 
 import torch
 from torch import nn
@@ -54,6 +54,8 @@ class Battery(CheckpointMixin, TrainingMixin, EvaluationMixin, PredictionMixin):
             provider-style optimization events.
         data_pack: Optional event-driven dataset and DataLoader configuration. When
             attached, workflow loaders may be omitted.
+        metric_error_policy: ``"raise"`` to propagate metric lifecycle exceptions.
+            ``"warn"`` logs the failure and skips that metric for the phase.
 
     Note:
         Epoch values exposed through event contexts are one-based. Prediction output
@@ -65,13 +67,17 @@ class Battery(CheckpointMixin, TrainingMixin, EvaluationMixin, PredictionMixin):
         "_data_pack",
         "_data_pack_handler",
         "_device",
+        "_event_dispatch_depth",
         "_event_handler",
         "_last_completed_epoch",
+        "_loader_generator_states",
+        "_metric_error_policy",
         "_metric_manager",
         "_metrics",
         "_model",
         "_optimizer",
         "_optimizer_step_idx",
+        "_pending_loader_generator_states",
         "_resume_loaded",
         "_stop_training",
         "_train_results",
@@ -86,12 +92,18 @@ class Battery(CheckpointMixin, TrainingMixin, EvaluationMixin, PredictionMixin):
         callbacks: list | None = None,
         *,
         data_pack: DataPack | None = None,
+        metric_error_policy: Literal["raise", "warn"] = "raise",
     ):
+        self._event_dispatch_depth = 0
         self._device = get_device(device)
         self._model = model.to(self._device)
         self._optimizer = optimizer
         self._metrics = metrics or {}
-        self._metric_manager = PhaseMetricManager(self._metrics)
+        self._metric_error_policy = metric_error_policy
+        self._metric_manager = PhaseMetricManager(
+            self._metrics,
+            metric_error_policy=metric_error_policy,
+        )
         callback_list = list(callbacks or [])
         self._callbacks = callback_list
         self._event_handler = EventHandler(self._model, callbacks=callback_list)
@@ -101,7 +113,9 @@ class Battery(CheckpointMixin, TrainingMixin, EvaluationMixin, PredictionMixin):
         )
         self._stop_training = False
         self._last_completed_epoch = 0
+        self._loader_generator_states: dict[str, dict[str, torch.Tensor]] = {}
         self._optimizer_step_idx = 0
+        self._pending_loader_generator_states: dict[str, dict[str, torch.Tensor]] = {}
         self._resume_loaded = False
         self._train_results: TrainResult = {
             "train_loss": [],
@@ -142,6 +156,7 @@ class Battery(CheckpointMixin, TrainingMixin, EvaluationMixin, PredictionMixin):
     @optimizer.setter
     def optimizer(self, value: torch.optim.Optimizer | None) -> None:
         """Set the optimizer."""
+        self._ensure_configuration_mutable("optimizer")
         self._optimizer = value
 
     @property
@@ -157,8 +172,30 @@ class Battery(CheckpointMixin, TrainingMixin, EvaluationMixin, PredictionMixin):
         value: dict[str, Metric] | None,
     ) -> None:
         """Set the metrics dictionary."""
+        self._ensure_configuration_mutable("metrics")
         self._metrics = value or {}
-        self._metric_manager = PhaseMetricManager(self._metrics)
+        self._metric_manager = PhaseMetricManager(
+            self._metrics,
+            metric_error_policy=self._metric_error_policy,
+        )
+
+    @property
+    def metric_error_policy(self) -> Literal["raise", "warn"]:
+        """Get the configured metric exception handling policy."""
+        return self._metric_error_policy
+
+    @metric_error_policy.setter
+    def metric_error_policy(self, value: Literal["raise", "warn"]) -> None:
+        """Set the metric exception policy while retaining configured metrics.
+
+        Args:
+            value: ``"raise"`` to propagate metric exceptions or ``"warn"`` to
+                log and skip failed metrics for the current phase.
+        """
+        self._ensure_configuration_mutable("metric_error_policy")
+        manager = PhaseMetricManager(self._metrics, metric_error_policy=value)
+        self._metric_error_policy = value
+        self._metric_manager = manager
 
     @property
     def stop_training(self) -> bool:
@@ -169,6 +206,53 @@ class Battery(CheckpointMixin, TrainingMixin, EvaluationMixin, PredictionMixin):
     def stop_training(self, value: bool) -> None:
         """Set the stop_training flag."""
         self._stop_training = value
+
+    def _ensure_configuration_mutable(self, name: str) -> None:
+        """Reject configuration assignment from inside an event dispatch."""
+        if self._event_dispatch_depth == 0:
+            return
+        logger.error(
+            "Battery.%s cannot be changed while an event handler is running.", name
+        )
+        msg = f"Battery.{name} cannot be changed while an event handler is running."
+        raise RuntimeError(msg)
+
+    @contextmanager
+    def _event_dispatch_scope(self) -> Generator[None]:
+        """Track nested event dispatch while handlers receive this Battery."""
+        self._event_dispatch_depth += 1
+        try:
+            yield
+        finally:
+            self._event_dispatch_depth -= 1
+
+    @contextmanager
+    def _workflow_exception_boundary(
+        self, *, ignore_generator_exit: bool = False
+    ) -> Generator[None]:
+        """Dispatch one failure event for an exception escaping a public workflow."""
+        try:
+            yield
+        except GeneratorExit as exception:
+            if not ignore_generator_exit:
+                self._dispatch_workflow_exception(exception)
+            raise
+        except BaseException as exception:
+            self._dispatch_workflow_exception(exception)
+            raise
+
+    def _dispatch_workflow_exception(self, exception: BaseException) -> None:
+        """Notify failure handlers without allowing them to replace the failure."""
+        context: EventContext = {
+            "battery": self,
+            "model": self._model,
+            "optimizer": self._optimizer,
+            "exception": exception,
+        }
+        try:
+            self._event_handler.call(Event.ON_EXCEPTION, context)
+        except BaseException:
+            logger.exception("Unexpected failure while dispatching ON_EXCEPTION.")
 
     def save_checkpoint(self, path: str | Path) -> None:
         """Save complete resumable training state atomically.
@@ -223,15 +307,16 @@ class Battery(CheckpointMixin, TrainingMixin, EvaluationMixin, PredictionMixin):
         Returns:
             Per-epoch loss and named metric histories.
         """
-        return TrainingMixin.train(
-            self,
-            train_loader,
-            val_loader,
-            epochs,
-            verbose,
-            resume_from=resume_from,
-            resume_epochs_mode=resume_epochs_mode,
-        )
+        with self._workflow_exception_boundary():
+            return TrainingMixin.train(
+                self,
+                train_loader,
+                val_loader,
+                epochs,
+                verbose,
+                resume_from=resume_from,
+                resume_epochs_mode=resume_epochs_mode,
+            )
 
     def fit(  # noqa: PLR0913
         self,
@@ -257,15 +342,16 @@ class Battery(CheckpointMixin, TrainingMixin, EvaluationMixin, PredictionMixin):
             Per-epoch training histories and optional validation histories. Validation
             histories are empty when validation data is unavailable.
         """
-        return TrainingMixin.fit(
-            self,
-            train_loader,
-            val_loader,
-            epochs,
-            verbose,
-            resume_from=resume_from,
-            resume_epochs_mode=resume_epochs_mode,
-        )
+        with self._workflow_exception_boundary():
+            return TrainingMixin.fit(
+                self,
+                train_loader,
+                val_loader,
+                epochs,
+                verbose,
+                resume_from=resume_from,
+                resume_epochs_mode=resume_epochs_mode,
+            )
 
     def validate(
         self,
@@ -282,7 +368,8 @@ class Battery(CheckpointMixin, TrainingMixin, EvaluationMixin, PredictionMixin):
         Returns:
             Aggregate validation loss and optional named validation metrics.
         """
-        return EvaluationMixin._validate(self, val_loader, verbose)  # noqa: SLF001
+        with self._workflow_exception_boundary():
+            return EvaluationMixin._validate(self, val_loader, verbose)  # noqa: SLF001
 
     @overload
     def test(
@@ -328,7 +415,10 @@ class Battery(CheckpointMixin, TrainingMixin, EvaluationMixin, PredictionMixin):
         Returns:
             One result or a mapping of named DataPack results.
         """
-        return EvaluationMixin._test(self, test_loader, verbose, dataset=dataset)  # noqa: SLF001
+        with self._workflow_exception_boundary():
+            return EvaluationMixin._test(  # noqa: SLF001
+                self, test_loader, verbose, dataset=dataset
+            )
 
     @overload
     def predict(
@@ -384,14 +474,15 @@ class Battery(CheckpointMixin, TrainingMixin, EvaluationMixin, PredictionMixin):
         Returns:
             One prediction result or a mapping of named results.
         """
-        return PredictionMixin._predict(  # noqa: SLF001
-            self,
-            data_loader,
-            verbose,
-            move_to_cpu=move_to_cpu,
-            concatenate=concatenate,
-            dataset=dataset,
-        )
+        with self._workflow_exception_boundary():
+            return PredictionMixin._predict(  # noqa: SLF001
+                self,
+                data_loader,
+                verbose,
+                move_to_cpu=move_to_cpu,
+                concatenate=concatenate,
+                dataset=dataset,
+            )
 
     def predict_iter(
         self,
@@ -412,13 +503,14 @@ class Battery(CheckpointMixin, TrainingMixin, EvaluationMixin, PredictionMixin):
         Yields:
             One prediction-step output at a time.
         """
-        yield from PredictionMixin.predict_iter(
-            self,
-            data_loader,
-            verbose,
-            move_to_cpu=move_to_cpu,
-            dataset=dataset,
-        )
+        with self._workflow_exception_boundary(ignore_generator_exit=True):
+            yield from PredictionMixin.predict_iter(
+                self,
+                data_loader,
+                verbose,
+                move_to_cpu=move_to_cpu,
+                dataset=dataset,
+            )
 
     @contextmanager
     def _data_workflow(

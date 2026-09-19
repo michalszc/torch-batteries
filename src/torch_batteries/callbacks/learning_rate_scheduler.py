@@ -51,12 +51,37 @@ class LearningRateScheduler(Callback):
         stage: SchedulerPhase | None = None,
     ) -> None:
         phase = resolve_monitor_phase(phase, stage=stage, required=False)
+        is_plateau = isinstance(scheduler, ReduceLROnPlateau)
+        self._validate_configuration(interval, phase, metric, is_plateau=is_plateau)
+        self._is_plateau = is_plateau
+        self._scheduler = scheduler
+        self._interval = interval
+        self._phase = phase
+        self._metric = metric
+        self._stepped_epochs: set[int] = set()
+        logger.info(
+            "Learning-rate scheduler configured: "
+            "type=%s, interval=%s, phase=%s, metric=%s",
+            type(scheduler).__name__,
+            interval,
+            phase,
+            metric,
+        )
+
+    @staticmethod
+    def _validate_configuration(
+        interval: object,
+        phase: object,
+        metric: object,
+        *,
+        is_plateau: bool,
+    ) -> None:
+        """Validate scheduler options from any configuration source."""
         if interval not in {"step", "epoch"}:
             logger.error("Unsupported scheduler interval: %s", interval)
             msg = "LearningRateScheduler interval must be 'step' or 'epoch'."
             raise ValueError(msg)
-        self._is_plateau = isinstance(scheduler, ReduceLROnPlateau)
-        if self._is_plateau:
+        if is_plateau:
             if (
                 interval != "epoch"
                 or phase not in {"train", "validation"}
@@ -76,20 +101,6 @@ class LearningRateScheduler(Callback):
             )
             msg = "phase and metric are only supported for ReduceLROnPlateau."
             raise ValueError(msg)
-
-        self._scheduler = scheduler
-        self._interval = interval
-        self._phase = phase
-        self._metric = metric
-        self._stepped_epochs: set[int] = set()
-        logger.info(
-            "Learning-rate scheduler configured: "
-            "type=%s, interval=%s, phase=%s, metric=%s",
-            type(scheduler).__name__,
-            interval,
-            phase,
-            metric,
-        )
 
     @property
     def scheduler(self) -> LRScheduler:
@@ -226,12 +237,24 @@ class LearningRateScheduler(Callback):
             state_dict: State returned by :meth:`state_dict`, including legacy
                 ``stage`` state.
         """
+        scheduler_state, stepped_epochs = self._validate_checkpoint_state(state_dict)
+        self._scheduler.load_state_dict(scheduler_state)
+        self._stepped_epochs = set(stepped_epochs)
+        logger.info(
+            "Learning-rate scheduler state restored: rates=%s",
+            self._learning_rates(),
+        )
+
+    def _validate_checkpoint_state(
+        self, state_dict: dict[str, Any]
+    ) -> tuple[dict[str, Any], list[int]]:
+        """Validate all scheduler checkpoint state without mutation."""
         has_phase = "phase" in state_dict
         has_stage = "stage" in state_dict
         if has_phase == has_stage:
             logger.error(
-                "Learning-rate scheduler checkpoint must contain exactly one "
-                "monitoring phase key."
+                "LearningRateScheduler checkpoint state must contain exactly one "
+                "of 'phase' or legacy 'stage'."
             )
             msg = (
                 "LearningRateScheduler checkpoint state must contain exactly one "
@@ -250,6 +273,12 @@ class LearningRateScheduler(Callback):
                 stage=cast("MonitorPhase | None", state_dict["stage"]),
                 required=False,
             )
+        self._validate_configuration(
+            state_dict.get("interval"),
+            checkpoint_phase,
+            state_dict.get("metric"),
+            is_plateau=self._is_plateau,
+        )
         if (
             state_dict.get("interval") != self._interval
             or checkpoint_phase != self._phase
@@ -260,15 +289,15 @@ class LearningRateScheduler(Callback):
             raise ValueError(msg)
         scheduler_state = state_dict.get("scheduler")
         stepped_epochs = state_dict.get("stepped_epochs")
-        if not isinstance(scheduler_state, dict) or not isinstance(
-            stepped_epochs, list
+        if (
+            not isinstance(scheduler_state, dict)
+            or not isinstance(stepped_epochs, list)
+            or any(
+                not isinstance(epoch, int) or isinstance(epoch, bool) or epoch < 0
+                for epoch in stepped_epochs
+            )
         ):
             logger.error("Invalid learning-rate scheduler checkpoint state.")
             msg = "Invalid LearningRateScheduler checkpoint state."
             raise TypeError(msg)
-        self._scheduler.load_state_dict(scheduler_state)
-        self._stepped_epochs = {int(epoch) for epoch in stepped_epochs}
-        logger.info(
-            "Learning-rate scheduler state restored: rates=%s",
-            self._learning_rates(),
-        )
+        return scheduler_state, stepped_epochs

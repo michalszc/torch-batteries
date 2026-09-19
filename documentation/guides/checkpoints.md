@@ -17,10 +17,13 @@ The write is atomic and creates missing parent directories. A full checkpoint st
 - The qualified DataPack type and its optional `state_dict()`
 - Last completed epoch and optimizer-step index
 - Accumulated train and validation histories
+- Python, PyTorch CPU, all available CUDA, available MPS, and optional NumPy RNG state
+- Distinct generators reachable from each used DataLoader, sampler, or batch sampler
 
-Datasets, DataLoaders, workers, open resources, and random-number-generator state are
-not included. A DataPack can preserve construction inputs such as split indices or a
-streaming position in its own state; it should not return live data objects.
+Datasets, DataLoaders, workers, and open resources are not included. NumPy state is
+stored when NumPy is already available; NumPy is not a core dependency. A DataPack can
+preserve construction inputs such as split indices or a streaming position in its own
+state; it should not return live data objects.
 
 ## Load and continue
 
@@ -63,6 +66,24 @@ Callback types and order and resumable metric names must match the saved state.
 If the checkpoint contains DataPack state, the same qualified DataPack type must be
 attached. `fit(resume_from=...)` and `train(resume_from=...)` restore it before
 `SETUP_DATA`, so saved splits affect the loaders used by the resumed workflow.
+
+Global RNG state is restored after all other checkpoint components. Loader-generator
+state is retained by phase and applied after explicit or DataPack-created loaders are
+available, before resumed iteration begins. If a saved accelerator backend, NumPy, or
+compatible loader generator is unavailable, restoration logs a warning and continues.
+
+Reproducible continuation is guaranteed at completed epoch boundaries when the model,
+optimizer, data, and equivalent generator-backed loaders are recreated. Checkpoints do
+not reproduce an iterator from the middle of an epoch, already-prefetched worker data,
+or persistent-worker process state. Schemas 1 and 2 remain loadable but do not contain
+the reproducible RNG fields.
+
+Full and raw-model restoration is transactional. The complete serialized structure and
+component compatibility are checked first. If applying any model, optimizer, callback,
+metric, DataPack, Battery, loader-generator, or RNG state fails, the pre-load state is
+restored and the original exception is raised. Custom callbacks, metrics, and DataPacks
+participate in this guarantee when their `state_dict()` output can be passed back to
+`load_state_dict()` to restore the same state.
 
 ## Keep the best checkpoints
 

@@ -33,6 +33,11 @@ the required improvement. Best weights are cloned to CPU-safe independent tensor
 and restored after training when requested. Full checkpoints preserve the best score,
 patience counter, and optional best weights.
 
+``EarlyStopping``, ``ModelCheckpoint``, and metric-aware
+``LearningRateScheduler`` configurations raise ``ValueError`` when their selected
+train or validation metric is unavailable. A misspelled or unproduced metric never
+silently disables monitoring.
+
 For compatibility, the callbacks still accept `stage=` as a deprecated keyword
 alias. New code should use `phase=`.
 
@@ -109,7 +114,30 @@ callback = LearningRateScheduler(
 A validation-monitored plateau scheduler requires a validation loader. Scheduler
 configuration and advancement state are restored strictly from full checkpoints.
 
+## Non-finite termination
+
+Use ``TerminateOnNonFinite`` to fail immediately when selected workflow values become
+NaN or infinite:
+
+```python
+from torch_batteries.callbacks import TerminateOnNonFinite
+
+callback = TerminateOnNonFinite(check_loss=True, check_metrics=True)
+```
+
+Training loss is checked before backward, so a non-finite loss never reaches backward
+or the optimizer. Validation and test losses are checked after their step returns.
+Named batch metrics and final stateful or collected metrics are checked separately.
+Set either option to ``False`` to disable that category; the metric name ``"loss"``
+always follows ``check_loss``. Both options cannot be disabled together.
+
 ## Custom callbacks
+
+Configure ``battery.optimizer``, ``battery.metrics``, and
+``battery.metric_error_policy`` outside charged event handlers. Assigning these
+workflow settings while any model, callback, or DataPack event is running raises a
+``RuntimeError``. The ``battery.stop_training`` flag remains available to callbacks as
+the explicit runtime control for requesting an orderly stop.
 
 ```python
 class EpochReporter(Callback):

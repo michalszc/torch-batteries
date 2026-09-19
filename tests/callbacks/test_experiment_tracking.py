@@ -307,6 +307,27 @@ class TestExperimentTrackingCallback:
         assert tracker.exit_code == 0
         assert not tracker.is_initialized
 
+    def test_on_exception_finishes_initialized_tracker_without_model(self) -> None:
+        """Workflow failure closes an active run without publishing an artifact."""
+        tracker = FakeTracker()
+        callback = ExperimentTrackingCallback(tracker=tracker)
+        callback.on_train_start(EventContext())
+
+        callback.on_exception(EventContext(exception=RuntimeError("failed")))
+
+        assert tracker.finished
+        assert tracker.exit_code == 1
+        assert tracker.logged_models == []
+
+    def test_on_exception_ignores_tracker_that_never_initialized(self) -> None:
+        """Failure cleanup is safe when run initialization did not complete."""
+        tracker = FakeTracker()
+        callback = ExperimentTrackingCallback(tracker=tracker)
+
+        callback.on_exception(EventContext(exception=RuntimeError("failed")))
+
+        assert not tracker.finished
+
     def test_full_training_lifecycle(self) -> None:
         """Test full training lifecycle with callback."""
         tracker = FakeTracker()

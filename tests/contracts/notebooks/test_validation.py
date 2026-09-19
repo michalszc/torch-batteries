@@ -11,7 +11,7 @@ import nbformat
 import pytest
 from nbformat.v4 import new_code_cell, new_notebook, new_output
 
-PROJECT_ROOT = Path(__file__).parents[1]
+PROJECT_ROOT = Path(__file__).parents[3]
 VALIDATOR = PROJECT_ROOT / "scripts" / "validate_notebooks.sh"
 VERSION = "0.8.0"
 

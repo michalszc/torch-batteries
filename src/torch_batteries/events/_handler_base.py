@@ -1,6 +1,7 @@
 """Shared charged-handler discovery and dispatch infrastructure."""
 
-from collections.abc import Callable, Generator, Iterable
+from collections.abc import Callable, Generator, Iterable, Mapping
+from contextlib import AbstractContextManager, nullcontext
 from logging import Logger
 from typing import Any
 
@@ -112,11 +113,12 @@ class _ChargedHandlerBase:
             self._handler_logger.debug("No handler found for event '%s'", event.value)
             return
         self._handler_logger.debug("Calling handlers for event '%s'", event.value)
-        for handler in handlers:
-            result = handler(*args, **kwargs)
-            if require_none and result is not None:
-                msg = f"Event '{event.value}' handlers must return None."
-                raise TypeError(msg)
+        with self._dispatch_scope(*args, **kwargs):
+            for handler in handlers:
+                result = handler(*args, **kwargs)
+                if require_none and result is not None:
+                    msg = f"Event '{event.value}' handlers must return None."
+                    raise TypeError(msg)
 
     def _provide(
         self,
@@ -139,4 +141,16 @@ class _ChargedHandlerBase:
             )
             raise ValueError(invalid_message)
         self._handler_logger.debug("Calling provider for event '%s'.", event.value)
-        return handlers[0](*args, **kwargs)
+        with self._dispatch_scope(*args, **kwargs):
+            return handlers[0](*args, **kwargs)
+
+    def _dispatch_scope(
+        self, *args: Any, **kwargs: Any
+    ) -> AbstractContextManager[None]:
+        """Return the Battery mutation guard carried by an event context."""
+        context = args[0] if args else kwargs.get("context")
+        if not isinstance(context, Mapping):
+            return nullcontext()
+        battery = context.get("battery")
+        scope = getattr(battery, "_event_dispatch_scope", None)
+        return scope() if callable(scope) else nullcontext()

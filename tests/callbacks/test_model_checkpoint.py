@@ -13,12 +13,16 @@ if TYPE_CHECKING:
     from torch_batteries.events import EventContext
 
 
-def valid_checkpoint_state() -> dict[str, object]:
+def valid_checkpoint_state(tmp_path: Path) -> dict[str, object]:
     """Return a minimal valid callback state for corruption tests."""
+    first = tmp_path / "first.pth"
+    second = tmp_path / "second.pth"
+    first.touch()
+    second.touch()
     return {
-        "best_k_models": {"first.pth": 0.8, "second.pth": 0.9},
-        "best_model_path": "second.pth",
-        "kth_best_model_path": "first.pth",
+        "best_k_models": {str(first): 0.8, str(second): 0.9},
+        "best_model_path": str(second),
+        "kth_best_model_path": str(first),
         "best_score": 0.9,
         "kth_best_score": 0.8,
         "save_weights_only": False,
@@ -451,27 +455,40 @@ class TestModelCheckpoint:
             str(missing_path),
         )
 
-    def test_missing_monitor_metric_logs_warning(self, tmp_path: Path) -> None:
-        """Missing checkpoint monitor data is visible at WARNING level."""
+    @pytest.mark.parametrize(
+        ("phase", "metrics_key", "handler_name"),
+        [
+            ("train", "train_metrics", "run_on_train_epoch_end"),
+            ("validation", "val_metrics", "run_on_validation_end"),
+        ],
+    )
+    def test_missing_monitor_metric_is_rejected(
+        self,
+        tmp_path: Path,
+        phase: str,
+        metrics_key: str,
+        handler_name: str,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Missing checkpoint monitor data fails for both monitoring phases."""
         checkpoint = ModelCheckpoint(
-            phase="validation", metric="accuracy", save_dir=str(tmp_path)
+            phase=phase,  # type: ignore[arg-type]
+            metric="accuracy",
+            save_dir=str(tmp_path),
         )
+        context = {
+            "model": torch.nn.Linear(1, 1),
+            metrics_key: {"loss": 0.5},
+            "epoch": 1,
+        }
 
-        with patch(
-            "torch_batteries.callbacks.model_checkpoint.logger.warning"
-        ) as mock_warning:
-            checkpoint.run_on_validation_end(
-                {
-                    "model": torch.nn.Linear(1, 1),
-                    "val_metrics": {"loss": 0.5},
-                    "epoch": 1,
-                }
-            )
+        with pytest.raises(
+            ValueError,
+            match=rf"metric 'accuracy'.*phase '{phase}'",
+        ):
+            getattr(checkpoint, handler_name)(context)
 
-        mock_warning.assert_called_once_with(
-            "Checkpoint monitor metric '%s' is missing; checkpoint was skipped.",
-            "accuracy",
-        )
+        assert f"phase={phase}, metric=accuracy" in caplog.text
 
     def test_min_mode_retains_two_lowest_checkpoints(self, tmp_path: Path) -> None:
         """Minimum-mode top-k retention evicts the highest loss checkpoint."""
@@ -526,15 +543,17 @@ class TestModelCheckpoint:
         )
 
     @pytest.mark.parametrize("mode", ["min", "max"])
-    def test_state_round_trip_restores_checkpoint_ranking(self, mode: str) -> None:
+    def test_state_round_trip_restores_checkpoint_ranking(
+        self, mode: str, tmp_path: Path
+    ) -> None:
         """Checkpoint ranking metadata survives callback serialization."""
-        state = valid_checkpoint_state()
+        state = valid_checkpoint_state(tmp_path)
         if mode == "min":
             state.update(
                 {
-                    "best_model_path": "first.pth",
+                    "best_model_path": str(tmp_path / "first.pth"),
                     "best_score": 0.8,
-                    "kth_best_model_path": "second.pth",
+                    "kth_best_model_path": str(tmp_path / "second.pth"),
                     "kth_best_score": 0.9,
                 }
             )
@@ -553,8 +572,8 @@ class TestModelCheckpoint:
         restored.load_state_dict(source.state_dict())
 
         assert restored.best_k_models == {
-            "first.pth": 0.8,
-            "second.pth": 0.9,
+            str(tmp_path / "first.pth"): 0.8,
+            str(tmp_path / "second.pth"): 0.9,
         }
         assert restored.best_model_path == state["best_model_path"]
         assert restored.best_score == state["best_score"]
@@ -571,9 +590,11 @@ class TestModelCheckpoint:
             ("save_weights_only", True),
         ],
     )
-    def test_invalid_state_is_rejected(self, field: str, value: object) -> None:
+    def test_invalid_state_is_rejected(
+        self, field: str, value: object, tmp_path: Path
+    ) -> None:
         """Every serialized ranking field is validated before restoration."""
-        state = valid_checkpoint_state()
+        state = valid_checkpoint_state(tmp_path)
         state[field] = value
         checkpoint = ModelCheckpoint(phase="validation", metric="score")
 
@@ -590,6 +611,28 @@ class TestModelCheckpoint:
             ValueError, match="Invalid ModelCheckpoint checkpoint state"
         ):
             checkpoint.load_state_dict({})
+
+    def test_missing_checkpoint_paths_are_rejected(self, tmp_path: Path) -> None:
+        """Serialized ranking paths must still reference checkpoint files."""
+        state = valid_checkpoint_state(tmp_path)
+        state["best_model_path"] = str(tmp_path / "missing.pth")
+        checkpoint = ModelCheckpoint(phase="validation", metric="score")
+
+        with pytest.raises(
+            ValueError, match="Invalid ModelCheckpoint checkpoint state"
+        ):
+            checkpoint.load_state_dict(state)
+
+    def test_inconsistent_checkpoint_ranking_is_rejected(self, tmp_path: Path) -> None:
+        """Cached ranking fields must agree with the retained checkpoint map."""
+        state = valid_checkpoint_state(tmp_path)
+        state["best_score"] = 0.1
+        checkpoint = ModelCheckpoint(phase="validation", metric="score")
+
+        with pytest.raises(
+            ValueError, match="Invalid ModelCheckpoint checkpoint state"
+        ):
+            checkpoint.load_state_dict(state)
 
     def test_phase_handlers_ignore_the_opposite_phase(self) -> None:
         """A checkpoint callback only handles its configured phase."""
