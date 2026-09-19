@@ -1,6 +1,6 @@
 """Tests for public DataPack value contracts."""
 
-from typing import Any
+from typing import Any, Literal
 
 import pytest
 import torch
@@ -39,11 +39,16 @@ def test_dataset_bundle_normalizes_named_and_singular_datasets() -> None:
 
 
 @pytest.mark.parametrize("phase", ["train", "validation"])
-def test_dataset_bundle_rejects_named_training_datasets(phase: str) -> None:
+def test_dataset_bundle_accepts_named_training_datasets(
+    phase: Literal["train", "validation"],
+) -> None:
     dataset = TensorDataset(torch.arange(2))
-
-    with pytest.raises(TypeError, match=rf"{phase} dataset must be .*Dataset"):
-        DatasetBundle(**{phase: {"named": dataset}})  # type: ignore[arg-type]
+    bundle = (
+        DatasetBundle(train={"named": dataset})
+        if phase == "train"
+        else DatasetBundle(validation={"named": dataset})
+    )
+    assert bundle.datasets_for_phase(phase) == {"named": dataset}
 
 
 @pytest.mark.parametrize("phase", ["train", "validation", "test", "predict"])
@@ -52,7 +57,7 @@ def test_dataset_bundle_rejects_unsupported_dataset_objects(phase: str) -> None:
         DatasetBundle(**{phase: object()})  # type: ignore[arg-type]
 
 
-@pytest.mark.parametrize("phase", ["test", "predict"])
+@pytest.mark.parametrize("phase", ["train", "validation", "test", "predict"])
 def test_dataset_bundle_rejects_empty_named_datasets(phase: str) -> None:
     with pytest.raises(ValueError, match=f"{phase} dataset mapping cannot be empty"):
         DatasetBundle(**{phase: {}})  # type: ignore[arg-type]
@@ -94,11 +99,16 @@ def test_dataloader_bundle_normalizes_named_and_singular_loaders() -> None:
 
 
 @pytest.mark.parametrize("phase", ["train", "validation"])
-def test_dataloader_bundle_rejects_named_training_loaders(phase: str) -> None:
+def test_dataloader_bundle_accepts_named_training_loaders(
+    phase: Literal["train", "validation"],
+) -> None:
     loader = DataLoader(TensorDataset(torch.arange(2)))
-
-    with pytest.raises(TypeError, match=rf"{phase} loader must be a DataLoader"):
-        DataLoaderBundle(**{phase: {"named": loader}})  # type: ignore[arg-type]
+    bundle = (
+        DataLoaderBundle(train={"named": loader})
+        if phase == "train"
+        else DataLoaderBundle(validation={"named": loader})
+    )
+    assert bundle.loaders_for_phase(phase) == {"named": loader}
 
 
 @pytest.mark.parametrize("phase", ["train", "validation", "test", "predict"])
@@ -107,10 +117,10 @@ def test_dataloader_bundle_rejects_unsupported_loader_objects(phase: str) -> Non
         DataLoaderBundle(**{phase: object()})  # type: ignore[arg-type]
 
 
-@pytest.mark.parametrize("phase", ["test", "predict"])
+@pytest.mark.parametrize("phase", ["train", "validation", "test", "predict"])
 def test_dataloader_bundle_rejects_empty_named_loaders(phase: str) -> None:
     with pytest.raises(ValueError, match=f"{phase} loader mapping cannot be empty"):
-        DataLoaderBundle(**{phase: {}})  # type: ignore[arg-type]
+        DataLoaderBundle(**{phase: {}})
 
 
 @pytest.mark.parametrize("name", ["", "   ", 1])

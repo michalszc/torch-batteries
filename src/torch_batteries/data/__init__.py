@@ -12,6 +12,7 @@
 from .base import DataPack
 from .handler import DataPackHandler
 from .types import (
+    BatchScheduleConfig,
     DataContext,
     DataLoaderBundle,
     DataLoaderConfig,
@@ -20,6 +21,7 @@ from .types import (
 )
 
 __all__ = [
+    "BatchScheduleConfig",
     "DataContext",
     "DataLoaderBundle",
     "DataLoaderConfig",

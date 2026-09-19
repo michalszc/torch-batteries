@@ -3,7 +3,7 @@
 from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Literal, overload
+from typing import Any, Literal
 
 import torch
 from torch import nn
@@ -365,40 +365,13 @@ class Battery(CheckpointMixin, TrainingMixin, EvaluationMixin, PredictionMixin):
         with self._workflow_exception_boundary():
             return EvaluationMixin._validate(self, val_loader, verbose)  # noqa: SLF001
 
-    @overload
-    def test(
-        self,
-        test_loader: DataLoader,
-        verbose: int = 1,
-        *,
-        dataset: None = None,
-    ) -> TestResult: ...
-
-    @overload
-    def test(
-        self,
-        test_loader: None = None,
-        verbose: int = 1,
-        *,
-        dataset: str,
-    ) -> TestResult: ...
-
-    @overload
-    def test(
-        self,
-        test_loader: DataLoader | None = None,
-        verbose: int = 1,
-        *,
-        dataset: None = None,
-    ) -> TestResult | dict[str, TestResult]: ...
-
     def test(
         self,
         test_loader: DataLoader | None = None,
         verbose: int = 1,
         *,
         dataset: str | None = None,
-    ) -> TestResult | dict[str, TestResult]:
+    ) -> TestResult:
         """Evaluate an explicit or DataPack-provided test dataset.
 
         Args:
@@ -407,45 +380,12 @@ class Battery(CheckpointMixin, TrainingMixin, EvaluationMixin, PredictionMixin):
             dataset: Optional DataPack test dataset name.
 
         Returns:
-            One result or a mapping of named DataPack results.
+            One aggregate result with named dataset metrics when applicable.
         """
         with self._workflow_exception_boundary():
             return EvaluationMixin._test(  # noqa: SLF001
                 self, test_loader, verbose, dataset=dataset
             )
-
-    @overload
-    def predict(
-        self,
-        data_loader: DataLoader,
-        verbose: int = 1,
-        *,
-        move_to_cpu: bool = False,
-        concatenate: bool = False,
-        dataset: None = None,
-    ) -> PredictResult: ...
-
-    @overload
-    def predict(
-        self,
-        data_loader: None = None,
-        verbose: int = 1,
-        *,
-        move_to_cpu: bool = False,
-        concatenate: bool = False,
-        dataset: str,
-    ) -> PredictResult: ...
-
-    @overload
-    def predict(
-        self,
-        data_loader: DataLoader | None = None,
-        verbose: int = 1,
-        *,
-        move_to_cpu: bool = False,
-        concatenate: bool = False,
-        dataset: None = None,
-    ) -> PredictResult | dict[str, PredictResult]: ...
 
     def predict(
         self,
@@ -455,7 +395,7 @@ class Battery(CheckpointMixin, TrainingMixin, EvaluationMixin, PredictionMixin):
         move_to_cpu: bool = False,
         concatenate: bool = False,
         dataset: str | None = None,
-    ) -> PredictResult | dict[str, PredictResult]:
+    ) -> PredictResult:
         """Collect predictions from an explicit or DataPack loader.
 
         Args:
@@ -466,7 +406,7 @@ class Battery(CheckpointMixin, TrainingMixin, EvaluationMixin, PredictionMixin):
             dataset: Optional DataPack prediction dataset name.
 
         Returns:
-            One prediction result or a mapping of named results.
+            One result, with predictions keyed by dataset when several run.
         """
         with self._workflow_exception_boundary():
             return PredictionMixin._predict(  # noqa: SLF001

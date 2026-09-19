@@ -1,6 +1,6 @@
 """Prediction workflows for ``torch_batteries.Battery``."""
 
-from collections.abc import Generator, Iterator, Mapping
+from collections.abc import Generator, Iterator
 from typing import Any
 
 import torch
@@ -32,7 +32,7 @@ class PredictionMixin(BatteryStateMixin):
         move_to_cpu: bool = False,
         concatenate: bool = False,
         dataset: str | None = None,
-    ) -> PredictResult | dict[str, PredictResult]:
+    ) -> PredictResult:
         """Collect predictions using an explicit or DataPack-provided loader.
 
         Args:
@@ -46,8 +46,8 @@ class PredictionMixin(BatteryStateMixin):
                 cannot be combined with an explicit loader.
 
         Returns:
-            One prediction result for an explicit, selected, or bare dataset. A named
-            dataset mapping returns results keyed by dataset name.
+            One prediction result. Multiple named datasets place their outputs
+            inside ``predictions`` under their dataset names.
         """
         if data_loader is not None:
             if dataset is not None:
@@ -71,9 +71,13 @@ class PredictionMixin(BatteryStateMixin):
                 )
                 for name, loader in prediction_loaders.items()
             }
-            if dataset is not None or not isinstance(workflow.loaders.predict, Mapping):
+            if len(results) == 1:
                 return next(iter(results.values()))
-            return results
+            return {
+                "predictions": {
+                    name: result["predictions"] for name, result in results.items()
+                }
+            }
 
     def _predict_with_loader(
         self,

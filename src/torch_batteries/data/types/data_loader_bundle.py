@@ -15,29 +15,18 @@ DataPhase = Literal["train", "validation", "test", "predict"]
 class DataLoaderBundle:
     """DataLoaders resolved for one DataPack stage.
 
-    Training and validation contain at most one loader. Test and prediction retain
-    whether their datasets were configured as a bare value or a named mapping.
+    Each phase retains whether its datasets were configured as a bare value or a
+    named mapping.
     """
 
-    train: DataLoader[Any] | None = None
-    validation: DataLoader[Any] | None = None
+    train: DataLoaderCollection | None = None
+    validation: DataLoaderCollection | None = None
     test: DataLoaderCollection | None = None
     predict: DataLoaderCollection | None = None
 
     def __post_init__(self) -> None:
         """Validate every configured loader against its phase contract."""
-        for phase in ("train", "validation"):
-            configured = getattr(self, phase)
-            if configured is None or isinstance(configured, DataLoader):
-                continue
-            returned = type(configured).__name__
-            msg = (
-                f"DataLoaderBundle {phase} loader must be a DataLoader or None, "
-                f"got {returned}."
-            )
-            raise TypeError(msg)
-
-        for phase in ("test", "predict"):
+        for phase in ("train", "validation", "test", "predict"):
             configured = getattr(self, phase)
             if configured is None or isinstance(configured, DataLoader):
                 continue

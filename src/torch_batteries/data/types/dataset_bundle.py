@@ -1,10 +1,12 @@
 """Public types used by event-driven DataPack workflows."""
 
 from collections.abc import Mapping
-from dataclasses import dataclass
-from typing import Any, Literal
+from dataclasses import dataclass, field
+from typing import Any, Literal, cast
 
 from torch.utils.data import Dataset, IterableDataset
+
+from .batch_schedule import BatchScheduleConfig
 
 DatasetType = Dataset[Any] | IterableDataset[Any]
 
@@ -17,29 +19,30 @@ DataPhase = Literal["train", "validation", "test", "predict"]
 class DatasetBundle:
     """Datasets made available by a charged ``SETUP_DATA`` provider.
 
-    Training and validation accept one PyTorch dataset. Test and prediction also
-    accept a non-empty mapping of non-blank names to PyTorch datasets.
+    Each phase accepts one PyTorch dataset or a non-empty mapping of dataset names
+    to PyTorch datasets.
     """
 
-    train: DatasetType | None = None
-    validation: DatasetType | None = None
+    train: DatasetCollection | None = None
+    validation: DatasetCollection | None = None
     test: DatasetCollection | None = None
     predict: DatasetCollection | None = None
+    train_batch_schedule: BatchScheduleConfig = field(
+        default_factory=BatchScheduleConfig
+    )
+    validation_batch_schedule: BatchScheduleConfig = field(
+        default_factory=BatchScheduleConfig
+    )
 
     def __post_init__(self) -> None:
         """Validate every configured dataset against its phase contract."""
-        for phase in ("train", "validation"):
-            configured = getattr(self, phase)
-            if configured is None or isinstance(configured, (Dataset, IterableDataset)):
-                continue
-            returned = type(configured).__name__
-            msg = (
-                f"DatasetBundle {phase} dataset must be a PyTorch Dataset or "
-                f"IterableDataset, or None, got {returned}."
-            )
-            raise TypeError(msg)
-
-        for phase in ("test", "predict"):
+        for schedule in (self.train_batch_schedule, self.validation_batch_schedule):
+            if not isinstance(cast("object", schedule), BatchScheduleConfig):
+                msg = (
+                    "DatasetBundle batch schedules must be BatchScheduleConfig values."
+                )
+                raise TypeError(msg)
+        for phase in ("train", "validation", "test", "predict"):
             configured = getattr(self, phase)
             if configured is None or isinstance(configured, (Dataset, IterableDataset)):
                 continue

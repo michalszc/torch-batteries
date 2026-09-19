@@ -1,20 +1,27 @@
 """Training workflows for ``torch_batteries.Battery``."""
 
 import copy
+from collections.abc import Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 import torch
 from torch.utils.data import DataLoader
 
+from torch_batteries.data import BatchScheduleConfig
 from torch_batteries.events import Event, EventContext, OptimizationStep
-from torch_batteries.trainer.context import copy_history_context
+from torch_batteries.trainer.context import (
+    copy_history_context,
+    dataset_identity_context,
+)
 from torch_batteries.trainer.types import FitResult, TrainResult
 from torch_batteries.utils.batch import get_batch_size
 from torch_batteries.utils.device import move_to_device
 from torch_batteries.utils.logging import get_logger
+from torch_batteries.utils.metrics._dataset_totals import DatasetMetricTotals
 from torch_batteries.utils.progress import Phase, Progress, ProgressFactory
 
+from ._batch_schedule import scheduled_batches
 from ._state import BatteryStateMixin, as_battery
 
 if TYPE_CHECKING:
@@ -129,8 +136,8 @@ class TrainingMixin(BatteryStateMixin):
 
         if train_loader is not None:
             return self._train_with_loaders(
-                train_loader,
-                val_loader,
+                {"default": train_loader},
+                {"default": val_loader} if val_loader is not None else {},
                 epochs,
                 verbose,
                 resume_epochs_mode=resume_epochs_mode,
@@ -149,21 +156,29 @@ class TrainingMixin(BatteryStateMixin):
                 else {}
             )
             return self._train_with_loaders(
-                next(iter(train_loaders.values())),
-                next(iter(validation_loaders.values()), None),
+                train_loaders,
+                validation_loaders,
                 epochs,
                 verbose,
                 resume_epochs_mode=resume_epochs_mode,
+                train_schedule=workflow.datasets.train_batch_schedule,
+                validation_schedule=workflow.datasets.validation_batch_schedule,
+                named_train=isinstance(workflow.loaders.train, Mapping),
+                named_validation=isinstance(workflow.loaders.validation, Mapping),
             )
 
-    def _train_with_loaders(  # noqa: PLR0912, PLR0915
+    def _train_with_loaders(  # noqa: PLR0912, PLR0913, PLR0915
         self,
-        train_loader: DataLoader,
-        val_loader: DataLoader | None = None,
+        train_loaders: dict[str, DataLoader],
+        validation_loaders: dict[str, DataLoader] | None = None,
         epochs: int = 1,
         verbose: int = 1,
         *,
         resume_epochs_mode: str = "total",
+        train_schedule: BatchScheduleConfig | None = None,
+        validation_schedule: BatchScheduleConfig | None = None,
+        named_train: bool = False,
+        named_validation: bool = False,
     ) -> FitResult:
         """Train the model for one or more epochs.
 
@@ -190,10 +205,22 @@ class TrainingMixin(BatteryStateMixin):
                 incompatible.
             TypeError: If a step result has an unsupported structure.
         """
+        validation_loaders = validation_loaders or {}
+        train_schedule = train_schedule or BatchScheduleConfig()
+        validation_schedule = validation_schedule or BatchScheduleConfig()
+        train_loader = next(iter(train_loaders.values()))
+        val_loader = next(iter(validation_loaders.values()), None)
         self._validate_train_inputs(train_loader, val_loader)
-        self._restore_loader_generator_state("train", train_loader)
-        if val_loader is not None:
-            self._restore_loader_generator_state("validation", val_loader)
+        for name, loader in train_loaders.items():
+            self._validate_loader(loader, f"Training '{name}'")
+            self._restore_loader_generator_state(
+                "train", loader, dataset_name=name if named_train else None
+            )
+        for name, loader in validation_loaders.items():
+            self._validate_loader(loader, f"Validation '{name}'")
+            self._restore_loader_generator_state(
+                "validation", loader, dataset_name=name if named_validation else None
+            )
         resumed = self._resume_loaded
         self._stop_training = False
         if not resumed:
@@ -208,8 +235,8 @@ class TrainingMixin(BatteryStateMixin):
         logger.info(
             "Training started: epochs=%d, train_batches=%d, validation=%s",
             epochs,
-            len(train_loader),
-            val_loader is not None,
+            sum(map(len, train_loaders.values())),
+            bool(validation_loaders),
         )
 
         context: EventContext = {
@@ -251,11 +278,20 @@ class TrainingMixin(BatteryStateMixin):
             progress.start_epoch(epoch)
 
             try:
-                train_metrics = self._train_epoch(train_loader, progress, epoch)
+                train_metrics = self._train_epoch(
+                    train_loaders,
+                    progress,
+                    epoch,
+                    train_schedule,
+                    named_datasets=named_train,
+                )
             except BaseException:
                 progress.abort()
                 raise
-            self._capture_loader_generator_state("train", train_loader)
+            for name, loader in train_loaders.items():
+                self._capture_loader_generator_state(
+                    "train", loader, dataset_name=name if named_train else None
+                )
             results["train_loss"].append(train_metrics["loss"])
 
             for key, value in train_metrics.items():
@@ -276,7 +312,7 @@ class TrainingMixin(BatteryStateMixin):
             }
             self._event_handler.call(Event.AFTER_TRAIN_EPOCH, after_epoch_context)
 
-            if val_loader:
+            if validation_loaders:
                 logger.debug("Validation phase started: epoch=%d", epoch)
                 before_val_context: EventContext = {
                     "battery": as_battery(self),
@@ -289,11 +325,22 @@ class TrainingMixin(BatteryStateMixin):
                 self._event_handler.call(Event.BEFORE_VALIDATION, before_val_context)
 
                 try:
-                    val_metrics = self._validate_epoch(val_loader, progress, epoch)
+                    val_metrics = self._validate_epoch(
+                        validation_loaders,
+                        progress,
+                        epoch,
+                        validation_schedule,
+                        named_datasets=named_validation,
+                    )
                 except BaseException:
                     progress.abort()
                     raise
-                self._capture_loader_generator_state("validation", val_loader)
+                for name, loader in validation_loaders.items():
+                    self._capture_loader_generator_state(
+                        "validation",
+                        loader,
+                        dataset_name=name if named_validation else None,
+                    )
                 results["val_loss"].append(val_metrics["loss"])
 
                 for key, value in val_metrics.items():
@@ -421,7 +468,13 @@ class TrainingMixin(BatteryStateMixin):
         self._event_handler.call(Event.AFTER_OPTIMIZER_STEP, backward_context)
 
     def _train_epoch(
-        self, dataloader: DataLoader, progress: Progress, epoch: int
+        self,
+        loaders: dict[str, DataLoader],
+        progress: Progress,
+        epoch: int,
+        schedule: BatchScheduleConfig,
+        *,
+        named_datasets: bool,
     ) -> dict[str, float]:
         """Run a single training epoch.
 
@@ -444,13 +497,16 @@ class TrainingMixin(BatteryStateMixin):
 
         self._model.train()
 
-        progress.start_phase(Phase.TRAIN, total_batches=len(dataloader))
+        total_batches = sum(map(len, loaders.values()))
+        progress.start_phase(Phase.TRAIN, total_batches=total_batches)
         self._metric_manager.reset()
         manual_metric_names: set[str] = set()
+        dataset_totals = DatasetMetricTotals()
         logger.debug("Training phase started: epoch=%d", epoch)
 
-        total_batches = len(dataloader)
-        for batch_idx, batch_data in enumerate(dataloader):
+        for batch_idx, (dataset_name, batch_data) in enumerate(
+            scheduled_batches(loaders, schedule, epoch)
+        ):
             batch = move_to_device(batch_data, self._device)
 
             optimization_plan, before_step_context = self._configure_optimization_step(
@@ -458,6 +514,9 @@ class TrainingMixin(BatteryStateMixin):
                 batch_idx,
                 total_batches,
                 epoch,
+            )
+            before_step_context.update(
+                dataset_identity_context(dataset_name if named_datasets else None)
             )
 
             if optimization_plan.zero_grad:
@@ -515,11 +574,13 @@ class TrainingMixin(BatteryStateMixin):
                 "optimizer_step": optimizer_step,
                 "optimizer_step_idx": self._optimizer_step_idx,
                 "optimization_plan": optimization_plan,
+                **dataset_identity_context(dataset_name if named_datasets else None),
             }
             self._event_handler.call(Event.AFTER_TRAIN_STEP, after_step_context)
 
             num_samples = get_batch_size(batch)
             progress.update(cast("ProgressMetrics", batch_metrics), num_samples)
+            dataset_totals.update(dataset_name, batch_metrics, num_samples)
 
         avg_metrics = progress.end_phase()
         train_metrics = (
@@ -532,6 +593,8 @@ class TrainingMixin(BatteryStateMixin):
                 if name not in manual_metric_names
             }
         )
+        if len(loaders) > 1:
+            train_metrics.update(dataset_totals.compute())
         logger.debug(
             "Training phase completed: epoch=%d, metrics=%s",
             epoch,

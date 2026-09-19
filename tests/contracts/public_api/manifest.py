@@ -4,6 +4,7 @@ from __future__ import annotations
 
 PUBLIC_EXPORTS: dict[str, set[str]] = {
     "torch_batteries": {
+        "BatchScheduleConfig",
         "Battery",
         "CollectedMetric",
         "DataContext",
@@ -38,6 +39,7 @@ PUBLIC_EXPORTS: dict[str, set[str]] = {
         "TerminateOnNonFinite",
     },
     "torch_batteries.data": {
+        "BatchScheduleConfig",
         "DataContext",
         "DataLoaderBundle",
         "DataLoaderConfig",

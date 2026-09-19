@@ -219,12 +219,11 @@ def test_multiple_test_and_prediction_datasets_run_independently() -> None:
     test_results = cast("dict[str, Any]", raw_test_results)
     prediction_results = cast("dict[str, Any]", raw_prediction_results)
 
-    assert set(test_results) == {"in_domain", "out_of_domain"}
-    assert test_results["in_domain"]["test_metrics"]["samples"] == 4.0
-    assert test_results["out_of_domain"]["test_metrics"]["samples"] == 2.0
-    assert set(prediction_results) == {"in_domain", "out_of_domain"}
-    assert prediction_results["in_domain"]["predictions"].shape == (4, 1)
-    assert prediction_results["out_of_domain"]["predictions"].shape == (2, 1)
+    assert test_results["test_metrics"]["in_domain:samples"] == 4.0
+    assert test_results["test_metrics"]["out_of_domain:samples"] == 2.0
+    assert set(prediction_results["predictions"]) == {"in_domain", "out_of_domain"}
+    assert prediction_results["predictions"]["in_domain"].shape == (4, 1)
+    assert prediction_results["predictions"]["out_of_domain"].shape == (2, 1)
     assert metric.reset_calls == 2
     assert data_pack.loader_datasets.count("in_domain") == 2
     assert data_pack.loader_datasets.count("out_of_domain") == 2
@@ -236,7 +235,7 @@ def test_multiple_test_and_prediction_datasets_run_independently() -> None:
     assert data_pack.teardown_stages == ["test", "predict"]
 
 
-def test_single_named_dataset_preserves_mapping_result_shape() -> None:
+def test_single_named_dataset_uses_singular_result_shape() -> None:
     data_pack = SingleNamedWorkflowDataPack()
     battery = _battery(data_pack)
 
@@ -246,10 +245,8 @@ def test_single_named_dataset_preserves_mapping_result_shape() -> None:
         battery.predict(verbose=0, concatenate=True),
     )
 
-    assert set(test_results) == {"production"}
-    assert "test_loss" in test_results["production"]
-    assert set(prediction_results) == {"production"}
-    assert prediction_results["production"]["predictions"].shape == (4, 1)
+    assert "test_loss" in test_results
+    assert prediction_results["predictions"].shape == (4, 1)
 
 
 def test_named_dataset_selection_returns_singular_result() -> None:
@@ -281,13 +278,9 @@ def test_named_dataset_errors_are_actionable() -> None:
     with pytest.raises(ValueError, match=r"Available datasets.*in_domain"):
         battery.test(verbose=0, dataset="missing")
     with pytest.raises(ValueError, match="explicit test loader"):
-        battery.test(  # type: ignore[call-overload]
-            loader, verbose=0, dataset="in_domain"
-        )
+        battery.test(loader, verbose=0, dataset="in_domain")
     with pytest.raises(ValueError, match="explicit prediction loader"):
-        battery.predict(  # type: ignore[call-overload]
-            loader, verbose=0, dataset="in_domain"
-        )
+        battery.predict(loader, verbose=0, dataset="in_domain")
     with pytest.raises(ValueError, match="explicit prediction loader"):
         list(battery.predict_iter(loader, verbose=0, dataset="in_domain"))
 

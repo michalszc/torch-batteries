@@ -15,7 +15,7 @@ if TYPE_CHECKING:
     from torch_batteries.callbacks.base import Callback
     from torch_batteries.data import DataPack, ResolvedData
     from torch_batteries.data.handler import DataPackHandler
-    from torch_batteries.data.types import DataStage
+    from torch_batteries.data.types import BatchScheduleConfig, DataStage
     from torch_batteries.events import EventHandler
     from torch_batteries.trainer.types import FitResult
     from torch_batteries.utils.metrics import Metric, PhaseMetricManager
@@ -88,9 +88,12 @@ if TYPE_CHECKING:
 
         def _validate_epoch(
             self,
-            dataloader: DataLoader,
+            dataloader: DataLoader | dict[str, DataLoader],
             progress: Any,
             epoch: int,
+            schedule: BatchScheduleConfig = ...,
+            *,
+            named_datasets: bool = ...,
         ) -> dict[str, float]: ...
 
 else:

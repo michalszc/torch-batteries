@@ -47,6 +47,7 @@ __author__ = ["Michal Szczygiel", "Arkadiusz Paterak", "Antoni Zięciak"]
 
 # Import main components
 from .data import (
+    BatchScheduleConfig,
     DataContext,
     DataLoaderBundle,
     DataLoaderConfig,
@@ -71,6 +72,7 @@ from .trainer import (
 from .utils.metrics import CollectedMetric, StatefulMetric
 
 __all__ = [
+    "BatchScheduleConfig",
     "Battery",
     "CollectedMetric",
     "DataContext",
