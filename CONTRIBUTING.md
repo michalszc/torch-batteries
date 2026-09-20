@@ -54,6 +54,20 @@ make clean               # Clean artifacts
 - **Testing:** [pytest](https://pytest.org/) with coverage reporting
 - **Pre-commit:** Automatic code quality checks before commits
 
+#### CPU workflow timing checks
+
+`make test` also runs the performance tests in `tests/performance/`. They time
+training, standalone validation, testing, prediction, and combined fit, with both
+direct loaders and named DataPack datasets. Each case uses a tiny CPU-only model,
+32 batches, one warmup, and three measured runs. The pytest summary reports median
+total time and time per batch spent retrieving data, in the charged model step, and
+in the remaining workflow. Training's remaining time includes PyTorch backward and
+optimizer operations. Each scenario must complete within 30 ms, based on the
+median of three measured runs. Compare the displayed timings from runs on the
+same hardware to assess smaller changes. CUDA and MPS are never selected by these
+tests. The per-batch columns use microseconds (µs/batch); total time uses
+milliseconds (ms).
+
 #### Pre-commit Hooks
 Pre-commit hooks are automatically installed with `make install-dev` and will run:
 - Trailing whitespace removal
