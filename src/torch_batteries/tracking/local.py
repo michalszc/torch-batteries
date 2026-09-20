@@ -17,8 +17,8 @@ logger = get_logger("tracking.local")
 class LocalTracker(ExperimentTracker):
     """Store run configuration, metrics, and summary beneath a local directory.
 
-    Each ``init`` allocates ``save_dir/model_name/version_N``. Metric rows use
-    ``step,metric,value`` columns and preserve prefixes supplied by the callback.
+    Each ``init`` allocates ``save_dir/model_name/version_N``. Metric rows are
+    indexed by epoch, with a column for each metric supplied by the callback.
     Model artifacts are not saved by this backend.
 
     Args:
@@ -26,7 +26,14 @@ class LocalTracker(ExperimentTracker):
         save_dir: Root directory for local experiments.
     """
 
-    __slots__ = ("_is_initialized", "_model_name", "_run_dir", "_save_dir")
+    __slots__ = (
+        "_fields",
+        "_is_initialized",
+        "_model_name",
+        "_rows",
+        "_run_dir",
+        "_save_dir",
+    )
 
     def __init__(
         self, model_name: str, save_dir: str | Path = "my_experiments"
@@ -43,6 +50,13 @@ class LocalTracker(ExperimentTracker):
         self._save_dir = Path(save_dir)
         self._run_dir: Path | None = None
         self._is_initialized = False
+        self._rows: dict[int, dict[str, float | int]] = {}
+        self._fields: list[str] = []
+
+    @property
+    def metric_granularity(self) -> str:
+        """Record completed epochs instead of individual optimization steps."""
+        return "epoch"
 
     @property
     def is_initialized(self) -> bool:
@@ -92,7 +106,9 @@ class LocalTracker(ExperimentTracker):
         with (run_dir / "metrics.csv").open(
             "w", encoding="utf-8", newline=""
         ) as stream:
-            csv.writer(stream).writerow(["step", "metric", "value"])
+            csv.writer(stream).writerow(["epoch"])
+        self._rows = {}
+        self._fields = []
         self._run_dir = run_dir
         self._is_initialized = True
         logger.info("Initialized local experiment run: path=%s", run_dir)
@@ -103,23 +119,38 @@ class LocalTracker(ExperimentTracker):
         step: int | None = None,
         prefix: str | None = None,
     ) -> None:
-        """Append prefixed metric values to the run CSV.
+        """Merge prefixed metrics into one CSV row for the specified epoch.
 
         Args:
             metrics: Metric names and scalar values.
-            step: Optional training step.
+            step: Epoch number; omitted values allocate the next epoch.
             prefix: Optional metric name prefix.
         """
         run_dir = self._require_run_dir()
+        if step is not None and (isinstance(step, bool) or step < 0):
+            msg = "LocalTracker metric epoch must be a non-negative integer."
+            raise ValueError(msg)
+        epoch = step if step is not None else max(self._rows, default=0) + 1
+        row = self._rows.setdefault(epoch, {"epoch": epoch})
+        for name, value in metrics.items():
+            if name == "epoch":
+                continue
+            column = f"{prefix or ''}{name}"
+            row[column] = value
+            if column not in self._fields:
+                self._fields.append(column)
         with (run_dir / "metrics.csv").open(
-            "a", encoding="utf-8", newline=""
+            "w", encoding="utf-8", newline=""
         ) as stream:
-            writer = csv.writer(stream)
-            for name, value in metrics.items():
-                writer.writerow(
-                    ["" if step is None else step, f"{prefix or ''}{name}", value]
-                )
-        logger.debug("Logged local metrics: path=%s, keys=%s", run_dir, sorted(metrics))
+            writer = csv.DictWriter(stream, fieldnames=["epoch", *self._fields])
+            writer.writeheader()
+            writer.writerows(self._rows[key] for key in sorted(self._rows))
+        logger.debug(
+            "Logged local epoch metrics: path=%s, epoch=%d, keys=%s",
+            run_dir,
+            epoch,
+            sorted(metrics),
+        )
 
     def log_summary(self, summary: dict[str, Any]) -> None:
         """Write the latest run summary as YAML.
@@ -128,8 +159,17 @@ class LocalTracker(ExperimentTracker):
             summary: Summary values to save.
         """
         run_dir = self._require_run_dir()
+
+        def latest(value: Any) -> Any:
+            if isinstance(value, list):
+                return latest(value[-1]) if value else None
+            if isinstance(value, dict):
+                return {key: latest(item) for key, item in value.items()}
+            return value
+
+        latest_summary = {key: latest(value) for key, value in summary.items()}
         with (run_dir / "summary.yaml").open("w", encoding="utf-8") as stream:
-            yaml.safe_dump(summary, stream, sort_keys=True)
+            yaml.safe_dump(latest_summary, stream, sort_keys=True)
         logger.debug("Logged local summary: path=%s", run_dir)
 
     def log_model(

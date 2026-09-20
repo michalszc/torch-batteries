@@ -25,6 +25,11 @@ class _Model(nn.Module):
         inputs, targets = cast("tuple[torch.Tensor, torch.Tensor]", context["batch"])
         return StepOutput(loss=nn.functional.mse_loss(self.linear(inputs), targets))
 
+    @charge(Event.VALIDATION_STEP)
+    def validation_step(self, context: EventContext) -> StepOutput:
+        inputs, targets = cast("tuple[torch.Tensor, torch.Tensor]", context["batch"])
+        return StepOutput(loss=nn.functional.mse_loss(self.linear(inputs), targets))
+
 
 def test_local_tracker_records_callback_run(tmp_path: Path) -> None:
     model = _Model()
@@ -37,7 +42,7 @@ def test_local_tracker_records_callback_run(tmp_path: Path) -> None:
     inputs = torch.arange(4, dtype=torch.float32).reshape(-1, 1)
     loader = DataLoader(TensorDataset(inputs, inputs), batch_size=2)
 
-    battery.train(loader, epochs=1, verbose=0)
+    battery.fit(loader, loader, epochs=2, verbose=0)
 
     run_dir = tmp_path / "model_a" / "version_0"
     assert tracker.run_dir == run_dir
@@ -51,9 +56,15 @@ def test_local_tracker_records_callback_run(tmp_path: Path) -> None:
     assert hparams["batch_size"] == 2
     with (run_dir / "metrics.csv").open(newline="") as stream:
         rows = list(csv.DictReader(stream))
-    assert len(rows) == 4
-    assert {row["metric"] for row in rows} == {"train/epoch", "train/loss"}
-    assert yaml.safe_load((run_dir / "summary.yaml").read_text())["exit_code"] == 0
+    assert len(rows) == 2
+    assert list(rows[0]) == ["epoch", "train/loss", "val/loss"]
+    assert [row["epoch"] for row in rows] == ["1", "2"]
+    assert all(row["train/loss"] and row["val/loss"] for row in rows)
+    summary = yaml.safe_load((run_dir / "summary.yaml").read_text())
+    assert summary["exit_code"] == 0
+    assert summary["total_epochs"] == 2
+    assert isinstance(summary["train_loss"], float)
+    assert isinstance(summary["val_loss"], float)
     assert not list(run_dir.glob("*.pt"))
 
     tracker.init(Run(config={"lr": 0.01}))
@@ -71,13 +82,19 @@ def test_local_tracker_requires_active_run_and_valid_name(tmp_path: Path) -> Non
     with pytest.raises(RuntimeError, match="already initialized"):
         tracker.init(Run())
     tracker.log_metrics({"accuracy": 0.8}, step=3, prefix="val/")
-    tracker.log_summary({"score": 0.8})
+    tracker.log_metrics({"loss": 0.2}, step=3, prefix="train/")
+    tracker.log_metrics({"accuracy": 0.9}, step=4, prefix="val/")
+    tracker.log_summary({"score": [0.3, 0.8], "metrics": {"accuracy": [0.7, 0.9]}})
     tracker.finish(exit_code=1)
     assert tracker.run_dir is not None
     with (tracker.run_dir / "metrics.csv").open(newline="") as stream:
         rows = list(csv.DictReader(stream))
-    assert rows == [{"step": "3", "metric": "val/accuracy", "value": "0.8"}]
+    assert rows == [
+        {"epoch": "3", "val/accuracy": "0.8", "train/loss": "0.2"},
+        {"epoch": "4", "val/accuracy": "0.9", "train/loss": ""},
+    ]
     assert yaml.safe_load((tracker.run_dir / "summary.yaml").read_text()) == {
         "exit_code": 1,
         "score": 0.8,
+        "metrics": {"accuracy": 0.9},
     }

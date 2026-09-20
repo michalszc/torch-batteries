@@ -198,6 +198,9 @@ class ExperimentTrackingCallback(Callback):
 
         self._global_step += 1
 
+        if self.tracker.metric_granularity == "epoch":
+            return
+
         if self._global_step % self.log_every_n_steps != 0:
             return
 
@@ -223,6 +226,23 @@ class ExperimentTrackingCallback(Callback):
             self._global_step,
         )
 
+    @charge(Event.AFTER_TRAIN_EPOCH)
+    def on_train_epoch_end(self, ctx: EventContext) -> None:
+        """Log completed epoch totals for trackers with epoch granularity.
+
+        Args:
+            ctx: Training epoch context containing aggregate metrics.
+        """
+        if self.tracker.metric_granularity != "epoch":
+            return
+        metrics = ctx.get("train_metrics")
+        if isinstance(metrics, dict):
+            self.tracker.log_metrics(
+                {name: float(value) for name, value in metrics.items()},
+                step=ctx["epoch"],
+                prefix="train/",
+            )
+
     @charge(Event.AFTER_VALIDATION_EPOCH)
     def on_validation_epoch_end(self, ctx: EventContext) -> None:
         """
@@ -232,6 +252,16 @@ class ExperimentTrackingCallback(Callback):
             ctx: Event context
         """
         assert self.tracker.is_initialized, "Expected tracker to be initialized."
+
+        if self.tracker.metric_granularity == "epoch":
+            val_metrics = ctx.get("val_metrics")
+            if isinstance(val_metrics, dict):
+                self.tracker.log_metrics(
+                    {name: float(value) for name, value in val_metrics.items()},
+                    step=ctx["epoch"],
+                    prefix="val/",
+                )
+            return
 
         metrics: dict[str, Any] = {}
         metrics["epoch"] = float(self._current_epoch)
