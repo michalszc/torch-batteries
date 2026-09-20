@@ -75,8 +75,8 @@ compatible loader generator is unavailable, restoration logs a warning and conti
 Reproducible continuation is guaranteed at completed epoch boundaries when the model,
 optimizer, data, and equivalent generator-backed loaders are recreated. Checkpoints do
 not reproduce an iterator from the middle of an epoch, already-prefetched worker data,
-or persistent-worker process state. Schemas 1 and 2 remain loadable but do not contain
-the reproducible RNG fields.
+or persistent-worker process state. Full checkpoints from earlier releases cannot be
+loaded directly in 1.0.0.
 
 Full and raw-model restoration is transactional. The complete serialized structure and
 component compatibility are checked first. If applying any model, optimizer, callback,
@@ -118,7 +118,7 @@ disabled.
 
 Restoration fails rather than silently changing an experiment when:
 
-- The checkpoint schema is unknown.
+- The checkpoint format is unsupported.
 - A saved optimizer exists but the new battery has none.
 - Resumable callback types or order differ.
 - Stateful metric names differ.

@@ -26,9 +26,10 @@ early_stopping = EarlyStopping(
 )
 ```
 
-`phase` is `"train"` or `"validation"`. The deprecated `"val"` spelling remains
-accepted until the next major release. The monitored metric can be `"loss"` or a metric
-produced by the phase. Patience counts consecutive completed monitored phases without
+`phase` is `"train"` or `"validation"`. The monitored metric can be `"loss"` or a metric
+produced by the phase. With multiple datasets, use `"dataset:metric"` for a specific
+dataset or the plain metric name for the sample-weighted aggregate. Patience counts
+consecutive completed monitored phases without
 the required improvement. Best weights are cloned to CPU-safe independent tensors
 and restored after training when requested. Full checkpoints preserve the best score,
 patience counter, and optional best weights.
@@ -38,8 +39,9 @@ patience counter, and optional best weights.
 train or validation metric is unavailable. A misspelled or unproduced metric never
 silently disables monitoring.
 
-For compatibility, the callbacks still accept `stage=` as a deprecated keyword
-alias. New code should use `phase=`.
+When it stops training, `EarlyStopping` reports a descriptive reason in the fit
+result's `stop_reason` field. A custom callback can call
+`battery.request_stop("reason")` for the same orderly stop behavior.
 
 ## Gradient accumulation
 
@@ -136,8 +138,8 @@ always follows ``check_loss``. Both options cannot be disabled together.
 Configure ``battery.optimizer``, ``battery.metrics``, and
 ``battery.metric_error_policy`` outside charged event handlers. Assigning these
 workflow settings while any model, callback, or DataPack event is running raises a
-``RuntimeError``. The ``battery.stop_training`` flag remains available to callbacks as
-the explicit runtime control for requesting an orderly stop.
+``RuntimeError``. Callbacks can call `battery.request_stop("reason")` to request an
+orderly stop with a visible result reason.
 
 ```python
 class EpochReporter(Callback):

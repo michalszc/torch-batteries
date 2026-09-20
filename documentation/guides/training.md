@@ -55,8 +55,7 @@ Predictions and targets are required when `Battery(metrics=...)` is configured.
 Manual metric values must be numeric scalars and override automatic metrics with the
 same name.
 
-For compatibility, a step may return either form below only when automatic metrics
-are not configured:
+A step may also return either form below when automatic metrics are not configured:
 
 ```python
 return loss
@@ -81,7 +80,9 @@ history = battery.fit(
 ```
 
 Loaders must implement `len()` and contain at least one batch. Validation runs after
-each completed train epoch. Public epochs begin at one in all event contexts.
+each completed train epoch by default. Pass `validate_every_n_epochs=5` to validate
+on absolute epochs 5, 10, and so on, including after a checkpoint resume. Public
+epochs begin at one in all event contexts.
 
 Without validation:
 
@@ -101,11 +102,8 @@ Use `train()` for an intentionally training-only workflow:
 history = battery.train(train_loader, epochs=20)
 ```
 
-For compatibility in 0.11.0, `train(..., val_loader=...)` and implicit DataPack
-validation still run validation and populate `TrainResult.val_loss` and
-`TrainResult.val_metrics`. That parameter and those fields are deprecated; the call
-logs a warning and emits `DeprecationWarning` when validation actually runs. Migrate
-combined workflows to `fit()`.
+`train()` runs training only. Use `fit()` when validation is needed, including when a
+DataPack provides a validation dataset.
 
 ## Validate once
 
@@ -141,12 +139,22 @@ Fitting returns an ordinary `FitResult` mapping:
     "val_loss": [0.68, 0.47],
     "train_metrics": {"accuracy": [0.74, 0.82]},
     "val_metrics": {"accuracy": [0.76, 0.84]},
+    "epochs_completed": 2,
+    "optimizer_steps": 40,
+    "stopped_early": False,
+    "stop_reason": None,
 }
 ```
 
 Loss and ordinary callable metrics are weighted by inferred batch size. Stateful
 metrics supply their own phase aggregation. See [Metrics](metrics.md) before using a
 non-decomposable measurement such as macro F1 or AUROC.
+
+The counters are cumulative across resume. `val_loss` and `val_metrics` contain entries
+only for epochs when validation ran. A callback can call
+`battery.request_stop("reason for stopping")`; the result then has
+`stopped_early=True` and that `stop_reason`. Early stopping supplies a descriptive
+reason automatically. Exceptions propagate and are not reported as a completed run.
 
 ## Input validation
 

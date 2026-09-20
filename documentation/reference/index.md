@@ -13,9 +13,9 @@ explanations, start with the [Guides](../guides/index.md).
 | Data construction | [Data API](data.md) | `DataPack`, `ResolvedData`, dataset/loader bundles, configuration, and context |
 | Lifecycle | [Events API](events.md) | `Event`, `EventContext`, `OptimizationStep`, and `charge` |
 | Extensions | [Callbacks API](callbacks.md) | `Callback`, early stopping, checkpoints, optimization callbacks, and experiment tracking |
-| Measurement | [Metrics API](metrics.md) | `StatefulMetric` and `CollectedMetric` |
-| Tracking | [Tracking API](tracking.md) | `ExperimentTracker`, `Run`, and `WandbTracker` |
-| Schemas and failures | [Results and Exceptions](results-and-errors.md) | Result fields, epoch numbering, validation behavior, and common exceptions |
+| Measurement | [Metrics API](metrics.md) | `MetricSpec`, `StatefulMetric`, and `CollectedMetric` |
+| Tracking | [Tracking API](tracking.md) | `ExperimentTracker`, `Run`, `LocalTracker`, and `WandbTracker` |
+| Results and failures | [Results and Exceptions](results-and-errors.md) | Result fields, epoch numbering, validation behavior, and common exceptions |
 
 ## Prefer public import paths
 
@@ -25,7 +25,7 @@ sub-package:
 ```python
 from torch_batteries import Battery, DataPack, Event, EventContext, StepOutput, charge
 from torch_batteries.callbacks import EarlyStopping, ModelCheckpoint
-from torch_batteries.tracking import Run, WandbTracker
+from torch_batteries.tracking import LocalTracker, Run, WandbTracker
 ```
 
 Do not depend on implementation modules such as `torch_batteries.trainer.core` or

@@ -74,6 +74,46 @@ It retains detached CPU tensors and concatenates them at phase end. Memory use g
 with the dataset, so prefer an incremental stateful implementation for large outputs.
 Multiple collected metrics share one retained prediction/target collection.
 
+## Configure phases separately
+
+A flat `metrics={"accuracy": accuracy}` mapping applies to training, validation,
+and testing. Use phase keys when the measurements differ:
+
+```python
+metrics = {
+    "train": {"accuracy": accuracy},
+    "validation": {
+        "accuracy": accuracy,
+        "macro_f1": CollectedMetric(macro_f1),
+    },
+    "test": {"accuracy": accuracy},
+}
+battery = Battery(model, optimizer=optimizer, metrics=metrics)
+```
+
+## Select structured outputs
+
+`StepOutput` can hold dictionaries of predictions and targets from several model
+heads. Bind each metric to its top-level keys with `MetricSpec`:
+
+```python
+return StepOutput(
+    loss=loss,
+    predictions={"classification": logits, "regression": estimated_price},
+    targets={"classification": labels, "regression": true_price},
+)
+
+metrics = {
+    "accuracy": MetricSpec(
+        accuracy, predictions="classification", targets="classification"
+    ),
+    "mae": MetricSpec(mae, predictions="regression", targets="regression"),
+}
+```
+
+Both selectors must be supplied together and must name keys present in the step
+output. Metric state is isolated between phases and named datasets.
+
 ## Manual step metrics
 
 A step can report task-specific scalar values directly:
@@ -102,5 +142,9 @@ test_result["test_metrics"]["accuracy"]
 ```
 
 It is also the name used by early stopping, checkpoint monitoring, progress output,
-and tracking callbacks. A misspelled monitored name raises for early stopping and is
-ignored by model checkpointing, so keep one consistent vocabulary.
+and tracking callbacks. A misspelled monitored name raises for metric-aware
+callbacks, so keep one consistent vocabulary.
+
+When several datasets run in a phase, the aggregate `accuracy` is weighted by sample
+count and each dataset has a `dataset:accuracy` key. Callback monitors accept the
+exact aggregate or dataset-specific key. With one dataset, only `accuracy` appears.
