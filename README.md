@@ -2,6 +2,9 @@
 
 <p align="center">
    <a href="https://pypi.org/project/torch-batteries/"><img src="https://img.shields.io/pypi/v/torch-batteries" alt="PyPI version"></a>
+   <a href="https://pypi.org/project/torch-batteries/"><img src="https://img.shields.io/pypi/dm/torch-batteries" alt="PyPI monthly downloads"></a>
+   <a href="https://github.com/michalszc/torch-batteries/blob/master/pyproject.toml"><img src="https://img.shields.io/badge/python-3.12%2B-important" alt="Python 3.12 or newer"></a>
+   <a href="https://github.com/michalszc/torch-batteries/actions/workflows/ci.yml"><img src="https://github.com/michalszc/torch-batteries/actions/workflows/ci.yml/badge.svg?branch=master" alt="CI on master"></a>
    <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-blue.svg" alt="License: Apache 2.0"></a>
    <a href="https://michalszc.github.io/torch-batteries/"><img src="https://img.shields.io/badge/docs-online-blue.svg" alt="Docs"></a>
 </p>
