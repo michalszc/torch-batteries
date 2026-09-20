@@ -21,6 +21,13 @@ class DatasetBundle:
 
     Each phase accepts one PyTorch dataset or a non-empty mapping of dataset names
     to PyTorch datasets.
+
+    Args:
+        train: Training dataset or named training datasets.
+        validation: Validation dataset or named validation datasets.
+        test: Test dataset or named test datasets.
+        predict: Prediction dataset or named prediction datasets.
+        batch_schedule: Batch order shared by named training and validation datasets.
     """
 
     train: DatasetCollection | None = None

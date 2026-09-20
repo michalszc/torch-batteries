@@ -24,9 +24,14 @@ class ExperimentTrackingCallback(Callback):
 
     This callback hooks into the event system to log:
     - Configuration at training start
-    - Training metrics after each step
+    - Training metrics after selected steps or completed epochs, depending on tracker
     - Validation metrics after validation
     - Summary statistics at training end
+
+    Args:
+        tracker: Backend that stores the experiment.
+        run: Optional run metadata and configuration overrides.
+        log_every_n_steps: Step logging interval for step-based trackers.
 
     Example:
     ```python

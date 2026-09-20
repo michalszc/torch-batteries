@@ -17,6 +17,12 @@ class DataLoaderBundle:
 
     Each phase retains whether its datasets were configured as a bare value or a
     named mapping.
+
+    Args:
+        train: Training loader or mapping of named training loaders.
+        validation: Validation loader or mapping of named validation loaders.
+        test: Test loader or mapping of named test loaders.
+        predict: Prediction loader or mapping of named prediction loaders.
     """
 
     train: DataLoaderCollection | None = None

@@ -8,10 +8,15 @@ BatchScheduleMode = Literal["round_robin", "interleave"]
 
 @dataclass(frozen=True, slots=True)
 class BatchScheduleConfig:
-    """Select a per-phase batch order for named datasets.
+    """Select the batch order shared by named train and validation datasets.
 
     ``interleave`` samples a loader in proportion to its remaining batches.
     ``seed`` makes its order reproducible for each absolute epoch.
+
+    Args:
+        mode: ``"round_robin"`` to cycle through loaders in name order, or
+            ``"interleave"`` to sample in proportion to remaining batches.
+        seed: Seed used for deterministic interleaving at each absolute epoch.
     """
 
     mode: BatchScheduleMode = "round_robin"
