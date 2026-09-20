@@ -47,7 +47,7 @@ class EvaluationMixin(BatteryStateMixin):
             return self._validate_with_loaders(
                 validation_loaders,
                 verbose,
-                schedule=workflow.datasets.validation_batch_schedule,
+                schedule=workflow.datasets.batch_schedule,
                 named_datasets=isinstance(workflow.loaders.validation, Mapping),
             )
 
@@ -425,7 +425,11 @@ class EvaluationMixin(BatteryStateMixin):
         self._event_handler.call(Event.AFTER_TEST_STEP, after_step_context)
 
         num_samples = get_batch_size(batch)
-        progress.update(cast("ProgressMetrics", batch_metrics), num_samples)
+        progress.update(
+            cast("ProgressMetrics", batch_metrics),
+            num_samples,
+            dataset_name=dataset_name if named_metrics else None,
+        )
         return num_samples
 
     def _validate_epoch(
@@ -567,7 +571,11 @@ class EvaluationMixin(BatteryStateMixin):
                 )
 
                 num_samples = get_batch_size(batch)
-                progress.update(cast("ProgressMetrics", batch_metrics), num_samples)
+                progress.update(
+                    cast("ProgressMetrics", batch_metrics),
+                    num_samples,
+                    dataset_name=dataset_name if len(loaders) > 1 else None,
+                )
                 dataset_totals.update(dataset_name, batch_metrics, num_samples)
 
         avg_metrics = progress.end_phase()

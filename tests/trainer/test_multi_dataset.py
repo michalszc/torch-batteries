@@ -39,8 +39,7 @@ class NamedPack(DataPack):
             validation=self.datasets,
             test=self.datasets,
             predict=self.datasets,
-            train_batch_schedule=BatchScheduleConfig(self.train_mode, seed=7),
-            validation_batch_schedule=BatchScheduleConfig("interleave", seed=11),
+            batch_schedule=BatchScheduleConfig(self.train_mode, seed=7),
         )
 
     @charge(Event.CONFIGURE_DATALOADER)
@@ -149,6 +148,7 @@ def test_round_robin_exhausts_loaders_and_weights_samples() -> None:
     result = battery.fit(epochs=1, verbose=0)
 
     assert model.train_order == ["small", "large", "small", "large", "small"]
+    assert model.validation_order == ["small", "large", "small", "large", "small"]
     assert result["train_loss"] == pytest.approx([23 / 11])
     assert result["val_loss"] == pytest.approx([23 / 11])
     assert result["train_metrics"]["score"] == pytest.approx([5.8 / 11])
@@ -167,6 +167,28 @@ def test_seeded_interleave_is_reproducible_and_exhaustive() -> None:
     assert first_model.train_order == second_model.train_order
     assert first_model.train_order.count("small") == 3
     assert first_model.train_order.count("large") == 2
+
+
+def test_progress_bar_shows_named_metrics_for_multiple_datasets(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    battery, _ = _battery()
+    battery.fit(epochs=1, verbose=1)
+    display = capsys.readouterr().err
+    assert "small:score" in display
+    assert "large:score" in display
+    assert "small:loss" in display
+    assert "large:loss" in display
+
+
+def test_single_schedule_applies_to_validation_too() -> None:
+    first, first_model = _battery("interleave")
+    second, second_model = _battery("interleave")
+    first.fit(epochs=1, verbose=0)
+    second.fit(epochs=1, verbose=0)
+    assert first_model.validation_order == second_model.validation_order
+    assert first_model.validation_order.count("small") == 3
+    assert first_model.validation_order.count("large") == 2
 
 
 def test_callbacks_monitor_exact_aggregate_or_dataset_metric_key() -> None:

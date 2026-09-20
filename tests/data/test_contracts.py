@@ -7,6 +7,7 @@ import torch
 from torch.utils.data import BatchSampler, DataLoader, SequentialSampler, TensorDataset
 
 from torch_batteries import (
+    BatchScheduleConfig,
     DataContext,
     DataLoaderBundle,
     DataLoaderConfig,
@@ -23,6 +24,14 @@ def test_dataset_bundle_selects_datasets_by_phase() -> None:
     assert bundle.for_phase("train") is dataset
     assert bundle.for_phase("validation") is None
     assert bundle.for_phase("test") is dataset
+    assert bundle.batch_schedule == BatchScheduleConfig()
+
+
+def test_dataset_bundle_uses_one_batch_schedule() -> None:
+    schedule = BatchScheduleConfig(mode="interleave", seed=19)
+    assert DatasetBundle(batch_schedule=schedule).batch_schedule is schedule
+    with pytest.raises(TypeError, match="batch_schedule"):
+        DatasetBundle(batch_schedule="interleave")  # type: ignore[arg-type]
 
 
 def test_dataset_bundle_normalizes_named_and_singular_datasets() -> None:

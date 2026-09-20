@@ -27,21 +27,13 @@ class DatasetBundle:
     validation: DatasetCollection | None = None
     test: DatasetCollection | None = None
     predict: DatasetCollection | None = None
-    train_batch_schedule: BatchScheduleConfig = field(
-        default_factory=BatchScheduleConfig
-    )
-    validation_batch_schedule: BatchScheduleConfig = field(
-        default_factory=BatchScheduleConfig
-    )
+    batch_schedule: BatchScheduleConfig = field(default_factory=BatchScheduleConfig)
 
     def __post_init__(self) -> None:
         """Validate every configured dataset against its phase contract."""
-        for schedule in (self.train_batch_schedule, self.validation_batch_schedule):
-            if not isinstance(cast("object", schedule), BatchScheduleConfig):
-                msg = (
-                    "DatasetBundle batch schedules must be BatchScheduleConfig values."
-                )
-                raise TypeError(msg)
+        if not isinstance(cast("object", self.batch_schedule), BatchScheduleConfig):
+            msg = "DatasetBundle batch_schedule must be a BatchScheduleConfig value."
+            raise TypeError(msg)
         for phase in ("train", "validation", "test", "predict"):
             configured = getattr(self, phase)
             if configured is None or isinstance(configured, (Dataset, IterableDataset)):

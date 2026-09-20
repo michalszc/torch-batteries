@@ -179,8 +179,8 @@ class TrainingMixin(BatteryStateMixin):
                 verbose,
                 resume_epochs_mode=resume_epochs_mode,
                 validate_every_n_epochs=validate_every_n_epochs,
-                train_schedule=workflow.datasets.train_batch_schedule,
-                validation_schedule=workflow.datasets.validation_batch_schedule,
+                train_schedule=workflow.datasets.batch_schedule,
+                validation_schedule=workflow.datasets.batch_schedule,
                 named_train=isinstance(workflow.loaders.train, Mapping),
                 named_validation=isinstance(workflow.loaders.validation, Mapping),
             )
@@ -630,7 +630,11 @@ class TrainingMixin(BatteryStateMixin):
             self._event_handler.call(Event.AFTER_TRAIN_STEP, after_step_context)
 
             num_samples = get_batch_size(batch)
-            progress.update(cast("ProgressMetrics", batch_metrics), num_samples)
+            progress.update(
+                cast("ProgressMetrics", batch_metrics),
+                num_samples,
+                dataset_name=dataset_name if len(loaders) > 1 else None,
+            )
             dataset_totals.update(dataset_name, batch_metrics, num_samples)
 
         avg_metrics = progress.end_phase()

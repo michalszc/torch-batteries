@@ -4,6 +4,7 @@ import time
 from typing import cast
 
 from torch_batteries.utils.formatting import format_metrics
+from torch_batteries.utils.metrics._dataset_totals import DatasetMetricTotals
 
 from .base import Progress
 from .types import Phase, ProgressMetrics
@@ -22,6 +23,7 @@ class SimpleProgress(Progress):
     __slots__ = (
         "_current_epoch",
         "_current_phase",
+        "_dataset_totals",
         "_epoch_start_time",
         "_phase_metrics",
         "_total_epochs",
@@ -39,10 +41,12 @@ class SimpleProgress(Progress):
         self._total_epochs = total_epochs
         self._current_epoch = 1
         self._current_phase: Phase | None = None
+        self._dataset_totals = DatasetMetricTotals()
         self._epoch_start_time = 0.0
         self._training_start_time = time.time()
         self._total_metrics: dict[str, float] = {}
         self._total_samples = 0
+        self._dataset_totals = DatasetMetricTotals()
         self._phase_metrics: dict[Phase, dict[str, float]] = {}
 
     def start_epoch(self, epoch: int) -> None:
@@ -70,13 +74,18 @@ class SimpleProgress(Progress):
         self._total_samples = 0
 
     def update(
-        self, metrics: ProgressMetrics | None = None, batch_size: int | None = None
+        self,
+        metrics: ProgressMetrics | None = None,
+        batch_size: int | None = None,
+        *,
+        dataset_name: str | None = None,
     ) -> None:
         """Update progress with batch metrics (accumulated for epoch summary).
 
         Args:
             metrics: Dictionary of metrics for the current batch.
             batch_size: Number of samples in the batch for weighted averaging.
+            dataset_name: Dataset whose metrics are shown in phase summaries.
         """
         if metrics and batch_size is not None:
             for key, value in metrics.items():
@@ -84,6 +93,10 @@ class SimpleProgress(Progress):
                     self._total_metrics[key] = 0.0
                 self._total_metrics[key] += cast("float", value) * batch_size
             self._total_samples += batch_size
+            if dataset_name is not None:
+                self._dataset_totals.update(
+                    dataset_name, cast("dict[str, float]", metrics), batch_size
+                )
 
     def end_phase(self) -> dict[str, float]:
         """End the current phase and return average metrics.
@@ -98,6 +111,7 @@ class SimpleProgress(Progress):
             }
         else:
             avg_metrics = {}
+        avg_metrics.update(self._dataset_totals.compute())
 
         if self._current_phase:
             self._phase_metrics[self._current_phase] = avg_metrics
