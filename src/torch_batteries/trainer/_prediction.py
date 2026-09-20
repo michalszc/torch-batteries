@@ -61,16 +61,35 @@ class PredictionMixin(BatteryStateMixin):
             )
         with self._data_workflow("predict", dataset_name=dataset) as workflow:
             prediction_loaders = workflow.loaders.loaders_for_phase("predict")
-            results = {
-                name: self._predict_with_loader(
-                    loader,
-                    verbose,
-                    move_to_cpu=move_to_cpu,
-                    concatenate=concatenate,
-                    dataset_name=name,
+            shared_progress: Progress | None = None
+            if len(prediction_loaders) > 1:
+                shared_progress = ProgressFactory.create(
+                    verbose=verbose, total_epochs=1
                 )
-                for name, loader in prediction_loaders.items()
-            }
+                shared_progress.start_epoch(1)
+                shared_progress.start_phase(
+                    Phase.PREDICT,
+                    total_batches=sum(map(len, prediction_loaders.values())),
+                )
+            try:
+                results = {
+                    name: self._predict_with_loader(
+                        loader,
+                        verbose,
+                        move_to_cpu=move_to_cpu,
+                        concatenate=concatenate,
+                        dataset_name=name,
+                        shared_progress=shared_progress,
+                    )
+                    for name, loader in prediction_loaders.items()
+                }
+            except BaseException:
+                if shared_progress is not None:
+                    shared_progress.abort()
+                raise
+            if shared_progress is not None:
+                shared_progress.end_phase()
+                shared_progress.end_epoch()
             if len(results) == 1:
                 return next(iter(results.values()))
             return {
@@ -79,7 +98,7 @@ class PredictionMixin(BatteryStateMixin):
                 }
             }
 
-    def _predict_with_loader(
+    def _predict_with_loader(  # noqa: PLR0913
         self,
         data_loader: DataLoader,
         verbose: int = 1,
@@ -87,6 +106,7 @@ class PredictionMixin(BatteryStateMixin):
         move_to_cpu: bool = False,
         concatenate: bool = False,
         dataset_name: str | None = None,
+        shared_progress: Progress | None = None,
     ) -> PredictResult:
         """Collect predictions from one evaluation-mode pass over a loader.
 
@@ -153,9 +173,12 @@ class PredictionMixin(BatteryStateMixin):
         self._model.eval()
         predictions: list[Any] = []
 
-        progress = ProgressFactory.create(verbose=verbose, total_epochs=1)
-        progress.start_epoch(1)
-        progress.start_phase(Phase.PREDICT, total_batches=len(data_loader))
+        progress = shared_progress or ProgressFactory.create(
+            verbose=verbose, total_epochs=1
+        )
+        if shared_progress is None:
+            progress.start_epoch(1)
+            progress.start_phase(Phase.PREDICT, total_batches=len(data_loader))
         logger.debug("Prediction phase started: epoch=1")
 
         try:
@@ -178,8 +201,9 @@ class PredictionMixin(BatteryStateMixin):
             "predict", data_loader, dataset_name=dataset_name
         )
 
-        progress.end_phase()
-        progress.end_epoch()
+        if shared_progress is None:
+            progress.end_phase()
+            progress.end_epoch()
 
         prediction_output = (
             concatenate_predictions(predictions) if concatenate else predictions

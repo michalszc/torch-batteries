@@ -1,6 +1,7 @@
 """Named dataset scheduling and weighted result contracts."""
 
 from typing import Any, Literal
+from unittest.mock import patch
 
 import pytest
 import torch
@@ -257,6 +258,23 @@ def test_test_and_prediction_use_flat_results_and_selection() -> None:
         verbose=0, dataset="small", concatenate=True
     )["predictions"]
     assert selected_predictions.shape == (5, 1)
+
+
+def test_named_test_and_prediction_each_use_one_progress_bar() -> None:
+    battery, _ = _battery()
+    with patch("torch_batteries.utils.progress.progress_bar.tqdm") as test_bar:
+        result = battery.test(verbose=1)
+    assert test_bar.call_count == 1
+    assert test_bar.call_args.kwargs["total"] == 5
+    assert result["test_metrics"]["small:score"] == pytest.approx(0.2)
+    assert result["test_metrics"]["large:score"] == pytest.approx(0.8)
+
+    with patch("torch_batteries.utils.progress.progress_bar.tqdm") as predict_bar:
+        predictions = battery.predict(verbose=1, concatenate=True)
+    assert predict_bar.call_count == 1
+    assert predict_bar.call_args.kwargs["total"] == 5
+    assert predictions["predictions"]["small"].shape == (5, 1)
+    assert predictions["predictions"]["large"].shape == (6, 1)
 
 
 def test_stateful_metrics_have_aggregate_and_isolated_dataset_state(

@@ -15,7 +15,12 @@ from torch_batteries.utils.device import move_to_device
 from torch_batteries.utils.logging import get_logger
 from torch_batteries.utils.metrics import PhaseMetricManager
 from torch_batteries.utils.metrics._dataset_totals import DatasetMetricTotals
-from torch_batteries.utils.progress import Phase, Progress, ProgressFactory
+from torch_batteries.utils.progress import (
+    Phase,
+    Progress,
+    ProgressFactory,
+    SilentProgress,
+)
 
 from ._batch_schedule import scheduled_batches
 from ._state import BatteryStateMixin, as_battery
@@ -144,15 +149,33 @@ class EvaluationMixin(BatteryStateMixin):
             return self._test_with_loader(test_loader, verbose)[0]
         with self._data_workflow("test", dataset_name=dataset) as workflow:
             test_loaders = workflow.loaders.loaders_for_phase("test")
-            results: dict[str, tuple[TestResult, int]] = {}
-            for index, (name, loader) in enumerate(test_loaders.items()):
-                results[name] = self._test_with_loader(
-                    loader,
-                    verbose,
-                    dataset_name=name,
-                    reset_metrics=index == 0,
-                    named_metrics=len(test_loaders) > 1,
+            shared_progress: Progress | None = None
+            if len(test_loaders) > 1:
+                shared_progress = ProgressFactory.create(
+                    verbose=verbose, total_epochs=1
                 )
+                shared_progress.start_epoch(1)
+                shared_progress.start_phase(
+                    Phase.TEST, total_batches=sum(map(len, test_loaders.values()))
+                )
+            results: dict[str, tuple[TestResult, int]] = {}
+            try:
+                for index, (name, loader) in enumerate(test_loaders.items()):
+                    results[name] = self._test_with_loader(
+                        loader,
+                        verbose,
+                        dataset_name=name,
+                        reset_metrics=index == 0,
+                        named_metrics=len(test_loaders) > 1,
+                        shared_progress=shared_progress,
+                    )
+            except BaseException:
+                if shared_progress is not None:
+                    shared_progress.abort()
+                raise
+            if shared_progress is not None:
+                shared_progress.end_phase()
+                shared_progress.end_epoch()
             if len(results) == 1:
                 return next(iter(results.values()))[0]
             total_samples = sum(samples for _, samples in results.values())
@@ -187,7 +210,7 @@ class EvaluationMixin(BatteryStateMixin):
             self._event_handler.call(Event.AFTER_TEST, aggregate_context)
             return aggregate_result
 
-    def _test_with_loader(
+    def _test_with_loader(  # noqa: PLR0913
         self,
         test_loader: DataLoader,
         verbose: int = 1,
@@ -195,6 +218,7 @@ class EvaluationMixin(BatteryStateMixin):
         dataset_name: str | None = None,
         reset_metrics: bool = True,
         named_metrics: bool = False,
+        shared_progress: Progress | None = None,
     ) -> tuple[TestResult, int]:
         """Evaluate the model once without gradient tracking.
 
@@ -208,6 +232,7 @@ class EvaluationMixin(BatteryStateMixin):
             dataset_name: Name included in dataset-specific event contexts.
             reset_metrics: Reset aggregate metric state before this loader.
             named_metrics: Maintain isolated metric state for this dataset.
+            shared_progress: Optional progress tracker shared by named loaders.
 
         Returns:
             Average test loss and, when present, named test metrics.
@@ -248,9 +273,15 @@ class EvaluationMixin(BatteryStateMixin):
 
         self._model.eval()
 
-        progress = ProgressFactory.create(verbose=verbose, total_epochs=1)
-        progress.start_epoch(1)
-        progress.start_phase(Phase.TEST, total_batches=len(test_loader))
+        progress = shared_progress or ProgressFactory.create(
+            verbose=verbose, total_epochs=1
+        )
+        metric_progress = progress if shared_progress is None else SilentProgress()
+        if shared_progress is None:
+            progress.start_epoch(1)
+            progress.start_phase(Phase.TEST, total_batches=len(test_loader))
+        else:
+            metric_progress.start_phase(Phase.TEST, total_batches=len(test_loader))
         metric_manager = self._manager_for_phase("test")
         if reset_metrics:
             metric_manager.reset()
@@ -276,6 +307,7 @@ class EvaluationMixin(BatteryStateMixin):
                         dataset_name=dataset_name,
                         dataset_manager=dataset_manager,
                         named_metrics=named_metrics,
+                        metric_progress=metric_progress,
                     )
         except BaseException:
             progress.abort()
@@ -285,8 +317,9 @@ class EvaluationMixin(BatteryStateMixin):
             "test", test_loader, dataset_name=dataset_name
         )
 
-        test_metrics = progress.end_phase()
-        progress.end_epoch()
+        test_metrics = metric_progress.end_phase()
+        if shared_progress is None:
+            progress.end_epoch()
         test_loss = (
             test_metrics
             if isinstance(test_metrics, float)
@@ -350,6 +383,7 @@ class EvaluationMixin(BatteryStateMixin):
         dataset_name: str | None = None,
         dataset_manager: PhaseMetricManager | None = None,
         named_metrics: bool = False,
+        metric_progress: Progress | None = None,
     ) -> int:
         """Process one test batch."""
         batch = move_to_device(batch_data, self._device)
@@ -430,6 +464,8 @@ class EvaluationMixin(BatteryStateMixin):
             num_samples,
             dataset_name=dataset_name if named_metrics else None,
         )
+        if metric_progress is not None and metric_progress is not progress:
+            metric_progress.update(cast("ProgressMetrics", batch_metrics), num_samples)
         return num_samples
 
     def _validate_epoch(
