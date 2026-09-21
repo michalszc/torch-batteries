@@ -172,7 +172,13 @@ def _one_run(
 
 
 def measure(  # noqa: PLR0913
-    phase: str, mode: str, batches: int, batch_size: int, repeats: int, warmups: int
+    phase: str,
+    mode: str,
+    *,
+    batches: int,
+    batch_size: int,
+    repeats: int,
+    warmups: int,
 ) -> Measurement:
     """Measure one workload with warmups and median per-batch cost."""
     if phase not in PHASES or mode not in MODES:
