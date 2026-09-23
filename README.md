@@ -2,6 +2,9 @@
 
 <p align="center">
    <a href="https://pypi.org/project/torch-batteries/"><img src="https://img.shields.io/pypi/v/torch-batteries" alt="PyPI version"></a>
+   <a href="https://pypi.org/project/torch-batteries/"><img src="https://img.shields.io/pypi/dm/torch-batteries" alt="PyPI monthly downloads"></a>
+   <a href="https://github.com/michalszc/torch-batteries/blob/master/pyproject.toml"><img src="https://img.shields.io/badge/python-3.12%2B-important" alt="Python 3.12 or newer"></a>
+   <a href="https://github.com/michalszc/torch-batteries/actions/workflows/ci.yml"><img src="https://github.com/michalszc/torch-batteries/actions/workflows/ci.yml/badge.svg?branch=master" alt="CI on master"></a>
    <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-blue.svg" alt="License: Apache 2.0"></a>
    <a href="https://michalszc.github.io/torch-batteries/"><img src="https://img.shields.io/badge/docs-online-blue.svg" alt="Docs"></a>
 </p>
@@ -122,6 +125,9 @@ Explore practical examples demonstrating torch-batteries features:
 | **CartPole Reinforcement Learning** | Train a compact DQN from replay transitions with optimization events and stateful metrics | [cartpole_reinforcement_learning.ipynb](notebooks/cartpole_reinforcement_learning.ipynb) | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/michalszc/torch-batteries/blob/master/notebooks/cartpole_reinforcement_learning.ipynb) |
 | **CIFAR-10 ResNet18 Transfer Learning** | Fine-tune a pretrained ResNet18 with resumable training state, full-phase metrics, and structured prediction | [cifar10_transfer_learning.ipynb](notebooks/cifar10_transfer_learning.ipynb) | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/michalszc/torch-batteries/blob/master/notebooks/cifar10_transfer_learning.ipynb) |
 | **Learning Rate Sweep with Early Stopping** | Conduct a learning rate sweep on MNIST classification with aggressive early stopping and log results to Weights & Biases | [lr_sweep_early_stopping.ipynb](notebooks/lr_sweep_early_stopping.ipynb) | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/michalszc/torch-batteries/blob/master/notebooks/lr_sweep_early_stopping.ipynb) |
+| **USPS and SEMEION Named Datasets** | Train and evaluate across two digit sources with named metrics and early stopping | [usps_semeion_multi_dataset.ipynb](notebooks/usps_semeion_multi_dataset.ipynb) | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/michalszc/torch-batteries/blob/master/notebooks/usps_semeion_multi_dataset.ipynb) |
+| **Ames Housing With Two Targets** | Train a shared model with regression and classification heads using DataPack and MetricSpec | [ames_housing_multi_target.ipynb](notebooks/ames_housing_multi_target.ipynb) | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/michalszc/torch-batteries/blob/master/notebooks/ames_housing_multi_target.ipynb) |
+| **FrozenLake A2C with Local Tracking** | Train and evaluate an on-policy agent through DataPack and save metrics with LocalTracker | [frozenlake_a2c_local_tracking.ipynb](notebooks/frozenlake_a2c_local_tracking.ipynb) | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/michalszc/torch-batteries/blob/master/notebooks/frozenlake_a2c_local_tracking.ipynb) |
 
 ## Development
 

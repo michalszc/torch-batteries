@@ -15,6 +15,7 @@ from torch_batteries import (
     Event,
     EventContext,
     OptimizationStep,
+    StepOutput,
     charge,
 )
 
@@ -54,10 +55,10 @@ class _OptimizationModel(nn.Module):
         return OptimizationStep(loss_divisor=2)
 
     @charge(Event.TRAIN_STEP)
-    def training_step(self, context: EventContext) -> torch.Tensor:
+    def training_step(self, context: EventContext) -> StepOutput:
         inputs, targets = cast("tuple[torch.Tensor, torch.Tensor]", context["batch"])
         self.events.append("train")
-        return ((inputs @ self.weight - targets) ** 2).mean()
+        return StepOutput(loss=((inputs @ self.weight - targets) ** 2).mean())
 
     @charge(Event.BACKWARD)
     def backward(self, context: EventContext) -> None:
@@ -113,9 +114,9 @@ class _FailingOptimizerModel(nn.Module):
         self.after_steps = 0
 
     @charge(Event.TRAIN_STEP)
-    def training_step(self, context: EventContext) -> torch.Tensor:
+    def training_step(self, context: EventContext) -> StepOutput:
         inputs, _ = cast("tuple[torch.Tensor, torch.Tensor]", context["batch"])
-        return (inputs @ self.weight).sum()
+        return StepOutput(loss=(inputs @ self.weight).sum())
 
     @charge(Event.OPTIMIZER_STEP)
     def optimizer_step(self, context: EventContext) -> None:

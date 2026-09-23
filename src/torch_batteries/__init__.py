@@ -42,11 +42,12 @@ battery.fit(train_loader, val_loader, epochs=10)
 ```
 """
 
-__version__ = "0.12.0"
+__version__ = "1.0.0"
 __author__ = ["Michal Szczygiel", "Arkadiusz Paterak", "Antoni Zięciak"]
 
 # Import main components
 from .data import (
+    BatchScheduleConfig,
     DataContext,
     DataLoaderBundle,
     DataLoaderConfig,
@@ -68,9 +69,10 @@ from .trainer import (
     TrainResult,
     ValidationResult,
 )
-from .utils.metrics import CollectedMetric, StatefulMetric
+from .utils.metrics import CollectedMetric, MetricSpec, StatefulMetric
 
 __all__ = [
+    "BatchScheduleConfig",
     "Battery",
     "CollectedMetric",
     "DataContext",
@@ -82,6 +84,7 @@ __all__ = [
     "Event",
     "EventContext",
     "FitResult",
+    "MetricSpec",
     "OptimizationStep",
     "PredictResult",
     "ResolvedData",

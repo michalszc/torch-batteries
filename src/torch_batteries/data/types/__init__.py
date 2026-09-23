@@ -7,6 +7,7 @@ from .aliases import (
     DatasetType,
     DataStage,
 )
+from .batch_schedule import BatchScheduleConfig
 from .data_context import DataContext
 from .data_loader_bundle import DataLoaderBundle
 from .data_loader_config import DataLoaderConfig
@@ -14,6 +15,7 @@ from .dataset_bundle import DatasetBundle
 from .resolved_data import ResolvedData
 
 __all__ = [
+    "BatchScheduleConfig",
     "DataContext",
     "DataLoaderBundle",
     "DataLoaderCollection",

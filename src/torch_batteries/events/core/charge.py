@@ -34,7 +34,7 @@ def charge(event: Event) -> Callable[[Callable[P, R]], Callable[P, R]]:
             x, y = batch
             pred = self(x)
             loss = F.mse_loss(pred, y)
-            return loss
+            return StepOutput(loss=loss)
 
         @charge(Event.BEFORE_TRAIN_EPOCH)
         def on_epoch_start(self, context: EventContext):
@@ -43,15 +43,14 @@ def charge(event: Event) -> Callable[[Callable[P, R]], Callable[P, R]]:
         @charge(Event.AFTER_TRAIN_STEP)
         def on_train_step_end(self, context: EventContext):
             # Log metrics, update learning rate, etc.
-            if context.get("loss"):
-                print(f"Batch {context['batch_idx']}: loss={context['loss']}")
+            if context.get("train_loss"):
+                print(f"Batch {context['batch_idx']}: loss={context['train_loss']}")
         ```
     """
 
     def decorator(fn: Callable[P, R]) -> Callable[P, R]:
         charged_events = getattr(fn, "_torch_batteries_events", ())
         fn._torch_batteries_events = (*charged_events, event)  # type: ignore[attr-defined] # noqa: SLF001
-        fn._torch_batteries_event = event  # type: ignore[attr-defined] # noqa: SLF001
         logger.debug("Method '%s' charged with event '%s'", fn.__name__, event.value)
         return fn
 

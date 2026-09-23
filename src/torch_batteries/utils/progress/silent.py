@@ -56,13 +56,18 @@ class SilentProgress(Progress):
         self._total_samples = 0
 
     def update(
-        self, metrics: ProgressMetrics | None = None, batch_size: int | None = None
+        self,
+        metrics: ProgressMetrics | None = None,
+        batch_size: int | None = None,
+        *,
+        dataset_name: str | None = None,  # noqa: ARG002
     ) -> None:
         """Update progress with batch metrics (silent, but tracked internally).
 
         Args:
             metrics: Dictionary of metrics for the current batch.
             batch_size: Number of samples in the batch for weighted averaging.
+            dataset_name: Accepted for the shared progress interface.
         """
         if metrics and batch_size is not None:
             for key, value in metrics.items():

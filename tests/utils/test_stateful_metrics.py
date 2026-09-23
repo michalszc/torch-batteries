@@ -112,7 +112,7 @@ def test_stateful_metric_protocol_and_phase_reset() -> None:
         batch_size=2,
     )
 
-    result = battery.train(loader, loader, verbose=0)
+    result = battery.fit(loader, loader, verbose=0)
 
     assert result["train_metrics"]["mean"] == [4.0]
     assert result["val_metrics"]["mean"] == [4.0]

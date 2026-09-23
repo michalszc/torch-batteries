@@ -80,7 +80,6 @@ EXPECTED_FIELDS: dict[Event, set[str]] = {
         "batch",
         "batch_idx",
         "epoch",
-        "loss",
         "train_loss",
         "train_metrics",
     },
@@ -114,16 +113,14 @@ EXPECTED_FIELDS: dict[Event, set[str]] = {
         "batch",
         "batch_idx",
         "epoch",
-        "loss",
         "val_loss",
         "val_metrics",
     },
     Event.BEFORE_TEST: COMMON_FIELDS | {"optimizer"},
-    Event.AFTER_TEST: COMMON_FIELDS
-    | {"optimizer", "loss", "test_loss", "test_metrics"},
+    Event.AFTER_TEST: COMMON_FIELDS | {"optimizer", "test_loss", "test_metrics"},
     Event.BEFORE_TEST_EPOCH: COMMON_FIELDS | {"optimizer", "epoch"},
     Event.AFTER_TEST_EPOCH: COMMON_FIELDS
-    | {"optimizer", "epoch", "loss", "test_loss", "test_metrics"},
+    | {"optimizer", "epoch", "test_loss", "test_metrics"},
     Event.BEFORE_TEST_STEP: COMMON_FIELDS
     | {"optimizer", "batch", "batch_idx", "epoch"},
     Event.TEST_STEP: COMMON_FIELDS | {"optimizer", "batch", "batch_idx", "epoch"},
@@ -133,7 +130,6 @@ EXPECTED_FIELDS: dict[Event, set[str]] = {
         "batch",
         "batch_idx",
         "epoch",
-        "loss",
         "test_loss",
         "test_metrics",
     },
@@ -258,7 +254,7 @@ def test_all_documented_event_context_contracts() -> None:  # noqa: PLR0915
     )
     loader = _make_loader()
 
-    battery.train(loader, loader, epochs=1, verbose=0)
+    battery.fit(loader, loader, epochs=1, verbose=0)
     battery.test(loader, verbose=0)
     prediction_result = battery.predict(loader, verbose=0)
 
@@ -291,10 +287,9 @@ def test_all_documented_event_context_contracts() -> None:  # noqa: PLR0915
     for event, loss_key, metrics_key in phase_contracts:
         for context in records[event]:
             dynamic_context = cast("dict[str, Any]", context)
-            assert isinstance(dynamic_context["loss"], float)
-            assert dynamic_context[loss_key] == dynamic_context["loss"]
+            assert isinstance(dynamic_context[loss_key], float)
             metrics = dynamic_context[metrics_key]
-            assert metrics["loss"] == context["loss"]
+            assert metrics["loss"] == dynamic_context[loss_key]
             assert isinstance(metrics["mae"], float)
             assert metrics["manual"] == 2.0
 
@@ -319,8 +314,7 @@ def test_all_documented_event_context_contracts() -> None:  # noqa: PLR0915
 
     for event in (Event.AFTER_TEST_EPOCH, Event.AFTER_TEST):
         context = records[event][0]
-        assert context["test_loss"] == context["loss"]
-        assert context["test_metrics"]["loss"] == context["loss"]
+        assert context["test_metrics"]["loss"] == context["test_loss"]
         assert context["test_metrics"]["manual"] == 2.0
 
     step_predictions = records[Event.AFTER_PREDICT_STEP]

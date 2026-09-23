@@ -43,10 +43,19 @@ run_test_check() {
         echo "" >> $GITHUB_STEP_SUMMARY
 
         # Extract test summary
-        if grep -q "=" test_output.txt; then
+        if grep -qE '^[0-9]+ passed' test_output.txt; then
             echo "### Test Summary:" >> $GITHUB_STEP_SUMMARY
             echo '```' >> $GITHUB_STEP_SUMMARY
-            grep -E "(passed|failed|error|skipped|=)" test_output.txt | tail -5 >> $GITHUB_STEP_SUMMARY
+            grep -E '^[0-9]+ passed' test_output.txt | tail -1 >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+        fi
+
+        # Keep timings separate from the pytest result and coverage table.
+        if grep -q 'CPU workflow timings' test_output.txt; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### CPU Workflow Timings:" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            awk '/^scenario / { show=1 } /^=+ tests coverage/ { show=0 } show' test_output.txt >> $GITHUB_STEP_SUMMARY
             echo '```' >> $GITHUB_STEP_SUMMARY
         fi
 

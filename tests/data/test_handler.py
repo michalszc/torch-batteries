@@ -211,7 +211,7 @@ def test_resolve_uses_default_loader_configuration_and_auto_device() -> None:
 
     with DefaultDataPack().resolve("fit", device="auto") as resolved:
         loader = resolved.loaders.train
-        assert loader is not None
+        assert isinstance(loader, DataLoader)
         assert loader.batch_size == 1
         assert isinstance(resolved.device, torch.device)
 

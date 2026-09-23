@@ -1,5 +1,21 @@
 # Release Notes
 
+## 1.0.0 — 2026-09-20
+
+- Added named training and validation datasets with deterministic round-robin or
+  seeded interleaved batches, sample-weighted losses and metrics, and dataset-specific
+  metric names for multi-dataset workflows.
+- Added phase-specific metric configuration and `MetricSpec` selectors for structured
+  model outputs and targets.
+- Added validation cadence, cumulative epoch and optimizer-step counts, and explicit
+  stop reasons to training results.
+- Added `LocalTracker` with versioned run directories, epoch-level CSV metrics,
+  hyperparameter YAML, and latest-value summaries.
+- Updated the existing examples and added USPS/SEMEION, Ames Housing multi-target,
+  and FrozenLake A2C notebooks.
+- Removed pre-1.0 callback aliases and legacy full-checkpoint loading in
+  [PR #25](https://github.com/michalszc/torch-batteries/pull/25).
+
 ## 0.12.0 — 2026-09-10
 
 - Added compatibility contracts that detect removal or incompatible changes to the
@@ -14,9 +30,8 @@
   training operations and across evaluation phase results.
 - Added `Event.ON_EXCEPTION` for escaping workflow failures and failure-aware
   experiment-tracker cleanup without final model artifact logging.
-- Introduced schema-version-3 checkpoints with Python, PyTorch CPU, available CUDA
-  and MPS, optional NumPy, and DataLoader generator RNG state while retaining schema
-  1 and 2 loading.
+- Expanded full checkpoints with Python, PyTorch CPU, available CUDA and MPS,
+  optional NumPy, and DataLoader generator RNG state.
 - Made full and raw-model checkpoint restoration transactional, with complete
   callback-state preflight, component rollback, and preservation of the original
   load failure.
@@ -57,8 +72,7 @@
   construction across training, testing, and prediction while preserving the direct
   DataLoader API.
 - Added validated phase-aware `DataLoaderConfig` materialization, deterministic
-  opt-in generators, guaranteed teardown, and DataPack state in schema-version-2
-  checkpoints with schema-version-1 compatibility.
+  opt-in generators, guaranteed teardown, and DataPack state in full checkpoints.
 - Added context-managed `DataPack.resolve()` for constructing and inspecting datasets
   and DataLoaders without a `Battery`, backed by the same lifecycle resolver used by
   implicit Battery workflows.

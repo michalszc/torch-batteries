@@ -16,22 +16,22 @@ class TestTrainerTypes:
         """Test TrainResult type structure."""
         train_result: TrainResult = {
             "train_loss": [0.5, 0.3, 0.2],
-            "val_loss": [0.4, 0.25, 0.15],
+            "train_metrics": {"accuracy": [0.4, 0.25, 0.15]},
         }
 
         assert "train_loss" in train_result
-        assert "val_loss" in train_result
+        assert "train_metrics" in train_result
         assert isinstance(train_result["train_loss"], list)
-        assert isinstance(train_result["val_loss"], list)
+        assert isinstance(train_result["train_metrics"], dict)
 
-    def test_train_result_empty_val_loss(self) -> None:
-        """Test TrainResult with empty validation loss."""
+    def test_train_result_empty_metrics(self) -> None:
+        """Test TrainResult with empty metrics."""
         train_result: TrainResult = {
             "train_loss": [0.5, 0.3],
-            "val_loss": [],
+            "train_metrics": {},
         }
 
-        assert len(train_result["val_loss"]) == 0
+        assert len(train_result["train_metrics"]) == 0
         assert len(train_result["train_loss"]) == 2
 
     def test_test_result_structure(self) -> None:
@@ -90,7 +90,6 @@ class TestTrainerTypes:
 
         train_result: TrainResult = {
             "train_loss": [0.8, 0.6, 0.4],
-            "val_loss": [0.7, 0.5, 0.3],
         }
 
         avg_loss = process_train_result(train_result)

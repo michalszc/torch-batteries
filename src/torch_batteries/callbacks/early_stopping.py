@@ -27,7 +27,7 @@ class EarlyStopping(Callback):
     """Early stops the training if selected metric doesn't improve after a given patience.
 
     Args:
-        phase: ``"train"`` or ``"validation"``. ``"val"`` is deprecated.
+        phase: ``"train"`` or ``"validation"``.
         metric: The name of the metric to monitor
         min_delta: Minimum change in the monitored metric to qualify as an improvement
         patience: Number of epochs with no improvement after which training will be stopped
@@ -36,7 +36,6 @@ class EarlyStopping(Callback):
               when the metric stops increasing
         restore_best_weights: If True, restore model weights from the epoch with the
                              best value of the monitored metric
-        stage: Deprecated keyword alias for ``phase``.
     """  # noqa: E501
 
     def __init__(  # noqa: PLR0913
@@ -48,9 +47,8 @@ class EarlyStopping(Callback):
         patience: int = 5,
         mode: Literal["min", "max"] = "min",
         restore_best_weights: bool = False,
-        stage: MonitorPhase | None = None,
     ) -> None:
-        phase = resolve_monitor_phase(phase, stage=stage, required=True)
+        phase = resolve_monitor_phase(phase, required=True)
         assert phase is not None
         metric = require_metric(metric)
         if min_delta < 0:
@@ -273,7 +271,11 @@ class EarlyStopping(Callback):
                 self._patience,
             )
             if self._epochs_no_improve >= self._patience:
-                battery.stop_training = True
+                battery.request_stop(
+                    f"Early stopping: {self._phase} metric '{self._metric}' "
+                    f"did not improve for {self._epochs_no_improve} checks "
+                    f"(best={self._best_score}, latest={current_score})"
+                )
                 logger.info(
                     "Early stopping applied. No improvement in '%s' for %d epochs.",
                     self._metric,

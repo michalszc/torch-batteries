@@ -15,12 +15,13 @@ if TYPE_CHECKING:
     from torch_batteries.callbacks.base import Callback
     from torch_batteries.data import DataPack, ResolvedData
     from torch_batteries.data.handler import DataPackHandler
-    from torch_batteries.data.types import DataStage
+    from torch_batteries.data.types import BatchScheduleConfig, DataStage
     from torch_batteries.events import EventHandler
-    from torch_batteries.trainer.types import TrainResult
-    from torch_batteries.utils.metrics import Metric, PhaseMetricManager
+    from torch_batteries.trainer.types import FitResult
+    from torch_batteries.utils.metrics import PhaseMetricManager
 
     from .core import Battery
+    from .types.metric_config import MetricsConfig
 
     class BatteryStateMixin:
         """Describe state and cross-module operations supplied by Battery."""
@@ -34,14 +35,17 @@ if TYPE_CHECKING:
         _last_completed_epoch: int
         _loader_generator_states: dict[str, dict[str, torch.Tensor]]
         _metric_manager: PhaseMetricManager
-        _metrics: dict[str, Metric]
+        _metric_managers: dict[str, PhaseMetricManager]
+        _dataset_metric_managers: dict[str, dict[str, PhaseMetricManager]]
+        _metrics: MetricsConfig
         _model: nn.Module
         _optimizer: torch.optim.Optimizer | None
         _optimizer_step_idx: int
         _pending_loader_generator_states: dict[str, dict[str, torch.Tensor]]
         _resume_loaded: bool
         _stop_training: bool
-        _train_results: TrainResult
+        _stop_reason: str | None
+        _train_results: FitResult
 
         def _data_workflow(
             self,
@@ -58,9 +62,13 @@ if TYPE_CHECKING:
         ) -> tuple[
             torch.Tensor,
             dict[str, float],
-            torch.Tensor | None,
-            torch.Tensor | None,
+            torch.Tensor | dict[str, torch.Tensor] | None,
+            torch.Tensor | dict[str, torch.Tensor] | None,
         ]: ...
+
+        def _manager_for_phase(self, phase: str) -> PhaseMetricManager: ...
+
+        def _manager_for_dataset(self, phase: str, name: str) -> PhaseMetricManager: ...
 
         def _validate_train_inputs(
             self,
@@ -88,9 +96,12 @@ if TYPE_CHECKING:
 
         def _validate_epoch(
             self,
-            dataloader: DataLoader,
+            dataloader: DataLoader | dict[str, DataLoader],
             progress: Any,
             epoch: int,
+            schedule: BatchScheduleConfig = ...,
+            *,
+            named_datasets: bool = ...,
         ) -> dict[str, float]: ...
 
 else:

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "torch-batteries"
-version = "0.12.0"
+version = "1.0.0"
 description = "A lightweight Python package that supplies batteries-included abstractions for PyTorch workflows"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -29,6 +29,7 @@ classifiers = [
 dependencies = [
     "torch>=2.9.0",
     "tqdm>=4.67.1",
+    "PyYAML>=6.0",
 ]
 
 [project.optional-dependencies]
@@ -38,8 +39,10 @@ example = [
     "gymnasium[classic-control]>=1.2.0,<2.0.0",
     "ipykernel>=7.1.0",
     "ipywidgets>=8.1.7",
+    "kagglehub>=0.3.0",
     "matplotlib>=3.10.7",
     "numpy>=2.3.4",
+    "pandas>=2.2.0",
     "scikit-learn>=1.7.2",
     "seaborn>=0.13.2",
     "torchvision>=0.24.1",
@@ -53,8 +56,10 @@ all = [
     "gymnasium[classic-control]>=1.2.0,<2.0.0",
     "ipykernel>=7.1.0",
     "ipywidgets>=8.1.7",
+    "kagglehub>=0.3.0",
     "matplotlib>=3.10.7",
     "numpy>=2.3.4",
+    "pandas>=2.2.0",
     "scikit-learn>=1.7.2",
     "seaborn>=0.13.2",
     "torchvision>=0.24.1",

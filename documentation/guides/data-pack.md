@@ -15,6 +15,7 @@ import torch
 from torch.utils.data import TensorDataset
 
 from torch_batteries import (
+    BatchScheduleConfig,
     DataContext,
     DataLoaderConfig,
     DataPack,
@@ -90,40 +91,54 @@ device is CPU; pass an explicit PyTorch device or `"auto"` when loader policy su
 automatic memory pinning should follow another device.
 
 The result is a `ResolvedData` containing the normalized device, the original
-`DatasetBundle`, and a matching `DataLoaderBundle`. Test and prediction loaders retain
-their original shape: a bare dataset produces a bare loader, while a named dataset
-mapping produces a loader mapping with the same names.
+`DatasetBundle`, and a matching `DataLoaderBundle`. Any phase can use a bare dataset
+or a mapping of names to datasets. The corresponding loader has the same shape.
 
 Resolution is context-managed because datasets and loaders may depend on open files,
 connections, worker processes, or streaming resources. They remain valid inside the
 `with` block, and `TEARDOWN_DATA` is guaranteed when the block exits normally or with
 an exception. Returning the loaders after teardown would make this guarantee unsafe.
 
-## Use named evaluation datasets
+## Use named datasets in any phase
 
-Test and prediction phases can expose several named datasets:
+Training, validation, test, and prediction can each expose named datasets:
 
 ```python
 return DatasetBundle(
-    train=train,
-    validation=validation,
-    test={"Test1": test_1, "Test2": test_2},
-    predict={"Predict1": predict_1, "Predict2": predict_2},
+    train={"usps": usps_train, "semeion": semeion_train},
+    validation={"usps": usps_val, "semeion": semeion_val},
+    test={"usps": usps_test, "semeion": semeion_test},
+    predict={"usps": usps_test, "semeion": semeion_test},
+    batch_schedule=BatchScheduleConfig(mode="interleave", seed=17),
 )
 ```
 
-Without a selector, `battery.test()` and `battery.predict()` run every named dataset
-and return results keyed by those names. Select one dataset when only one pass is
-needed:
+`batch_schedule` applies to both train and validation. Its default
+`round_robin` mode takes a batch from each loader in order, skipping loaders after
+they are exhausted. `interleave` draws a loader in proportion to its remaining batch
+count; the seed makes the order deterministic for each absolute epoch. Both modes
+exhaust every loader.
+
+`battery.fit()` combines named training and validation loaders into one result per
+phase. Losses are weighted by the number of samples. Aggregate metrics retain names
+such as `accuracy`; when several datasets run, each dataset also has keys such as
+`usps:accuracy` and `usps:loss`. Progress output shows these keys. A single dataset
+uses plain metric names.
+
+Without a selector, `battery.test()` combines all named test datasets into one
+aggregate result. `battery.predict()` returns one result whose `predictions` field
+maps dataset names to outputs when several datasets run. Select one dataset when only
+one pass is needed:
 
 ```python
 test_2_result = battery.test(dataset="Test2")
 predict_1_result = battery.predict(dataset="Predict1")
 ```
 
-A bare dataset, or one selected by name, retains the ordinary singular result shape.
-A named mapping always returns a mapping, including when it contains one entry.
-Training and validation datasets remain singular.
+A bare dataset, a named mapping with one entry, or one selected by name retains the
+ordinary single-dataset result shape. The resolved train, validation, test, and
+prediction loader fields each use `DataLoaderCollection` (one loader or a named
+mapping). `CONFIGURE_DATALOADER` configures each loader separately.
 
 `datasets_for_phase()` normalizes a singular dataset under the name `"default"` so
 internal workflow code can handle singular and named datasets uniformly. Therefore,
@@ -173,7 +188,8 @@ also gets an optional `seed` and `generator`; loader configuration additionally 
 event contexts expose the same identity field. Teardown receives `datasets` when setup
 completed.
 
-`dataset_name` is the stable identifier intended for logging and branching.
+`dataset_name` is the stable identifier intended for logging and branching. Train and
+validation step events also expose it when named loaders are used.
 
 There is no framework default seed. Define a non-negative integer `seed` attribute on
 the DataPack only when its construction needs deterministic generators.
@@ -236,8 +252,7 @@ Full checkpoints store this dictionary and the DataPack's qualified type. During
 `fit(resume_from=...)` or `train(resume_from=...)`, it is restored before
 `SETUP_DATA`. Datasets, DataLoaders,
 worker processes, and open resources are never serialized. A resume requires the
-same DataPack type to be attached; checkpoints created before DataPack state was
-introduced remain readable.
+same DataPack type to be attached.
 
 Distributed sampling and unsized streaming loaders are outside the current contract.
 Configure ordinary sized PyTorch loaders and manage distributed sampling in
