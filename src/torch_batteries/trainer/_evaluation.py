@@ -424,8 +424,9 @@ class EvaluationMixin(BatteryStateMixin):
         ):
             dataset_manager.update(predictions, targets)
         manual_metric_names.update(step_metrics)
+        loss_value = loss.item()
         batch_metrics = {
-            "loss": loss.item(),
+            "loss": loss_value,
             **automatic_metrics,
             **step_metrics,
         }
@@ -442,7 +443,7 @@ class EvaluationMixin(BatteryStateMixin):
             "batch": batch,
             "batch_idx": batch_idx,
             "epoch": 1,
-            "test_loss": loss.item(),
+            "test_loss": loss_value,
             "test_metrics": (
                 {
                     **batch_metrics,
@@ -568,8 +569,9 @@ class EvaluationMixin(BatteryStateMixin):
                 if predictions is not None and targets is not None and dataset_managers:
                     dataset_managers[dataset_name].update(predictions, targets)
                 manual_metric_names.update(step_metrics)
+                loss_value = loss.item()
                 batch_metrics = {
-                    "loss": loss.item(),
+                    "loss": loss_value,
                     **automatic_metrics,
                     **step_metrics,
                 }
@@ -586,7 +588,7 @@ class EvaluationMixin(BatteryStateMixin):
                     "batch": batch,
                     "batch_idx": batch_idx,
                     "epoch": epoch,
-                    "val_loss": loss.item(),
+                    "val_loss": loss_value,
                     "val_metrics": (
                         {
                             **batch_metrics,

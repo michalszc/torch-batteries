@@ -326,21 +326,10 @@ class TrainingMixin(BatteryStateMixin):
             self._last_completed_epoch = epoch
             results["epochs_completed"] = epoch
             results["optimizer_steps"] = self._optimizer_step_idx
-            self._train_results = copy.deepcopy(results)
+            self._train_results = results
 
-            after_epoch_context: EventContext = {
-                "battery": as_battery(self),
-                "model": self._model,
-                "optimizer": self._optimizer,
-                "epoch": epoch,
-                "train_metrics": train_metrics,
-                **copy_history_context(results),
-            }
-            self._event_handler.call(Event.AFTER_TRAIN_EPOCH, after_epoch_context)
-
-            if validation_loaders and epoch % validate_every_n_epochs == 0:
-                logger.debug("Validation phase started: epoch=%d", epoch)
-                before_val_context: EventContext = {
+            if self._event_handler.has_handler(Event.AFTER_TRAIN_EPOCH):
+                after_epoch_context: EventContext = {
                     "battery": as_battery(self),
                     "model": self._model,
                     "optimizer": self._optimizer,
@@ -348,7 +337,22 @@ class TrainingMixin(BatteryStateMixin):
                     "train_metrics": train_metrics,
                     **copy_history_context(results),
                 }
-                self._event_handler.call(Event.BEFORE_VALIDATION, before_val_context)
+                self._event_handler.call(Event.AFTER_TRAIN_EPOCH, after_epoch_context)
+
+            if validation_loaders and epoch % validate_every_n_epochs == 0:
+                logger.debug("Validation phase started: epoch=%d", epoch)
+                if self._event_handler.has_handler(Event.BEFORE_VALIDATION):
+                    before_val_context: EventContext = {
+                        "battery": as_battery(self),
+                        "model": self._model,
+                        "optimizer": self._optimizer,
+                        "epoch": epoch,
+                        "train_metrics": train_metrics,
+                        **copy_history_context(results),
+                    }
+                    self._event_handler.call(
+                        Event.BEFORE_VALIDATION, before_val_context
+                    )
 
                 try:
                     val_metrics = self._validate_epoch(
@@ -374,18 +378,17 @@ class TrainingMixin(BatteryStateMixin):
                         if key not in results["val_metrics"]:
                             results["val_metrics"][key] = []
                         results["val_metrics"][key].append(value)
-                self._train_results = copy.deepcopy(results)
-
-                after_val_context: EventContext = {
-                    "battery": as_battery(self),
-                    "model": self._model,
-                    "optimizer": self._optimizer,
-                    "epoch": epoch,
-                    "train_metrics": train_metrics,
-                    "val_metrics": val_metrics,
-                    **copy_history_context(results),
-                }
-                self._event_handler.call(Event.AFTER_VALIDATION, after_val_context)
+                if self._event_handler.has_handler(Event.AFTER_VALIDATION):
+                    after_val_context: EventContext = {
+                        "battery": as_battery(self),
+                        "model": self._model,
+                        "optimizer": self._optimizer,
+                        "epoch": epoch,
+                        "train_metrics": train_metrics,
+                        "val_metrics": val_metrics,
+                        **copy_history_context(results),
+                    }
+                    self._event_handler.call(Event.AFTER_VALIDATION, after_val_context)
                 logger.debug(
                     "Validation phase completed: epoch=%d, metrics=%s",
                     epoch,
@@ -407,17 +410,18 @@ class TrainingMixin(BatteryStateMixin):
         results["stopped_early"] = self._stop_training
         results["stop_reason"] = self._stop_reason
 
-        after_train_context: EventContext = {
-            "battery": as_battery(self),
-            "model": self._model,
-            "optimizer": self._optimizer,
-            "epoch": last_epoch,
-            "train_metrics": train_metrics,
-            **copy_history_context(results),
-        }
-        if val_loader and val_metrics:
-            after_train_context["val_metrics"] = val_metrics
-        self._event_handler.call(Event.AFTER_TRAIN, after_train_context)
+        if self._event_handler.has_handler(Event.AFTER_TRAIN):
+            after_train_context: EventContext = {
+                "battery": as_battery(self),
+                "model": self._model,
+                "optimizer": self._optimizer,
+                "epoch": last_epoch,
+                "train_metrics": train_metrics,
+                **copy_history_context(results),
+            }
+            if val_loader and val_metrics:
+                after_train_context["val_metrics"] = val_metrics
+            self._event_handler.call(Event.AFTER_TRAIN, after_train_context)
         self._train_results = copy.deepcopy(results)
         self._last_completed_epoch = last_epoch
         self._resume_loaded = False
@@ -472,10 +476,11 @@ class TrainingMixin(BatteryStateMixin):
         context: EventContext,
     ) -> None:
         """Run backward and an optional optimizer step through generic events."""
+        normalized_loss = loss if plan.loss_divisor == 1 else loss / plan.loss_divisor
         backward_context: EventContext = {
             **context,
             "loss_tensor": loss,
-            "backward_loss": loss / plan.loss_divisor,
+            "backward_loss": normalized_loss,
         }
         self._event_handler.call(Event.BEFORE_BACKWARD, backward_context)
         backward_loss = backward_context.get("backward_loss")
@@ -591,8 +596,9 @@ class TrainingMixin(BatteryStateMixin):
             self._run_optimization(loss, optimization_plan, before_step_context)
             optimizer_step = optimization_plan.optimizer_step
 
+            loss_value = loss.item()
             batch_metrics = {
-                "loss": loss.item(),
+                "loss": loss_value,
                 **automatic_metrics,
                 **step_metrics,
             }
@@ -610,7 +616,7 @@ class TrainingMixin(BatteryStateMixin):
                 "batch": batch,
                 "batch_idx": batch_idx,
                 "epoch": epoch,
-                "train_loss": loss.item(),
+                "train_loss": loss_value,
                 "train_metrics": (
                     {
                         **batch_metrics,
