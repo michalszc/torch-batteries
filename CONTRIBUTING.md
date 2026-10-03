@@ -63,8 +63,9 @@ direct loaders and named DataPack datasets. Each case uses a tiny CPU-only model
 32 batches, one warmup, and three measured runs. The pytest summary reports median
 total time and time per batch spent retrieving data, in the charged model step, and
 in the remaining workflow. Training's remaining time includes PyTorch backward and
-optimizer operations. Each scenario must complete within 30 ms, based on the
-median of three measured runs. Compare the displayed timings from runs on the
+optimizer operations. Timings are informational and have no maximum-duration
+failure threshold. The tests still check completed batch counts and valid timing
+measurements. Compare the displayed timings from runs on the
 same hardware to assess smaller changes. CUDA and MPS are never selected by these
 tests. The per-batch columns use microseconds (µs/batch); total time uses
 milliseconds (ms).
