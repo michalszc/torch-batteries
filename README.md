@@ -7,6 +7,7 @@
    <a href="https://github.com/michalszc/torch-batteries/actions/workflows/ci.yml"><img src="https://github.com/michalszc/torch-batteries/actions/workflows/ci.yml/badge.svg?branch=master" alt="CI on master"></a>
    <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-blue.svg" alt="License: Apache 2.0"></a>
    <a href="https://michalszc.github.io/torch-batteries/"><img src="https://img.shields.io/badge/docs-online-blue.svg" alt="Docs"></a>
+   <a href="https://zenodo.org/badge/latestdoi/1103141433"><img src="https://zenodo.org/badge/1103141433.svg" alt="Latest Zenodo DOI"></a>
 </p>
 
 <p align="center">

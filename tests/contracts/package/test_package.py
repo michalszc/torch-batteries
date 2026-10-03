@@ -2,6 +2,7 @@
 
 import builtins
 import importlib
+import re
 import sys
 import tomllib
 from pathlib import Path
@@ -89,6 +90,21 @@ def test_citation_metadata_matches_project(
     assert [package_names.get(name, name) for name in names] == [
         author["name"] for author in project["authors"]
     ]
+
+
+def test_readme_badge_links_to_latest_zenodo_doi() -> None:
+    """The DOI badge and its latest-record link identify this repository."""
+    readme = (PROJECT_ROOT / "README.md").read_text(encoding="utf-8")
+    badge = re.search(
+        r'<a href="([^"]+)"><img src="([^"]+)" alt="Latest Zenodo DOI"></a>',
+        readme,
+    )
+    assert badge is not None
+    logger.debug("Read Zenodo badge link and image: %s", badge.groups())
+    assert badge.groups() == (
+        "https://zenodo.org/badge/latestdoi/1103141433",
+        "https://zenodo.org/badge/1103141433.svg",
+    )
 
 
 def test_dependencies_and_extras(project_configuration: dict[str, Any]) -> None:
