@@ -1,4 +1,4 @@
-.PHONY: help install install-dev test lint lint-fix format format-check type-check build clean validate-version docs docs-serve notebooks-check release-metadata
+.PHONY: help install install-dev test lint lint-fix format format-check type-check build clean validate-version docs docs-serve notebooks-check release-metadata release-select-commit release
 .DEFAULT_GOAL := help
 
 help: ## Show this help message
@@ -47,6 +47,12 @@ check-build: ## Check if build is ready for publishing
 
 release-metadata: ## Record the current commit and package version without publishing
 	python scripts/release.py metadata --output "$(or $(RELEASE_METADATA),release-metadata.json)"
+
+release-select-commit: ## Select the deployed commit from validated CD metadata
+	python scripts/release.py select-commit --metadata "$(or $(RELEASE_METADATA),release-metadata.json)"
+
+release: ## Publish a GitHub release for the checkout recorded in deployment metadata
+	python scripts/release.py publish --metadata "$(or $(RELEASE_METADATA),release-metadata.json)" --project "$(or $(RELEASE_PROJECT),.)" --repository "$(or $(RELEASE_REPOSITORY),$(GITHUB_REPOSITORY))"
 
 validate-version: ## Check project versions, release notes, and PyPI
 	@bash scripts/validate_version.sh

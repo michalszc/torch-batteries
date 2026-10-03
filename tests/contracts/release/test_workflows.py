@@ -143,3 +143,73 @@ def test_cd_records_identity_before_publishing(tmp_path: Path) -> None:
     )
     assert result.returncode == 0, result.stderr
     assert json.loads((tmp_path / "local.json").read_text())["sha"] == SHA
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "expected"),
+    [
+        ("conclusion", "success", True),
+        ("conclusion", "failure", False),
+        ("conclusion", "cancelled", False),
+        ("conclusion", "skipped", False),
+        ("head_branch", "feature/example", False),
+        ("head_repository.full_name", "fork/repo", False),
+    ],
+)
+def test_release_guards(field: str, value: str, *, expected: bool) -> None:
+    fields = {
+        "conclusion": "success",
+        "head_branch": "master",
+        "head_repository.full_name": "owner/repo",
+    }
+    fields[field] = value
+    assert permits(workflow("release")["jobs"]["release"]["if"], **fields) is expected
+
+
+def test_release_uses_metadata_from_exact_cd_run() -> None:
+    release = workflow("release")
+    assert release["on"] == {
+        "workflow_run": {
+            "workflows": ["CD"],
+            "branches": ["master"],
+            "types": ["completed"],
+        },
+    }
+    assert release["concurrency"]["cancel-in-progress"] == "false"
+    job = release["jobs"]["release"]
+    assert job["permissions"] == {"actions": "read", "contents": "write"}
+    steps = job["steps"]
+    names = [step["name"] for step in steps]
+    download = names.index("Download deployment identity")
+    select = names.index("Select deployed commit")
+    checkout = names.index("Check out deployed commit")
+    publish = names.index("Publish GitHub release")
+    assert download < select < checkout < publish
+    assert steps[download]["with"]["run-id"] == "${{ github.event.workflow_run.id }}"
+    assert steps[download]["with"]["repository"] == "${{ github.repository }}"
+    assert steps[download]["with"]["name"] == "release-metadata"
+    assert steps[checkout]["with"]["ref"] == "${{ steps.deployment.outputs.sha }}"
+    assert steps[checkout]["with"]["path"] == "deployed"
+    assert steps[publish]["env"]["RELEASE_PROJECT"] == "deployed"
+    assert steps[publish]["env"]["GH_TOKEN"] == "${{ secrets.GITHUB_TOKEN }}"
+    assert steps[select]["run"] == "make release-select-commit"
+    assert steps[publish]["run"] == "make release"
+    assert not any("pip install" in step.get("run", "") for step in steps)
+
+
+def test_ci_checks_release_automation_changes() -> None:
+    ci = workflow("ci")
+    for event in ("push", "pull_request"):
+        assert {
+            ".github/workflows/cd.yml",
+            ".github/workflows/release.yml",
+            "scripts/release.py",
+            "documentation/release-notes.md",
+        } <= set(ci["on"][event]["paths"])
+    checks = ci["jobs"]["quality-checks"]["strategy"]["matrix"]["check"]
+    assert {"lint", "format-check", "type-check", "test"} <= set(checks)
+    makefile = (ROOT / "Makefile").read_text()
+    assert "ruff check src/ tests/ scripts/" in makefile
+    assert "ruff format --diff src/ tests/ scripts/" in makefile
+    assert "mypy src/torch_batteries/ tests/ scripts/" in makefile
+    assert "pytest tests/" in makefile

@@ -17,7 +17,8 @@ jobs:
           github.event.workflow_run.head_branch == 'master' &&
           github.event.workflow_run.head_repository.full_name == github.repository }}
     steps:
-    - uses: actions/checkout@v7
+    - name: Check out repository
+      uses: actions/checkout@v7
       with:
         ref: ${{ github.event.workflow_run.head_sha }}
         persist-credentials: false
