@@ -188,6 +188,9 @@ def test_release_uses_metadata_from_exact_cd_run() -> None:
     assert steps[download]["with"]["run-id"] == "${{ github.event.workflow_run.id }}"
     assert steps[download]["with"]["repository"] == "${{ github.repository }}"
     assert steps[download]["with"]["name"] == "release-metadata"
+    metadata_path = steps[download]["with"]["path"] + "/release-metadata.json"
+    assert steps[select]["env"]["RELEASE_METADATA"] == metadata_path
+    assert steps[publish]["env"]["RELEASE_METADATA"] == metadata_path
     assert steps[checkout]["with"]["ref"] == "${{ steps.deployment.outputs.sha }}"
     assert steps[checkout]["with"]["path"] == "deployed"
     assert steps[publish]["env"]["RELEASE_PROJECT"] == "deployed"
@@ -195,6 +198,23 @@ def test_release_uses_metadata_from_exact_cd_run() -> None:
     assert steps[select]["run"] == "make release-select-commit"
     assert steps[publish]["run"] == "make release"
     assert not any("pip install" in step.get("run", "") for step in steps)
+
+
+@pytest.mark.parametrize("name", ["ci", "cd", "release"])
+def test_workflow_job_environment_uses_available_contexts(name: str) -> None:
+    """Job env is evaluated before runner and step contexts are available.
+
+    GitHub's context-availability table allows these seven contexts at job env:
+    https://docs.github.com/en/actions/reference/workflows-and-actions/contexts
+    """
+    available = {"github", "needs", "strategy", "matrix", "vars", "secrets", "inputs"}
+    for job in workflow(name)["jobs"].values():
+        for value in job.get("env", {}).values():
+            for expression in re.findall(r"\$\{\{(.*?)\}\}", value):
+                contexts = set(re.findall(r"(?<![\w.])([a-z_]\w*)\.", expression))
+                assert contexts <= available, (
+                    f"Unavailable contexts in {name} job env: {contexts - available}"
+                )
 
 
 def test_ci_checks_release_automation_changes() -> None:

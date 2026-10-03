@@ -22,8 +22,6 @@ jobs:
       ${{ github.event.workflow_run.conclusion == 'success' &&
           github.event.workflow_run.head_branch == 'master' &&
           github.event.workflow_run.head_repository.full_name == github.repository }}
-    env:
-      RELEASE_METADATA: ${{ runner.temp }}/release-metadata/release-metadata.json
     steps:
     - name: Check out repository
       uses: actions/checkout@v7
@@ -48,6 +46,8 @@ jobs:
     - name: Select deployed commit
       id: deployment
       run: make release-select-commit
+      env:
+        RELEASE_METADATA: ${{ runner.temp }}/release-metadata/release-metadata.json
 
     - name: Check out deployed commit
       uses: actions/checkout@v7
@@ -60,4 +60,5 @@ jobs:
       run: make release
       env:
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        RELEASE_METADATA: ${{ runner.temp }}/release-metadata/release-metadata.json
         RELEASE_PROJECT: deployed
