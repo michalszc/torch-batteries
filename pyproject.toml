@@ -95,6 +95,10 @@ Issues = "https://github.com/michalszc/torch-batteries/issues"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+include = ["torch_batteries", "torch_batteries.*"]
+
+[tool.setuptools.package-data]
+torch_batteries = ["py.typed"]
 
 [tool.setuptools.package-dir]
 "" = "src"
