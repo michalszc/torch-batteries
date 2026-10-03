@@ -213,3 +213,28 @@ def test_ci_checks_release_automation_changes() -> None:
     assert "ruff format --diff src/ tests/ scripts/" in makefile
     assert "mypy src/torch_batteries/ tests/ scripts/" in makefile
     assert "pytest tests/" in makefile
+
+
+def test_maintainer_release_instructions_reference_existing_workflows_and_targets() -> (
+    None
+):
+    documentation = (ROOT / "CONTRIBUTING.md").read_text()
+    section = documentation.split("## Release Process\n", 1)[1].split(
+        "## Code Style\n", 1
+    )[0]
+    names = [workflow(name)["name"] for name in ("ci", "cd", "release")]
+    assert " → ".join(names) in section
+    documented_commands = set(re.findall(r"make ([\w-]+)", section))
+    targets = set(
+        re.findall(r"^([\w-]+):", (ROOT / "Makefile").read_text(), re.MULTILINE)
+    )
+    assert documented_commands <= targets
+    assert {
+        "lint",
+        "format-check",
+        "type-check",
+        "test",
+        "release-metadata",
+        "release-select-commit",
+        "release",
+    } <= documented_commands
