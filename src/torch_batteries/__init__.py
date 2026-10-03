@@ -1,4 +1,6 @@
-"""torch-batteries: A lightweight Python package for PyTorch workflow abstractions.
+"""A lightweight, event-driven training layer for PyTorch that provides
+reusable utilities for training, evaluation, metrics, checkpointing,
+and experiment management.
 
 torch-batteries provides a flexible training framework for PyTorch that uses
 event-based decorators to define training, validation, testing, and prediction logic.

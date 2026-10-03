@@ -9,6 +9,7 @@ from typing import Any
 
 import pytest
 import torch
+import yaml  # type: ignore[import-untyped]
 from packaging.requirements import Requirement
 from packaging.utils import canonicalize_name
 from packaging.version import Version
@@ -38,6 +39,56 @@ def project_configuration() -> dict[str, Any]:
 def test_project_version_matches_runtime(project_configuration: dict[str, Any]) -> None:
     """Keep the public runtime and distribution version in agreement."""
     assert project_configuration["project"]["version"] == torch_batteries.__version__
+
+
+def test_citation_metadata_matches_project(
+    project_configuration: dict[str, Any],
+) -> None:
+    """Keep citation metadata accurate without coupling it to a release version."""
+    path = PROJECT_ROOT / "CITATION.cff"
+    citation = yaml.safe_load(path.read_text(encoding="utf-8"))
+    logger.debug("Read citation metadata from %s", path)
+    assert isinstance(citation, dict)
+    for field in ("cff-version", "message", "title", "type"):
+        assert isinstance(citation[field], str)
+        assert citation[field].strip()
+    assert citation["cff-version"] == "1.2.0"
+    assert citation["type"] == "software"
+    assert {"version", "date-released", "doi"}.isdisjoint(citation)
+
+    project = project_configuration["project"]
+    assert citation["title"] == project["name"]
+    assert citation["abstract"] == project["description"]
+    assert citation["license"] == project["license"]
+    assert citation["repository-code"] == project["urls"]["Repository"]
+    assert citation["url"] == project["urls"]["Documentation"]
+    assert citation["keywords"] == project["keywords"]
+    assert citation["authors"] == [
+        {
+            "given-names": "Michał",
+            "family-names": "Szczygieł",
+            "orcid": "https://orcid.org/0009-0006-9186-1595",
+        },
+        {
+            "given-names": "Arkadiusz",
+            "family-names": "Paterak",
+            "orcid": "https://orcid.org/0009-0002-1175-971X",
+        },
+        {
+            "given-names": "Antoni",
+            "family-names": "Zięciak",
+            "orcid": "https://orcid.org/0009-0005-8951-4431",
+        },
+    ]
+    # Citation uses the supplied Polish spelling; package metadata stays unchanged.
+    package_names = {"Michał Szczygieł": "Michal Szczygiel"}
+    names = [
+        f"{author['given-names']} {author['family-names']}"
+        for author in citation["authors"]
+    ]
+    assert [package_names.get(name, name) for name in names] == [
+        author["name"] for author in project["authors"]
+    ]
 
 
 def test_dependencies_and_extras(project_configuration: dict[str, Any]) -> None:
