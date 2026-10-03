@@ -1,4 +1,4 @@
-.PHONY: help install install-dev test lint lint-fix format format-check type-check build clean validate-version docs docs-serve notebooks-check
+.PHONY: help install install-dev test lint lint-fix format format-check type-check build clean validate-version docs docs-serve notebooks-check release-metadata
 .DEFAULT_GOAL := help
 
 help: ## Show this help message
@@ -19,19 +19,19 @@ test-verbose: ## Run tests with verbose output
 	pytest tests/ -v --cov=src/torch_batteries --cov-report=term-missing
 
 lint: ## Run linting (ruff check)
-	ruff check src/ tests/
+	ruff check src/ tests/ scripts/
 
 lint-fix: ## Run linting with auto-fix
-	ruff check --fix src/ tests/
+	ruff check --fix src/ tests/ scripts/
 
 format: ## Format code (ruff format)
-	ruff format src/ tests/
+	ruff format src/ tests/ scripts/
 
 format-check: ## Check code formatting without making changes
-	ruff format --diff src/ tests/
+	ruff format --diff src/ tests/ scripts/
 
 type-check: ## Run type checking (mypy)
-	mypy src/torch_batteries/ tests/
+	mypy src/torch_batteries/ tests/ scripts/
 
 build: ## Build package for distribution
 	python -m build
@@ -44,6 +44,9 @@ publish: ## Publish to PyPI
 
 check-build: ## Check if build is ready for publishing
 	python -m twine check dist/*
+
+release-metadata: ## Record the current commit and package version without publishing
+	python scripts/release.py metadata --output "$(or $(RELEASE_METADATA),release-metadata.json)"
 
 validate-version: ## Check project versions, release notes, and PyPI
 	@bash scripts/validate_version.sh
