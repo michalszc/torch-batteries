@@ -55,13 +55,14 @@ return DatasetBundle(
     predict={"Predict1": predict_1, "Predict2": predict_2},
 )
 
-results = battery.predict(move_to_cpu=True, concatenate=True)
-predict_1_outputs = results["Predict1"]["predictions"]
+result = battery.predict(move_to_cpu=True, concatenate=True)
+predict_1_outputs = result["predictions"]["Predict1"]
 ```
 
-A bare prediction dataset returns the ordinary `PredictResult` shape. A named mapping
-always returns results keyed by dataset name, including when the mapping contains one
-entry. Pass `dataset="Predict1"` to run only one and receive the singular result shape.
+A bare prediction dataset or a named mapping with one entry returns the ordinary
+`PredictResult` shape. Several named datasets produce one result with predictions
+keyed by dataset name. Pass `dataset="Predict1"` to run only one and receive the
+ordinary single-dataset predictions.
 Dataset selection is available only for implicit DataPack workflows and cannot
 accompany an explicit DataLoader.
 

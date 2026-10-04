@@ -2,6 +2,8 @@
 
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from torch_batteries.utils.progress import Phase, SimpleProgress
 
 
@@ -39,6 +41,17 @@ class TestSimpleProgress:
         expected_avg = (0.5 * 10 + 0.3 * 20) / (10 + 20)
         assert isinstance(avg_metrics, dict)
         assert abs(avg_metrics["loss"] - expected_avg) < 1e-6
+
+    def test_named_metrics_appear_in_phase_summary(self) -> None:
+        progress = SimpleProgress()
+        progress.start_phase(Phase.TRAIN, total_batches=2)
+        progress.update({"loss": 1.0}, 2, dataset_name="usps")
+        progress.update({"loss": 3.0}, 4, dataset_name="semeion")
+        assert progress.end_phase() == {
+            "loss": pytest.approx(14 / 6),
+            "usps:loss": 1.0,
+            "semeion:loss": 3.0,
+        }
 
     def test_empty_phase_returns_and_records_empty_metrics(self) -> None:
         """A phase without samples has a well-defined empty result."""

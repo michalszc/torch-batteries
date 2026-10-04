@@ -63,7 +63,7 @@ def test_amp_selects_cpu_bfloat16_for_all_phases() -> None:
         callbacks=[precision],
     )
 
-    battery.train(_loader(), _loader(), verbose=0)
+    battery.fit(_loader(), _loader(), verbose=0)
     battery.test(_loader(), verbose=0)
     battery.predict(_loader(), verbose=0)
 

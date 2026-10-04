@@ -51,7 +51,6 @@ class EventContext(TypedDict, total=False):
     - `train_loss`: Current training loss for training step events.
     - `val_loss`: Current validation loss for validation step events.
     - `test_loss`: Current test loss for test events.
-    - `loss`: Deprecated compatibility alias for the phase-specific loss key.
 
     Metric keys:
 
@@ -84,7 +83,6 @@ class EventContext(TypedDict, total=False):
     optimization_plan: OptimizationStep
     loss_tensor: torch.Tensor
     backward_loss: torch.Tensor
-    loss: float
     train_loss: float
     val_loss: float
     test_loss: float

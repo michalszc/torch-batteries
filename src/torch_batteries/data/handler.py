@@ -266,12 +266,10 @@ class DataPackHandler(_ChargedHandlerBase):
                 self._prepared = True
             datasets = self.setup(setup_context)
 
-            train_loader: DataLoader[Any] | None = None
-            validation_loader: DataLoader[Any] | None = None
-            test_loaders: DataLoader[Any] | Mapping[str, DataLoader[Any]] | None = None
-            predict_loaders: DataLoader[Any] | Mapping[str, DataLoader[Any]] | None = (
-                None
-            )
+            train_loader: DataLoaderCollection | None = None
+            validation_loader: DataLoaderCollection | None = None
+            test_loaders: DataLoaderCollection | None = None
+            predict_loaders: DataLoaderCollection | None = None
 
             for phase, required in self.STAGE_PHASES[stage]:
                 configured = datasets.for_phase(phase)
@@ -315,10 +313,8 @@ class DataPackHandler(_ChargedHandlerBase):
                     resolved_loaders = next(iter(phase_loaders.values()))
                 match phase:
                     case "train":
-                        assert isinstance(resolved_loaders, DataLoader)
                         train_loader = resolved_loaders
                     case "validation":
-                        assert isinstance(resolved_loaders, DataLoader)
                         validation_loader = resolved_loaders
                     case "test":
                         test_loaders = resolved_loaders

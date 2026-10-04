@@ -223,3 +223,6 @@ wandb/
 uv.lock
 
 .DS_Store
+
+# Local deployment identity
+/release-metadata.json

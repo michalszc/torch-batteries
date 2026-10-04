@@ -83,11 +83,66 @@ def _public_classes() -> Iterator[tuple[Path, ast.ClassDef]]:
                 yield path, node
 
 
+def _constructor_parameters(node: ast.ClassDef) -> list[str]:
+    """Find arguments shown by an explicit or generated dataclass constructor."""
+    init = next(
+        (
+            method
+            for method in node.body
+            if isinstance(method, ast.FunctionDef) and method.name == "__init__"
+        ),
+        None,
+    )
+    if init is not None:
+        return _parameters(init)
+
+    is_dataclass = any(
+        (isinstance(decorator, ast.Name) and decorator.id == "dataclass")
+        or (
+            isinstance(decorator, ast.Call)
+            and isinstance(decorator.func, ast.Name)
+            and decorator.func.id == "dataclass"
+        )
+        for decorator in node.decorator_list
+    )
+    if not is_dataclass:
+        return []
+    return [
+        field.target.id
+        for field in node.body
+        if isinstance(field, ast.AnnAssign)
+        and isinstance(field.target, ast.Name)
+        and not field.target.id.startswith("_")
+    ]
+
+
 @pytest.mark.parametrize(("path", "node"), list(_public_classes()))
 def test_public_class_has_docstring(path: Path, node: ast.ClassDef) -> None:
     """Every public class provides a rendered API description."""
     location = f"{path.relative_to(SOURCE_ROOT.parent.parent)}:{node.lineno}"
     assert ast.get_docstring(node), f"{location} {node.name} has no docstring"
+
+
+@pytest.mark.parametrize(("path", "node"), list(_public_classes()))
+def test_public_class_documents_constructor_parameters(
+    path: Path, node: ast.ClassDef
+) -> None:
+    """Class pages describe every explicit or generated constructor argument."""
+    parameters = _constructor_parameters(node)
+    if not parameters:
+        return
+    location = f"{path.relative_to(SOURCE_ROOT.parent.parent)}:{node.lineno}"
+    docstring = ast.get_docstring(node) or ""
+    assert "Args:" in docstring, f"{location} {node.name} lacks an Args section"
+    missing = [
+        parameter
+        for parameter in parameters
+        if re.search(rf"(?m)^\s*{re.escape(parameter)}:", docstring) is None
+    ]
+    assert not missing, (
+        f"{location} {node.name} does not document constructor parameters: "
+        f"{', '.join(missing)}"
+    )
 
 
 @pytest.mark.parametrize(
@@ -105,9 +160,15 @@ def test_public_callable_documents_parameters(
     location = f"{path.relative_to(SOURCE_ROOT.parent.parent)}:{node.lineno}"
     assert docstring, f"{location} {qualified_name} has no docstring"
 
+    parameters = _parameters(node)
+    if parameters:
+        assert "Args:" in docstring, (
+            f"{location} {qualified_name} lacks a renderable Args section"
+        )
+
     missing = [
         parameter
-        for parameter in _parameters(node)
+        for parameter in parameters
         if re.search(rf"(?m)^\s*\**{re.escape(parameter)}:", docstring) is None
     ]
     assert not missing, (

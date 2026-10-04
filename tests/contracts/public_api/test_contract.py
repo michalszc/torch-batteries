@@ -12,7 +12,6 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 from tests.contracts.public_api.manifest import (
-    DEPRECATED_PARAMETERS,
     PUBLIC_EXPORTS,
     PUBLIC_KEYWORD_ONLY_PARAMETERS,
     PUBLIC_MEMBERS,
@@ -74,13 +73,6 @@ def test_protected_parameter_kinds_remain_compatible() -> None:
                 else inspect.Parameter.POSITIONAL_OR_KEYWORD
             )
             assert parameters[name].kind is expected_kind
-
-
-def test_deprecated_parameters_are_explicitly_tracked() -> None:
-    """Deprecated compatibility remains protected until its removal release."""
-    for callable_name, expected in DEPRECATED_PARAMETERS.items():
-        parameters = inspect.signature(_resolve(callable_name)).parameters
-        assert expected <= set(parameters)
 
 
 def test_protected_endpoints_remain_in_generated_reference(tmp_path: Path) -> None:

@@ -14,14 +14,13 @@ class TestChargeDecorator:
     """Test cases for charge decorator."""
 
     def test_charge_decorator_sets_attribute(self) -> None:
-        """Test that charge decorator sets _torch_batteries_event attribute."""
+        """Test that charge decorator sets event metadata."""
 
         @charge(Event.TRAIN_STEP)
         def training_step(self: nn.Module, context: EventContext) -> torch.Tensor:
             return torch.tensor(1.0)
 
-        assert hasattr(training_step, "_torch_batteries_event")
-        assert training_step._torch_batteries_event == Event.TRAIN_STEP  # noqa: SLF001 # type: ignore[attr-defined]
+        assert training_step._torch_batteries_events == (Event.TRAIN_STEP,)  # type: ignore[attr-defined] # noqa: SLF001
 
     def test_charge_decorator_preserves_function(self) -> None:
         """Test that charge decorator preserves original function."""
@@ -34,7 +33,7 @@ class TestChargeDecorator:
         # Function should still work
         context: EventContext = {}
         assert decorated(nn.Module(), context) == "original_result"
-        assert decorated._torch_batteries_event == Event.VALIDATION_STEP  # type: ignore[attr-defined] # noqa: SLF001
+        assert decorated._torch_batteries_events == (Event.VALIDATION_STEP,)  # type: ignore[attr-defined] # noqa: SLF001
 
     def test_charge_decorators_accumulate_events(self) -> None:
         """Stacked decorators retain every event in application order."""
@@ -60,8 +59,8 @@ class TestChargeDecorator:
         def predict_func() -> None:
             pass
 
-        assert test_func._torch_batteries_event == Event.TEST_STEP  # type: ignore[attr-defined] # noqa: SLF001
-        assert predict_func._torch_batteries_event == Event.PREDICT_STEP  # type: ignore[attr-defined] # noqa: SLF001
+        assert test_func._torch_batteries_events == (Event.TEST_STEP,)  # type: ignore[attr-defined] # noqa: SLF001
+        assert predict_func._torch_batteries_events == (Event.PREDICT_STEP,)  # type: ignore[attr-defined] # noqa: SLF001
 
 
 class TestEventContext:
@@ -70,7 +69,6 @@ class TestEventContext:
     def test_event_context_supports_phase_loss_and_history_fields(self) -> None:
         """Test EventContext supports current and historical metric fields."""
         context: EventContext = {
-            "loss": 0.5,
             "train_loss": 0.5,
             "val_loss": 0.4,
             "test_loss": 0.3,
@@ -83,7 +81,7 @@ class TestEventContext:
             "history_val_metrics": {"accuracy": [0.65, 0.75]},
         }
 
-        assert context["train_loss"] == context["loss"]
+        assert context["train_loss"] == 0.5
         assert context["history_train_metrics"]["accuracy"] == [0.7, 0.8]
 
 

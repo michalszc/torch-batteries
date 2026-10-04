@@ -1,8 +1,9 @@
 """Tests for torch_batteries.utils.progress.BarProgress class."""
 
+from typing import cast
 from unittest.mock import MagicMock, patch
 
-from torch_batteries.utils.progress import BarProgress, Phase
+from torch_batteries.utils.progress import BarProgress, Phase, ProgressMetrics
 
 
 class TestBarProgress:
@@ -66,6 +67,39 @@ class TestBarProgress:
         progress.update({"loss": 0.3}, 16)
 
         mock_pbar.set_postfix_str.assert_called_with("Loss=0.3000")
+
+    @patch("torch_batteries.utils.progress.progress_bar.tqdm")
+    def test_named_metrics_show_dataset_weighted_values(
+        self, mock_tqdm: MagicMock
+    ) -> None:
+        """Named postfix values use only samples from their dataset."""
+        mock_pbar = MagicMock()
+        mock_tqdm.return_value = mock_pbar
+        progress = BarProgress(total_epochs=1)
+        progress.start_phase(Phase.TRAIN, total_batches=3)
+        progress.update(
+            cast("ProgressMetrics", {"loss": 1.0, "accuracy": 0.5}),
+            2,
+            dataset_name="usps",
+        )
+        progress.update(
+            cast("ProgressMetrics", {"loss": 3.0, "accuracy": 1.0}),
+            4,
+            dataset_name="semeion",
+        )
+        progress.update(
+            cast("ProgressMetrics", {"loss": 2.0, "accuracy": 1.0}),
+            2,
+            dataset_name="usps",
+        )
+        postfix = mock_pbar.set_postfix_str.call_args.args[0]
+        assert "usps:loss=1.5000" in postfix
+        assert "usps:accuracy=0.7500" in postfix
+        assert "semeion:loss=3.0000" in postfix
+        assert "semeion:accuracy=1.0000" in postfix
+        assert "Loss=2.2500" in postfix
+        assert "Accuracy=0.8750" in postfix
+        assert progress.end_phase()["loss"] == 2.25
 
     @patch("torch_batteries.utils.progress.progress_bar.tqdm")
     def test_end_phase_closes_bar(self, mock_tqdm: MagicMock) -> None:

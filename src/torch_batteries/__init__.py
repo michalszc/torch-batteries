@@ -1,4 +1,6 @@
-"""torch-batteries: A lightweight Python package for PyTorch workflow abstractions.
+"""A lightweight, event-driven training layer for PyTorch that provides
+reusable utilities for training, evaluation, metrics, checkpointing,
+and experiment management.
 
 torch-batteries provides a flexible training framework for PyTorch that uses
 event-based decorators to define training, validation, testing, and prediction logic.
@@ -42,11 +44,12 @@ battery.fit(train_loader, val_loader, epochs=10)
 ```
 """
 
-__version__ = "0.12.0"
+__version__ = "1.0.0"
 __author__ = ["Michal Szczygiel", "Arkadiusz Paterak", "Antoni Zięciak"]
 
 # Import main components
 from .data import (
+    BatchScheduleConfig,
     DataContext,
     DataLoaderBundle,
     DataLoaderConfig,
@@ -68,9 +71,10 @@ from .trainer import (
     TrainResult,
     ValidationResult,
 )
-from .utils.metrics import CollectedMetric, StatefulMetric
+from .utils.metrics import CollectedMetric, MetricSpec, StatefulMetric
 
 __all__ = [
+    "BatchScheduleConfig",
     "Battery",
     "CollectedMetric",
     "DataContext",
@@ -82,6 +86,7 @@ __all__ = [
     "Event",
     "EventContext",
     "FitResult",
+    "MetricSpec",
     "OptimizationStep",
     "PredictResult",
     "ResolvedData",

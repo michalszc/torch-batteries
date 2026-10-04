@@ -16,6 +16,7 @@ from torch_batteries import (
     DatasetBundle,
     Event,
     EventContext,
+    StepOutput,
     charge,
 )
 from torch_batteries.callbacks import ExperimentTrackingCallback
@@ -35,16 +36,16 @@ class _WorkflowModel(nn.Module):
         return ((inputs * self.weight - targets) ** 2).mean()
 
     @charge(Event.TRAIN_STEP)
-    def training_step(self, context: EventContext) -> torch.Tensor:
-        return self._result(context)
+    def training_step(self, context: EventContext) -> StepOutput:
+        return StepOutput(loss=self._result(context))
 
     @charge(Event.VALIDATION_STEP)
-    def validation_step(self, context: EventContext) -> torch.Tensor:
-        return self._result(context)
+    def validation_step(self, context: EventContext) -> StepOutput:
+        return StepOutput(loss=self._result(context))
 
     @charge(Event.TEST_STEP)
-    def test_step(self, context: EventContext) -> torch.Tensor:
-        return self._result(context)
+    def test_step(self, context: EventContext) -> StepOutput:
+        return StepOutput(loss=self._result(context))
 
     @charge(Event.PREDICT_STEP)
     def predict_step(self, context: EventContext) -> torch.Tensor:

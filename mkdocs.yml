@@ -1,5 +1,8 @@
 site_name: torch-batteries
-site_description: Event-driven utilities for practical PyTorch workflows
+site_description: >-
+  A lightweight, event-driven training layer for PyTorch that provides
+  reusable utilities for training, evaluation, metrics, checkpointing,
+  and experiment management.
 site_url: https://michalszc.github.io/torch-batteries/
 repo_url: https://github.com/michalszc/torch-batteries
 repo_name: michalszc/torch-batteries

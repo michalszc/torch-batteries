@@ -12,8 +12,4 @@ def get_charged_events(fn: Callable[..., Any]) -> tuple[Event, ...]:
     Args:
         fn: Callable inspected for charge metadata.
     """
-    events = getattr(fn, "_torch_batteries_events", None)
-    if events is not None:
-        return tuple(events)
-    legacy_event = getattr(fn, "_torch_batteries_event", None)
-    return () if legacy_event is None else (legacy_event,)
+    return tuple(getattr(fn, "_torch_batteries_events", ()))

@@ -2,7 +2,6 @@
 
 from typing import cast
 
-import pytest
 import torch
 from torch import nn
 from torch.nn import functional as F  # noqa: N812
@@ -18,12 +17,6 @@ from torch_batteries import (
     EventContext,
     StepOutput,
     charge,
-)
-from torch_batteries import (
-    PredictResult as BatteryPredictResult,
-)
-from torch_batteries import (
-    TestResult as BatteryTestResult,
 )
 
 
@@ -149,8 +142,8 @@ def test_getting_started_workflow() -> None:
     assert prediction_result["predictions"].device.type == "cpu"
 
 
-def test_documented_train_validation_compatibility_is_deprecated() -> None:
-    """The migration note matches train's temporary validation behavior."""
+def test_documented_train_runs_without_validation() -> None:
+    """Training alone does not run validation."""
     inputs = torch.randn(8, 4)
     targets = inputs.sum(dim=1, keepdim=True)
     loader = DataLoader(TensorDataset(inputs, targets), batch_size=8)
@@ -161,10 +154,9 @@ def test_documented_train_validation_compatibility_is_deprecated() -> None:
         optimizer=torch.optim.Adam(model.parameters(), lr=0.05),
     )
 
-    with pytest.warns(DeprecationWarning, match=r"Battery\.fit\(\)"):
-        history = battery.train(loader, val_loader=loader, verbose=0)
+    history = battery.train(loader, verbose=0)
 
-    assert len(history["val_loss"]) == 1
+    assert len(history["train_loss"]) == 1
 
 
 def test_documented_data_pack_workflow() -> None:
@@ -179,11 +171,8 @@ def test_documented_data_pack_workflow() -> None:
     )
 
     history = battery.fit(epochs=1, verbose=0)
-    test_result = cast("BatteryTestResult", battery.test(verbose=0))
-    predictions = cast(
-        "BatteryPredictResult",
-        battery.predict(verbose=0, concatenate=True),
-    )
+    test_result = battery.test(verbose=0)
+    predictions = battery.predict(verbose=0, concatenate=True)
 
     assert len(history["train_loss"]) == 1
     assert test_result["test_loss"] >= 0

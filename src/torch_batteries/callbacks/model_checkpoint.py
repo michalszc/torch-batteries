@@ -35,7 +35,7 @@ class ModelCheckpoint(Callback):
     """Saves the model when a monitored metric improves.
 
     Args:
-        phase: ``"train"`` or ``"validation"``. ``"val"`` is deprecated.
+        phase: ``"train"`` or ``"validation"``.
         metric: The name of the metric to monitor
         mode: One of 'min' or 'max'. In 'min' mode, the model is saved when the
               monitored metric decreases. In 'max' mode, it is saved when the
@@ -45,7 +45,6 @@ class ModelCheckpoint(Callback):
                    'epochs-metric=value.pth'
         save_top_k: Saves specified number of best models (defaults to 1)
         save_weights_only: Save only model weights instead of full Battery state.
-        stage: Deprecated keyword alias for ``phase``.
 
     Missing directories are created automatically. A `.pth` suffix is added only
     when `save_path` has no explicit suffix. Static templates gain an epoch field
@@ -75,9 +74,8 @@ class ModelCheckpoint(Callback):
         *,
         save_top_k: int = 1,
         save_weights_only: bool = False,
-        stage: MonitorPhase | None = None,
     ) -> None:
-        phase = resolve_monitor_phase(phase, stage=stage, required=True)
+        phase = resolve_monitor_phase(phase, required=True)
         assert phase is not None
         metric = require_metric(metric)
         if save_top_k < 1:

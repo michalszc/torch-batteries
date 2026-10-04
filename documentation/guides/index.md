@@ -16,7 +16,7 @@ exact signature or event context.
 | Control optimization | [Callbacks and Optimization](callbacks.md) | Callback order, early stopping, accumulation, clipping, mixed precision, and schedulers |
 | Preserve or resume work | [Checkpoints and Resume](checkpoints.md) | Manual saves, Top-K selection, weights-only files, full state, and resume modes |
 | Run inference | [Prediction](prediction.md) | Batch preservation, recursive CPU transfer, concatenation, and `predict_iter` streaming |
-| Track experiments | [Experiment Tracking](tracking.md) | W&B configuration, offline operation, automatic logging, and custom backends |
+| Track experiments | [Experiment Tracking](tracking.md) | Local epoch logs, W&B configuration, offline operation, and automatic logging |
 
 ## Suggested paths
 
@@ -41,14 +41,14 @@ same compatible structure.
 
 ### Tracked experiments
 
-Read Experiment Tracking after your metrics and callbacks are stable. W&B is optional,
-supports offline operation, and is not required by the core package.
+Read Experiment Tracking after your metrics and callbacks are stable. Use
+`LocalTracker` for local files or the optional W&B extra for cloud logging.
 
 ## Where to look when behavior is unexpected
 
 - Use [Troubleshooting](../troubleshooting.md) for common configuration and runtime
   failures.
 - Use [Events API](../reference/events.md) for exact event frequency and context keys.
-- Use [Results and Exceptions](../reference/results-and-errors.md) for returned schemas
+- Use [Results and Exceptions](../reference/results-and-errors.md) for returned structures
   and public validation errors.
 - Use the maintained [Examples](../examples.md) for complete notebook workflows.

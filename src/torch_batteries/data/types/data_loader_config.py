@@ -15,6 +15,21 @@ class DataLoaderConfig:
     ``shuffle=None`` selects the phase default and ``pin_memory="auto"`` lets the
     runtime select pinning from the Battery device. Setting ``batch_sampler`` requires
     ``batch_size=None`` and conflicts with shuffle, sampler, and drop-last options.
+
+    Args:
+        batch_size: Samples per batch, or ``None`` to disable automatic batching.
+        shuffle: Whether to shuffle map-style data; ``None`` selects the phase default.
+        sampler: Optional sampler or iterable of dataset indices.
+        batch_sampler: Optional sampler or iterable yielding batches of indices.
+        num_workers: Number of DataLoader worker processes; zero runs in the caller.
+        collate_fn: Optional function that combines samples into a batch.
+        pin_memory: Whether to pin host memory; ``"auto"`` enables it for CUDA.
+        drop_last: Whether to omit an incomplete final batch.
+        timeout: Seconds to wait for a worker batch before timing out.
+        worker_init_fn: Optional initializer called for each worker process.
+        generator: Optional PyTorch generator overriding the DataPack generator.
+        prefetch_factor: Batches prefetched per worker when workers are enabled.
+        persistent_workers: Keep worker processes alive between loader iterations.
     """
 
     batch_size: int | None = 1

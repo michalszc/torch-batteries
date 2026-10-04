@@ -11,6 +11,10 @@ on:
       - "Makefile"
       - "scripts/ci/run_check.sh"
       - ".github/workflows/ci.yml"
+      - ".github/workflows/cd.yml"
+      - ".github/workflows/release.yml"
+      - "scripts/release.py"
+      - "documentation/release-notes.md"
   pull_request:
     branches:
         - master
@@ -21,6 +25,10 @@ on:
       - "Makefile"
       - "scripts/ci/run_check.sh"
       - ".github/workflows/ci.yml"
+      - ".github/workflows/cd.yml"
+      - ".github/workflows/release.yml"
+      - "scripts/release.py"
+      - "documentation/release-notes.md"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}

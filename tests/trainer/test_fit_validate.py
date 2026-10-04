@@ -1,4 +1,4 @@
-"""Tests for fit, standalone validation, and train compatibility behavior."""
+"""Tests for fit, standalone validation, and train-only behavior."""
 
 import warnings
 from pathlib import Path
@@ -18,6 +18,7 @@ from torch_batteries import (
     Event,
     EventContext,
     FitResult,
+    StepOutput,
     TrainResult,
     ValidationResult,
     charge,
@@ -41,15 +42,13 @@ class WorkflowModel(nn.Module):
         return nn.functional.mse_loss(self.layer(inputs), targets)
 
     @charge(Event.TRAIN_STEP)
-    def training_step(self, context: EventContext) -> torch.Tensor:
-        return self._loss(context)
+    def training_step(self, context: EventContext) -> StepOutput:
+        return StepOutput(loss=self._loss(context))
 
     @charge(Event.VALIDATION_STEP)
-    def validation_step(
-        self, context: EventContext
-    ) -> tuple[torch.Tensor, dict[str, float]]:
+    def validation_step(self, context: EventContext) -> StepOutput:
         self.validation_grad_states.append(torch.is_grad_enabled())
-        return self._loss(context), {"score": 0.75}
+        return StepOutput(loss=self._loss(context), metrics={"score": 0.75})
 
 
 class ValidationRecorder:
@@ -74,6 +73,13 @@ class ValidationRecorder:
     @charge(Event.AFTER_VALIDATION)
     def after_validation(self, context: EventContext) -> None:
         self._record(Event.AFTER_VALIDATION, context)
+
+
+class StopAfterEpoch:
+    @charge(Event.AFTER_TRAIN_EPOCH)
+    def stop(self, context: EventContext) -> None:
+        if context["epoch"] == 2:
+            context["battery"].request_stop("manual_limit")
 
 
 class ValidationDataPack(DataPack):
@@ -137,6 +143,42 @@ def test_fit_runs_optional_validation_without_compatibility_warning(
     assert "Validation through Battery.train()" not in caplog.text
 
 
+def test_loss_only_step_returns_work_across_all_phases() -> None:
+    class LossOnlyModel(nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.layer = nn.Linear(1, 1)
+
+        def loss(self, context: EventContext) -> torch.Tensor:
+            inputs, targets = cast(
+                "tuple[torch.Tensor, torch.Tensor]", context["batch"]
+            )
+            return nn.functional.mse_loss(self.layer(inputs), targets)
+
+        @charge(Event.TRAIN_STEP)
+        def train_step(self, context: EventContext) -> torch.Tensor:
+            return self.loss(context)
+
+        @charge(Event.VALIDATION_STEP)
+        def validation_step(self, context: EventContext) -> torch.Tensor:
+            return self.loss(context)
+
+        @charge(Event.TEST_STEP)
+        def test_step(self, context: EventContext) -> torch.Tensor:
+            return self.loss(context)
+
+    model = LossOnlyModel()
+    battery = Battery(
+        model, optimizer=torch.optim.SGD(model.parameters(), lr=0.01), device="cpu"
+    )
+    fit_result = battery.fit(_loader(), _loader(), verbose=0)
+    test_result = battery.test(_loader(), verbose=0)
+    assert len(fit_result["train_loss"]) == 1
+    assert len(fit_result["val_loss"]) == 1
+    assert isinstance(test_result["test_loss"], float)
+    assert "test_metrics" not in test_result
+
+
 def test_fit_without_validation_returns_empty_validation_histories() -> None:
     battery, _ = _battery()
 
@@ -147,26 +189,62 @@ def test_fit_without_validation_returns_empty_validation_histories() -> None:
     assert result["val_metrics"] == {}
 
 
-def test_train_warns_only_when_compatibility_validation_runs(
-    caplog: pytest.LogCaptureFixture,
-) -> None:
+def test_train_only_runs_training() -> None:
     battery, _ = _battery()
+    result: TrainResult = battery.train(_loader(), verbose=0)
+    assert len(result["train_loss"]) == 1
+    assert result["epochs_completed"] == 1
+    assert result["optimizer_steps"] == 2
+    assert result["stopped_early"] is False
+    assert result["stop_reason"] is None
 
-    with pytest.warns(DeprecationWarning, match=r"Battery\.fit\(\)"):
-        result: TrainResult = battery.train(_loader(), _loader(), verbose=0)
 
-    assert len(result["val_loss"]) == 1
-    assert result["val_metrics"]["score"] == [0.75]
-    assert "Validation through Battery.train()" in caplog.text
+def test_validation_cadence_and_cumulative_metadata(tmp_path: Path) -> None:
+    battery, model = _battery()
+    first = battery.fit(
+        _loader(), _loader(), epochs=3, verbose=0, validate_every_n_epochs=2
+    )
+    assert len(first["train_loss"]) == 3
+    assert len(first["val_loss"]) == 1
+    assert model.validation_grad_states == [False, False]
+    assert (first["epochs_completed"], first["optimizer_steps"]) == (3, 6)
 
-    caplog.clear()
+    checkpoint = tmp_path / "cadence.pth"
+    battery.save_checkpoint(checkpoint)
+    restored, _ = _battery()
+    resumed = restored.fit(
+        _loader(),
+        _loader(),
+        epochs=5,
+        verbose=0,
+        resume_from=checkpoint,
+        validate_every_n_epochs=2,
+    )
+    assert len(resumed["train_loss"]) == 5
+    assert len(resumed["val_loss"]) == 2
+    assert (resumed["epochs_completed"], resumed["optimizer_steps"]) == (5, 10)
+
+
+def test_stop_reason_is_reported() -> None:
+    battery, _ = _battery(callbacks=[StopAfterEpoch()])
+    result = battery.fit(_loader(), epochs=5, verbose=0)
+    assert result["epochs_completed"] == 2
+    assert result["optimizer_steps"] == 4
+    assert result["stopped_early"] is True
+    assert result["stop_reason"] == "manual_limit"
+
+
+@pytest.mark.parametrize("cadence", [0, -1, 1.5, True])
+def test_fit_rejects_invalid_validation_cadence(cadence: object) -> None:
     battery, _ = _battery()
-    with warnings.catch_warnings(record=True) as warnings_record:
-        training_only = battery.train(_loader(), verbose=0)
+    with pytest.raises(ValueError, match="validate_every_n_epochs"):
+        battery.fit(_loader(), verbose=0, validate_every_n_epochs=cadence)  # type: ignore[arg-type]
 
-    assert warnings_record == []
-    assert training_only["val_loss"] == []
-    assert "Validation through Battery.train()" not in caplog.text
+
+def test_train_rejects_validation_loader() -> None:
+    battery, _ = _battery()
+    with pytest.raises(TypeError, match="val_loader"):
+        battery.train(_loader(), val_loader=_loader(), verbose=0)  # type: ignore[call-arg]
 
 
 def test_validate_runs_without_optimizer_or_gradients_and_dispatches_events() -> None:

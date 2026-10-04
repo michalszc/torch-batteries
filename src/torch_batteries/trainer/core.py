@@ -1,9 +1,10 @@
 """Battery trainer class for torch-batteries."""
 
-from collections.abc import Generator
+import copy
+from collections.abc import Generator, Mapping
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Literal, overload
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 import torch
 from torch import nn
@@ -21,9 +22,10 @@ from torch_batteries.trainer.types import (
     TrainResult,
     ValidationResult,
 )
+from torch_batteries.trainer.types.metric_config import METRIC_PHASES, MetricsConfig
 from torch_batteries.utils.device import get_device
 from torch_batteries.utils.logging import get_logger
-from torch_batteries.utils.metrics import Metric, PhaseMetricManager
+from torch_batteries.utils.metrics import PhaseMetricManager
 
 from ._checkpoint import CheckpointMixin
 from ._evaluation import EvaluationMixin
@@ -31,6 +33,9 @@ from ._prediction import PredictionMixin
 from ._training import TrainingMixin
 
 logger = get_logger("trainer.core")
+
+if TYPE_CHECKING:
+    from torch_batteries.utils.metrics.types import MetricDefinition
 
 
 class Battery(CheckpointMixin, TrainingMixin, EvaluationMixin, PredictionMixin):
@@ -66,6 +71,7 @@ class Battery(CheckpointMixin, TrainingMixin, EvaluationMixin, PredictionMixin):
         "_callbacks",
         "_data_pack",
         "_data_pack_handler",
+        "_dataset_metric_managers",
         "_device",
         "_event_dispatch_depth",
         "_event_handler",
@@ -73,12 +79,15 @@ class Battery(CheckpointMixin, TrainingMixin, EvaluationMixin, PredictionMixin):
         "_loader_generator_states",
         "_metric_error_policy",
         "_metric_manager",
+        "_metric_managers",
         "_metrics",
         "_model",
         "_optimizer",
         "_optimizer_step_idx",
         "_pending_loader_generator_states",
+        "_phase_metrics",
         "_resume_loaded",
+        "_stop_reason",
         "_stop_training",
         "_train_results",
     )
@@ -88,7 +97,7 @@ class Battery(CheckpointMixin, TrainingMixin, EvaluationMixin, PredictionMixin):
         model: nn.Module,
         device: str | torch.device = "auto",
         optimizer: torch.optim.Optimizer | None = None,
-        metrics: dict[str, Metric] | None = None,
+        metrics: MetricsConfig | None = None,
         callbacks: list | None = None,
         *,
         data_pack: DataPack | None = None,
@@ -98,12 +107,8 @@ class Battery(CheckpointMixin, TrainingMixin, EvaluationMixin, PredictionMixin):
         self._device = get_device(device)
         self._model = model.to(self._device)
         self._optimizer = optimizer
-        self._metrics = metrics or {}
         self._metric_error_policy = metric_error_policy
-        self._metric_manager = PhaseMetricManager(
-            self._metrics,
-            metric_error_policy=metric_error_policy,
-        )
+        self._set_metric_config(metrics or {})
         callback_list = list(callbacks or [])
         self._callbacks = callback_list
         self._event_handler = EventHandler(self._model, callbacks=callback_list)
@@ -112,16 +117,21 @@ class Battery(CheckpointMixin, TrainingMixin, EvaluationMixin, PredictionMixin):
             DataPackHandler(data_pack) if data_pack is not None else None
         )
         self._stop_training = False
+        self._stop_reason: str | None = None
         self._last_completed_epoch = 0
         self._loader_generator_states: dict[str, dict[str, torch.Tensor]] = {}
         self._optimizer_step_idx = 0
         self._pending_loader_generator_states: dict[str, dict[str, torch.Tensor]] = {}
         self._resume_loaded = False
-        self._train_results: TrainResult = {
+        self._train_results: FitResult = {
             "train_loss": [],
             "val_loss": [],
             "train_metrics": {},
             "val_metrics": {},
+            "epochs_completed": 0,
+            "optimizer_steps": 0,
+            "stopped_early": False,
+            "stop_reason": None,
         }
         setup_context: EventContext = {
             "battery": self,
@@ -162,22 +172,70 @@ class Battery(CheckpointMixin, TrainingMixin, EvaluationMixin, PredictionMixin):
     @property
     def metrics(
         self,
-    ) -> dict[str, Metric]:
+    ) -> MetricsConfig:
         """Get the metrics dictionary."""
         return self._metrics
 
     @metrics.setter
     def metrics(
         self,
-        value: dict[str, Metric] | None,
+        value: MetricsConfig | None,
     ) -> None:
         """Set the metrics dictionary."""
         self._ensure_configuration_mutable("metrics")
-        self._metrics = value or {}
-        self._metric_manager = PhaseMetricManager(
-            self._metrics,
-            metric_error_policy=self._metric_error_policy,
+        self._set_metric_config(value or {})
+
+    def _set_metric_config(self, value: MetricsConfig) -> None:
+        """Build phase managers from flat or phase-specific metric definitions."""
+        is_phase_specific = bool(value) and all(
+            name in METRIC_PHASES and isinstance(configured, dict)
+            for name, configured in value.items()
         )
+        if not is_phase_specific and any(
+            isinstance(configured, dict) for configured in value.values()
+        ):
+            msg = "Metrics must be flat or keyed only by train, validation, and test."
+            raise ValueError(msg)
+        self._metrics = value
+        if is_phase_specific:
+            configured_phases = cast(
+                "Mapping[str, Mapping[str, MetricDefinition]]", value
+            )
+            self._phase_metrics = {
+                phase: dict(configured_phases.get(phase, {})) for phase in METRIC_PHASES
+            }
+            self._metric_managers = {
+                phase: PhaseMetricManager(
+                    self._phase_metrics[phase],
+                    metric_error_policy=self._metric_error_policy,
+                )
+                for phase in METRIC_PHASES
+            }
+        else:
+            flat = dict(cast("Mapping[str, MetricDefinition]", value))
+            self._phase_metrics = dict.fromkeys(METRIC_PHASES, flat)
+            manager = PhaseMetricManager(
+                flat, metric_error_policy=self._metric_error_policy
+            )
+            self._metric_managers = dict.fromkeys(METRIC_PHASES, manager)
+        self._metric_manager = self._metric_managers["train"]
+        self._dataset_metric_managers: dict[str, dict[str, PhaseMetricManager]] = {
+            phase: {} for phase in METRIC_PHASES
+        }
+
+    def _manager_for_phase(self, phase: str) -> PhaseMetricManager:
+        """Return the aggregate metric manager for a workflow phase."""
+        return self._metric_managers[phase]
+
+    def _manager_for_dataset(self, phase: str, name: str) -> PhaseMetricManager:
+        """Return an isolated metric manager for one named dataset."""
+        managers = self._dataset_metric_managers[phase]
+        if name not in managers:
+            managers[name] = PhaseMetricManager(
+                copy.deepcopy(self._phase_metrics[phase]),
+                metric_error_policy=self._metric_error_policy,
+            )
+        return managers[name]
 
     @property
     def metric_error_policy(self) -> Literal["raise", "warn"]:
@@ -193,9 +251,11 @@ class Battery(CheckpointMixin, TrainingMixin, EvaluationMixin, PredictionMixin):
                 log and skip failed metrics for the current phase.
         """
         self._ensure_configuration_mutable("metric_error_policy")
-        manager = PhaseMetricManager(self._metrics, metric_error_policy=value)
+        if value not in {"raise", "warn"}:
+            msg = "metric_error_policy must be either 'raise' or 'warn'."
+            raise ValueError(msg)
         self._metric_error_policy = value
-        self._metric_manager = manager
+        self._set_metric_config(self._metrics)
 
     @property
     def stop_training(self) -> bool:
@@ -206,6 +266,19 @@ class Battery(CheckpointMixin, TrainingMixin, EvaluationMixin, PredictionMixin):
     def stop_training(self, value: bool) -> None:
         """Set the stop_training flag."""
         self._stop_training = value
+        self._stop_reason = "requested" if value else None
+
+    def request_stop(self, reason: str) -> None:
+        """Request training stop after the current epoch.
+
+        Args:
+            reason: Non-empty reason reported in the run result.
+        """
+        if not isinstance(reason, str) or not reason.strip():
+            msg = "Stop reason must be a non-empty string."
+            raise ValueError(msg)
+        self._stop_training = True
+        self._stop_reason = reason
 
     def _ensure_configuration_mutable(self, name: str) -> None:
         """Reject configuration assignment from inside an event dispatch."""
@@ -279,11 +352,9 @@ class Battery(CheckpointMixin, TrainingMixin, EvaluationMixin, PredictionMixin):
         """
         CheckpointMixin.load_checkpoint(self, path)
 
-    def train(  # noqa: PLR0913
+    def train(
         self,
         train_loader: DataLoader | None = None,
-        # Deprecated compatibility parameter; use fit(..., val_loader=...).
-        val_loader: DataLoader | None = None,
         epochs: int = 1,
         verbose: int = 1,
         *,
@@ -292,13 +363,10 @@ class Battery(CheckpointMixin, TrainingMixin, EvaluationMixin, PredictionMixin):
     ) -> TrainResult:
         """Train with explicit loaders or the attached DataPack.
 
-        Validation through this method is deprecated. Use ``fit`` for combined
-        training and validation. Calls without validation data do not warn.
+        Use ``fit`` for combined training and validation.
 
         Args:
             train_loader: Optional sized, non-empty training loader.
-            val_loader: Deprecated. Optional validation loader for direct-loader
-                compatibility. Use ``fit`` for validated training.
             epochs: Positive epoch count or resume target.
             verbose: ``0`` for silent, ``1`` for bars, or ``2`` for summaries.
             resume_from: Optional full checkpoint restored before data setup.
@@ -311,7 +379,6 @@ class Battery(CheckpointMixin, TrainingMixin, EvaluationMixin, PredictionMixin):
             return TrainingMixin.train(
                 self,
                 train_loader,
-                val_loader,
                 epochs,
                 verbose,
                 resume_from=resume_from,
@@ -327,6 +394,7 @@ class Battery(CheckpointMixin, TrainingMixin, EvaluationMixin, PredictionMixin):
         *,
         resume_from: str | Path | None = None,
         resume_epochs_mode: str = "total",
+        validate_every_n_epochs: int = 1,
     ) -> FitResult:
         """Train with optional per-epoch validation.
 
@@ -337,6 +405,7 @@ class Battery(CheckpointMixin, TrainingMixin, EvaluationMixin, PredictionMixin):
             verbose: ``0`` for silent, ``1`` for bars, or ``2`` for summaries.
             resume_from: Optional full checkpoint restored before data setup.
             resume_epochs_mode: ``"total"`` or ``"additional"``.
+            validate_every_n_epochs: Run validation on absolute epoch multiples.
 
         Returns:
             Per-epoch training histories and optional validation histories. Validation
@@ -351,6 +420,7 @@ class Battery(CheckpointMixin, TrainingMixin, EvaluationMixin, PredictionMixin):
                 verbose,
                 resume_from=resume_from,
                 resume_epochs_mode=resume_epochs_mode,
+                validate_every_n_epochs=validate_every_n_epochs,
             )
 
     def validate(
@@ -371,40 +441,13 @@ class Battery(CheckpointMixin, TrainingMixin, EvaluationMixin, PredictionMixin):
         with self._workflow_exception_boundary():
             return EvaluationMixin._validate(self, val_loader, verbose)  # noqa: SLF001
 
-    @overload
-    def test(
-        self,
-        test_loader: DataLoader,
-        verbose: int = 1,
-        *,
-        dataset: None = None,
-    ) -> TestResult: ...
-
-    @overload
-    def test(
-        self,
-        test_loader: None = None,
-        verbose: int = 1,
-        *,
-        dataset: str,
-    ) -> TestResult: ...
-
-    @overload
-    def test(
-        self,
-        test_loader: DataLoader | None = None,
-        verbose: int = 1,
-        *,
-        dataset: None = None,
-    ) -> TestResult | dict[str, TestResult]: ...
-
     def test(
         self,
         test_loader: DataLoader | None = None,
         verbose: int = 1,
         *,
         dataset: str | None = None,
-    ) -> TestResult | dict[str, TestResult]:
+    ) -> TestResult:
         """Evaluate an explicit or DataPack-provided test dataset.
 
         Args:
@@ -413,45 +456,12 @@ class Battery(CheckpointMixin, TrainingMixin, EvaluationMixin, PredictionMixin):
             dataset: Optional DataPack test dataset name.
 
         Returns:
-            One result or a mapping of named DataPack results.
+            One aggregate result with named dataset metrics when applicable.
         """
         with self._workflow_exception_boundary():
             return EvaluationMixin._test(  # noqa: SLF001
                 self, test_loader, verbose, dataset=dataset
             )
-
-    @overload
-    def predict(
-        self,
-        data_loader: DataLoader,
-        verbose: int = 1,
-        *,
-        move_to_cpu: bool = False,
-        concatenate: bool = False,
-        dataset: None = None,
-    ) -> PredictResult: ...
-
-    @overload
-    def predict(
-        self,
-        data_loader: None = None,
-        verbose: int = 1,
-        *,
-        move_to_cpu: bool = False,
-        concatenate: bool = False,
-        dataset: str,
-    ) -> PredictResult: ...
-
-    @overload
-    def predict(
-        self,
-        data_loader: DataLoader | None = None,
-        verbose: int = 1,
-        *,
-        move_to_cpu: bool = False,
-        concatenate: bool = False,
-        dataset: None = None,
-    ) -> PredictResult | dict[str, PredictResult]: ...
 
     def predict(
         self,
@@ -461,7 +471,7 @@ class Battery(CheckpointMixin, TrainingMixin, EvaluationMixin, PredictionMixin):
         move_to_cpu: bool = False,
         concatenate: bool = False,
         dataset: str | None = None,
-    ) -> PredictResult | dict[str, PredictResult]:
+    ) -> PredictResult:
         """Collect predictions from an explicit or DataPack loader.
 
         Args:
@@ -472,7 +482,7 @@ class Battery(CheckpointMixin, TrainingMixin, EvaluationMixin, PredictionMixin):
             dataset: Optional DataPack prediction dataset name.
 
         Returns:
-            One prediction result or a mapping of named results.
+            One result, with predictions keyed by dataset when several run.
         """
         with self._workflow_exception_boundary():
             return PredictionMixin._predict(  # noqa: SLF001
@@ -571,13 +581,21 @@ class Battery(CheckpointMixin, TrainingMixin, EvaluationMixin, PredictionMixin):
     ) -> tuple[
         torch.Tensor,
         dict[str, float],
-        torch.Tensor | None,
-        torch.Tensor | None,
+        torch.Tensor | dict[str, torch.Tensor] | None,
+        torch.Tensor | dict[str, torch.Tensor] | None,
     ]:
         """Validate a step result and expose data for configured metrics."""
+        metric_phase = {
+            "training": "train",
+            "validation": "validation",
+            "test": "test",
+        }[phase.lower()]
+        configured_metrics = self._phase_metrics[metric_phase]
         if isinstance(result, StepOutput):
             loss = self._validate_loss(result.loss, phase)
-            if self._metrics and (result.predictions is None or result.targets is None):
+            if configured_metrics and (
+                result.predictions is None or result.targets is None
+            ):
                 msg = (
                     f"{phase} step must return StepOutput with predictions and "
                     "targets when Battery metrics are configured."
@@ -586,22 +604,34 @@ class Battery(CheckpointMixin, TrainingMixin, EvaluationMixin, PredictionMixin):
             manual_metrics = self._normalize_step_metrics(result.metrics, phase)
             return loss, manual_metrics, result.predictions, result.targets
 
-        if self._metrics:
-            msg = (
-                f"{phase} step must return StepOutput with predictions and targets "
-                "when Battery metrics are configured."
-            )
-            raise ValueError(msg)
+        if isinstance(result, torch.Tensor):
+            if configured_metrics:
+                msg = (
+                    f"{phase} step must return StepOutput with predictions and "
+                    "targets when Battery metrics are configured."
+                )
+                raise ValueError(msg)
+            return self._validate_loss(result, phase), {}, None, None
 
         if isinstance(result, tuple):
             if len(result) != 2 or not isinstance(result[1], dict):
                 msg = f"{phase} step tuple must be (loss, metrics_dict)."
                 raise TypeError(msg)
+            if configured_metrics:
+                msg = (
+                    f"{phase} step must return StepOutput with predictions and "
+                    "targets when Battery metrics are configured."
+                )
+                raise ValueError(msg)
             loss = self._validate_loss(result[0], phase)
             metrics = self._normalize_step_metrics(result[1], phase)
             return loss, metrics, None, None
 
-        return self._validate_loss(result, phase), {}, None, None
+        msg = (
+            f"{phase} step must return StepOutput, a scalar loss tensor, "
+            "or (loss, metrics_dict)."
+        )
+        raise TypeError(msg)
 
     @staticmethod
     def _validate_loader(dataloader: object, name: str) -> None:

@@ -14,6 +14,7 @@ class Run:
         group: Optional group name for organizing runs
         job_type: Optional type of job (e.g., "training", "evaluation")
         description: Optional description of the run
+        tags: Labels used to organize related runs.
         config: Run-specific configuration
     """
 

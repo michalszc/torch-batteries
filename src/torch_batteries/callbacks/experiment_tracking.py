@@ -1,6 +1,10 @@
 """Experiment tracking callback for automatic logging."""
 
+from dataclasses import replace
 from typing import Any
+
+from torch import nn
+from torch.optim import Optimizer
 
 from torch_batteries.callbacks.base import Callback
 from torch_batteries.events import Event, EventContext, charge
@@ -20,9 +24,14 @@ class ExperimentTrackingCallback(Callback):
 
     This callback hooks into the event system to log:
     - Configuration at training start
-    - Training metrics after each step
+    - Training metrics after selected steps or completed epochs, depending on tracker
     - Validation metrics after validation
     - Summary statistics at training end
+
+    Args:
+        tracker: Backend that stores the experiment.
+        run: Optional run metadata and configuration overrides.
+        log_every_n_steps: Step logging interval for step-based trackers.
 
     Example:
     ```python
@@ -144,16 +153,31 @@ class ExperimentTrackingCallback(Callback):
         return current_epoch, global_step
 
     @charge(Event.BEFORE_TRAIN)
-    def on_train_start(self, _: EventContext) -> None:
+    def on_train_start(self, context: EventContext) -> None:
         """
         Initialize tracker and log configuration.
 
         Args:
-            _: Event context, unused by this handler.
+            context: Training context containing the model and optimizer.
         """
-        self.tracker.init(
-            run=self.run if self.run is not None else Run(),
-        )
+        run = self.run if self.run is not None else Run()
+        defaults: dict[str, Any] = {}
+        model = context.get("model")
+        if isinstance(model, nn.Module):
+            defaults["model"] = str(model)
+            defaults["parameter_count"] = sum(p.numel() for p in model.parameters())
+        optimizer = context.get("optimizer")
+        if isinstance(optimizer, Optimizer):
+            defaults["optimizer"] = type(optimizer).__name__
+            defaults["optimizer_settings"] = {
+                key: value
+                if isinstance(value, (str, int, float, bool, type(None)))
+                else str(value)
+                for key, value in optimizer.defaults.items()
+            }
+        if defaults:
+            run = replace(run, config={**defaults, **run.config})
+        self.tracker.init(run=run)
 
         logger.info("Experiment tracking started")
 
@@ -179,14 +203,17 @@ class ExperimentTrackingCallback(Callback):
 
         self._global_step += 1
 
+        if self.tracker.metric_granularity == "epoch":
+            return
+
         if self._global_step % self.log_every_n_steps != 0:
             return
 
         metrics: dict[str, float] = {
             "epoch": float(self._current_epoch),
         }
-        if ctx.get("loss") is not None:
-            metrics["loss"] = float(ctx["loss"])
+        if ctx.get("train_loss") is not None:
+            metrics["loss"] = float(ctx["train_loss"])
 
         if ctx.get("train_metrics"):
             train_metrics = ctx["train_metrics"]
@@ -204,6 +231,23 @@ class ExperimentTrackingCallback(Callback):
             self._global_step,
         )
 
+    @charge(Event.AFTER_TRAIN_EPOCH)
+    def on_train_epoch_end(self, ctx: EventContext) -> None:
+        """Log completed epoch totals for trackers with epoch granularity.
+
+        Args:
+            ctx: Training epoch context containing aggregate metrics.
+        """
+        if self.tracker.metric_granularity != "epoch":
+            return
+        metrics = ctx.get("train_metrics")
+        if isinstance(metrics, dict):
+            self.tracker.log_metrics(
+                {name: float(value) for name, value in metrics.items()},
+                step=ctx["epoch"],
+                prefix="train/",
+            )
+
     @charge(Event.AFTER_VALIDATION_EPOCH)
     def on_validation_epoch_end(self, ctx: EventContext) -> None:
         """
@@ -213,6 +257,16 @@ class ExperimentTrackingCallback(Callback):
             ctx: Event context
         """
         assert self.tracker.is_initialized, "Expected tracker to be initialized."
+
+        if self.tracker.metric_granularity == "epoch":
+            val_metrics = ctx.get("val_metrics")
+            if isinstance(val_metrics, dict):
+                self.tracker.log_metrics(
+                    {name: float(value) for name, value in val_metrics.items()},
+                    step=ctx["epoch"],
+                    prefix="val/",
+                )
+            return
 
         metrics: dict[str, Any] = {}
         metrics["epoch"] = float(self._current_epoch)

@@ -18,6 +18,7 @@ from torch_batteries import (
     DatasetBundle,
     Event,
     EventContext,
+    StepOutput,
     TrainResult,
     charge,
 )
@@ -30,10 +31,10 @@ class _DropoutModel(nn.Module):
         self.linear = nn.Linear(3, 1)
 
     @charge(Event.TRAIN_STEP)
-    def training_step(self, context: EventContext) -> torch.Tensor:
+    def training_step(self, context: EventContext) -> StepOutput:
         inputs, targets = cast("tuple[torch.Tensor, torch.Tensor]", context["batch"])
         predictions = self.linear(self.dropout(inputs))
-        return ((predictions - targets) ** 2).mean()  # type: ignore[no-any-return]
+        return StepOutput(loss=((predictions - targets) ** 2).mean())
 
 
 class _SeededDataPack(DataPack):

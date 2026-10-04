@@ -44,6 +44,7 @@ make publish-test        # Publish to TestPyPI
 make publish             # Publish to PyPI
 make check-build         # Check if build is ready for publishing
 make validate-version    # Check if versions in pyproject.toml and __init__.py match
+make release-metadata    # Record the current commit and version without publishing
 make clean               # Clean artifacts
 ```
 
@@ -53,6 +54,21 @@ make clean               # Clean artifacts
 - **Type Checking:** [MyPy](https://github.com/python/mypy) - Static type checker
 - **Testing:** [pytest](https://pytest.org/) with coverage reporting
 - **Pre-commit:** Automatic code quality checks before commits
+
+#### CPU workflow timing checks
+
+`make test` also runs the performance tests in `tests/performance/`. They time
+training, standalone validation, testing, prediction, and combined fit, with both
+direct loaders and named DataPack datasets. Each case uses a tiny CPU-only model,
+32 batches, one warmup, and three measured runs. The pytest summary reports median
+total time and time per batch spent retrieving data, in the charged model step, and
+in the remaining workflow. Training's remaining time includes PyTorch backward and
+optimizer operations. Timings are informational and have no maximum-duration
+failure threshold. The tests still check completed batch counts and valid timing
+measurements. Compare the displayed timings from runs on the
+same hardware to assess smaller changes. CUDA and MPS are never selected by these
+tests. The per-batch columns use microseconds (µs/batch); total time uses
+milliseconds (ms).
 
 #### Pre-commit Hooks
 Pre-commit hooks are automatically installed with `make install-dev` and will run:
@@ -139,26 +155,85 @@ torch-batteries/
 ## CI/CD
 The project uses GitHub Actions for continuous integration:
 - **Quality Checks:** Tests, Linting, formatting, type checking, and version validation run in parallel
-- **Publishing:** Automatic publishing to PyPI when merged to master
+- **Publishing:** Successful CI on master triggers CD publication to PyPI, followed by a GitHub release
 
 All checks must pass before merging pull requests.
 
 ## Release Process
 
-1. **Update version** in both `pyproject.toml` and `src/torch_batteries/__init__.py`
-2. **Validate version consistency:**
+This section is for maintainers. The automated sequence is **CI → CD → Release**.
+
+1. **Prepare a new package version** in both `pyproject.toml` and
+   `src/torch_batteries/__init__.py`, and add exactly one matching version section
+   with nonempty notes in `documentation/release-notes.md`.
+2. **Validate the proposed version** with `make validate-version`.
+3. **Run the existing quality checks** using the development environment:
    ```bash
-   make validate-version
+   source .venv/bin/activate
+   make lint
+   make format-check
+   make type-check
+   make test
    ```
-3. **Run quality checks:**
-    ```bash
-    make lint
-    make format-check
-    make type-check
-    make test
-    ```
-4. **Create a pull request** with your changes
-5. **Merge to master** - this will automatically publish to PyPI
+   These targets cover `scripts/release.py` and the release contract tests;
+   no separate release-check target is needed.
+4. **Create a pull request and merge to master.** Successful CI from a push to this
+   repository's master branch triggers CD. CD checks out that exact CI commit,
+   builds and checks the package, records its commit SHA, package name, and version
+   in the `release-metadata` artifact, and publishes to PyPI. Artifact upload must
+   succeed before publication proceeds.
+5. **Release runs only after successful CD on master.** It downloads metadata from
+   the triggering CD run, selects the deployed commit, and validates its package
+   name and version before publishing a GitHub release. Advancing master during
+   the sequence does not change the deployed commit or release tag.
+
+The release title and tag are `v<version>`. Its body starts with `## What's Changed`,
+followed by the matching curated release-notes list and a **View on PyPI** link to
+that deployed version. GitHub automatically provides source ZIP and tar.gz archives
+for the tag; wheel and package source-distribution files remain on PyPI.
+
+The Release job uses the automatic `GITHUB_TOKEN` with `actions: read` to download
+CD metadata and `contents: write` to create the tag and release. CD retains its
+existing `PYPI_API_TOKEN` secret. Workflow chaining becomes active once the workflow
+files are present on the default branch; verify the first release after merge and
+its next successful CD deployment.
+
+### Local release tooling
+
+To inspect the current checkout's deployment identity without publishing:
+
+```bash
+source .venv/bin/activate
+make release-metadata
+# Optional output path:
+make release-metadata RELEASE_METADATA=/tmp/release-metadata.json
+```
+
+CD supplies `DEPLOYED_SHA` so recording metadata also verifies the expected CI
+commit. Local use defaults to the current checkout. The default generated
+`release-metadata.json` is ignored by Git.
+
+`make release-select-commit` validates downloaded metadata and writes its SHA to
+`GITHUB_OUTPUT` for the next Actions checkout step; it does not check out code.
+`make release` publishes through GitHub CLI and requires authentication, matching
+metadata, and a repository specified through `GITHUB_REPOSITORY` or
+`RELEASE_REPOSITORY`. `RELEASE_METADATA` selects the metadata file and
+`RELEASE_PROJECT` selects the deployed checkout directory. Neither publishing nor
+package builds are needed to run the four quality checks above.
+
+### Recovery
+
+For transient GitHub API or permission failures, correct the cause and rerun the
+failed **Release** job from Actions while the CD metadata artifact is still
+available. Avoid rerunning CD solely to recover GitHub release creation, since the
+package version has already been published to PyPI. Missing or expired metadata
+causes release creation to fail.
+
+Release runs are serialized without cancelling active publication. A retry skips
+an already published release if its tag resolves to the same deployed commit.
+Conflicting tags and existing draft releases fail for maintainer review; automation
+never moves tags or overwrites releases. Check the job logs and summary for the
+outcome and release URL.
 
 ## Code Style
 

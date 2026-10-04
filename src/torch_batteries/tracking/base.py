@@ -21,6 +21,11 @@ class ExperimentTracker(ABC):
     integrated with training via ExperimentTrackingCallback.
     """
 
+    @property
+    def metric_granularity(self) -> str:
+        """Choose whether the callback reports individual steps or whole epochs."""
+        return "step"
+
     @abstractmethod
     def init(
         self,

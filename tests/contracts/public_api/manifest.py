@@ -4,6 +4,7 @@ from __future__ import annotations
 
 PUBLIC_EXPORTS: dict[str, set[str]] = {
     "torch_batteries": {
+        "BatchScheduleConfig",
         "Battery",
         "CollectedMetric",
         "DataContext",
@@ -15,6 +16,7 @@ PUBLIC_EXPORTS: dict[str, set[str]] = {
         "Event",
         "EventContext",
         "FitResult",
+        "MetricSpec",
         "OptimizationStep",
         "PredictResult",
         "ResolvedData",
@@ -38,6 +40,7 @@ PUBLIC_EXPORTS: dict[str, set[str]] = {
         "TerminateOnNonFinite",
     },
     "torch_batteries.data": {
+        "BatchScheduleConfig",
         "DataContext",
         "DataLoaderBundle",
         "DataLoaderConfig",
@@ -53,7 +56,12 @@ PUBLIC_EXPORTS: dict[str, set[str]] = {
         "OptimizationStep",
         "charge",
     },
-    "torch_batteries.tracking": {"ExperimentTracker", "Run", "WandbTracker"},
+    "torch_batteries.tracking": {
+        "ExperimentTracker",
+        "LocalTracker",
+        "Run",
+        "WandbTracker",
+    },
     "torch_batteries.trainer": {
         "Battery",
         "FitResult",
@@ -67,6 +75,7 @@ PUBLIC_EXPORTS: dict[str, set[str]] = {
         "CollectedMetric",
         "Metric",
         "MetricCallable",
+        "MetricSpec",
         "PhaseMetricManager",
         "StatefulMetric",
         "calculate_metrics",
@@ -82,6 +91,7 @@ PUBLIC_MEMBERS: dict[str, set[str]] = {
         "metrics",
         "metric_error_policy",
         "stop_training",
+        "request_stop",
         "save_checkpoint",
         "load_checkpoint",
         "train",
@@ -231,6 +241,15 @@ PUBLIC_MEMBERS: dict[str, set[str]] = {
         "log_summary",
         "log_model",
     },
+    "torch_batteries.tracking.LocalTracker": {
+        "is_initialized",
+        "run_dir",
+        "init",
+        "log_metrics",
+        "finish",
+        "log_summary",
+        "log_model",
+    },
     "torch_batteries.utils.metrics.StatefulMetric": {"reset", "update", "compute"},
     "torch_batteries.utils.metrics.CollectedMetric": {
         "reset",
@@ -264,7 +283,6 @@ PUBLIC_PARAMETERS: dict[str, dict[str, object]] = {
     },
     "torch_batteries.trainer.Battery.train": {
         "train_loader": None,
-        "val_loader": None,
         "epochs": 1,
         "verbose": 1,
         "resume_from": None,
@@ -277,6 +295,7 @@ PUBLIC_PARAMETERS: dict[str, dict[str, object]] = {
         "verbose": 1,
         "resume_from": None,
         "resume_epochs_mode": "total",
+        "validate_every_n_epochs": 1,
     },
     "torch_batteries.trainer.Battery.validate": {"val_loader": None, "verbose": 1},
     "torch_batteries.trainer.Battery.test": {
@@ -312,6 +331,7 @@ PUBLIC_KEYWORD_ONLY_PARAMETERS: dict[str, set[str]] = {
     "torch_batteries.trainer.Battery.fit": {
         "resume_from",
         "resume_epochs_mode",
+        "validate_every_n_epochs",
     },
     "torch_batteries.trainer.Battery.test": {"dataset"},
     "torch_batteries.trainer.Battery.predict": {
@@ -322,12 +342,6 @@ PUBLIC_KEYWORD_ONLY_PARAMETERS: dict[str, set[str]] = {
     "torch_batteries.trainer.Battery.predict_iter": {"move_to_cpu", "dataset"},
 }
 
-DEPRECATED_PARAMETERS: dict[str, set[str]] = {
-    "torch_batteries.trainer.Battery.train": {"val_loader"},
-    "torch_batteries.callbacks.EarlyStopping": {"stage"},
-    "torch_batteries.callbacks.LearningRateScheduler": {"stage"},
-    "torch_batteries.callbacks.ModelCheckpoint": {"stage"},
-}
 
 REFERENCE_PAGES: dict[str, str] = {
     "torch_batteries.trainer": "reference/trainer/index.html",

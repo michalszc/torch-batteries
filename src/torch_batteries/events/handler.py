@@ -195,6 +195,10 @@ class EventHandler(_ChargedHandlerBase):
             The result of the handler call, or None if no handler exists
         """
         handlers = self._handlers_for(event)
+        if not handlers:
+            if event is not Event.ON_EXCEPTION:
+                logger.debug("No handler found for event '%s'", event.value)
+            return None
         if event is Event.ON_EXCEPTION:
             labels = self._handler_labels.get(event, [])
             for handler, label in zip(handlers, labels, strict=True):
@@ -204,7 +208,7 @@ class EventHandler(_ChargedHandlerBase):
                 except BaseException:
                     logger.exception("ON_EXCEPTION handler '%s' failed.", label)
             return None
-        if event in self.MODEL_SPECIFIC_CALLBACKS and handlers:
+        if event in self.MODEL_SPECIFIC_CALLBACKS:
             logger.debug("Calling handler for event '%s'", event.value)
             with self._dispatch_scope(*args, **kwargs):
                 return handlers[0](*args, **kwargs)
@@ -284,6 +288,13 @@ class EventHandler(_ChargedHandlerBase):
             **kwargs: Keyword arguments passed to each provider.
         """
         handlers = self._handlers_for(event)
+        if not handlers:
+            with self._dispatch_scope(*args, **kwargs):
+                logger.debug(
+                    "Entered 0 execution contexts for event '%s'.", event.value
+                )
+                yield
+            return
         with self._dispatch_scope(*args, **kwargs), ExitStack() as stack:
             for item in handlers:
                 manager = item(*args, **kwargs)

@@ -18,18 +18,83 @@ from torch_batteries.utils.logging import get_logger
 from ._state import BatteryStateMixin
 
 if TYPE_CHECKING:
-    from torch_batteries.trainer.types import TrainResult
+    from torch_batteries.trainer.types import FitResult
 
 logger = get_logger("trainer._checkpoint")
 
-_CHECKPOINT_SCHEMA_VERSION = 3
-_SUPPORTED_CHECKPOINT_SCHEMAS = {1, 2, _CHECKPOINT_SCHEMA_VERSION}
+_CHECKPOINT_SCHEMA_VERSION = 4
+_SUPPORTED_CHECKPOINT_SCHEMAS = {_CHECKPOINT_SCHEMA_VERSION}
 
 
 class CheckpointMixin(BatteryStateMixin):
     """Implement full-state and raw-model checkpoint persistence."""
 
     __slots__ = ()
+
+    def _checkpoint_metric_states(self) -> dict[str, Any]:
+        """Serialize aggregate and named dataset metric states by phase."""
+        return {
+            "phases": {
+                phase: manager.state_dict()
+                for phase, manager in self._metric_managers.items()
+            },
+            "datasets": {
+                phase: {
+                    name: manager.state_dict() for name, manager in managers.items()
+                }
+                for phase, managers in self._dataset_metric_managers.items()
+            },
+        }
+
+    def _validate_metric_states(self, state: object) -> None:
+        """Check checkpoint metric names before mutating runtime state.
+
+        Args:
+            state: Untrusted serialized metric state.
+        """
+        if not isinstance(state, dict):
+            msg = "Invalid metric state in training checkpoint."
+            raise TypeError(msg)
+        phases = state.get("phases")
+        datasets = state.get("datasets")
+        if not isinstance(phases, dict) or not isinstance(datasets, dict):
+            msg = "Configured metric states do not match checkpoint state."
+            raise ValueError(msg)  # noqa: TRY004
+        expected_phases = set(self._metric_managers)
+        if set(phases) != expected_phases or set(datasets) != expected_phases:
+            msg = "Configured metric states do not match checkpoint state."
+            raise ValueError(msg)
+        for phase, manager in self._metric_managers.items():
+            expected_names = set(manager.state_dict())
+            if (
+                not isinstance(phases[phase], dict)
+                or set(phases[phase]) != expected_names
+            ):
+                msg = "Configured metric states do not match checkpoint state."
+                raise ValueError(msg)
+            if not isinstance(datasets[phase], dict):
+                msg = "Invalid metric state in training checkpoint."
+                raise TypeError(msg)
+            for name, saved in datasets[phase].items():
+                if not isinstance(name, str) or not isinstance(saved, dict):
+                    msg = "Invalid metric state in training checkpoint."
+                    raise TypeError(msg)
+                if set(saved) != expected_names:
+                    msg = "Configured metric states do not match checkpoint state."
+                    raise ValueError(msg)
+
+    def _restore_metric_states(self, state: dict[str, Any]) -> None:
+        """Restore phase and dataset metric states after validation.
+
+        Args:
+            state: Validated serialized metric state.
+        """
+        for phase, manager in self._metric_managers.items():
+            manager.load_state_dict(state["phases"][phase])
+        self._dataset_metric_managers = {phase: {} for phase in self._metric_managers}
+        for phase, datasets in state["datasets"].items():
+            for name, saved in datasets.items():
+                self._manager_for_dataset(phase, name).load_state_dict(saved)
 
     def _checkpoint_callbacks(self) -> list[Callback]:
         """Return configured callbacks participating in checkpoint state."""
@@ -65,11 +130,8 @@ class CheckpointMixin(BatteryStateMixin):
     def _validate_checkpoint_data_pack(
         self,
         payload: dict[str, Any],
-        schema_version: int,
     ) -> dict[str, Any] | None:
-        """Validate and return DataPack state for schema version 2 and newer."""
-        if schema_version < 2:
-            return None
+        """Validate and return DataPack state from a current checkpoint."""
         if "data_pack" not in payload:
             msg = "Training checkpoint is missing fields: ['data_pack']."
             raise ValueError(msg)
@@ -316,13 +378,12 @@ class CheckpointMixin(BatteryStateMixin):
             raise TypeError(msg)
         return cast("dict[str, dict[str, torch.Tensor]]", states)
 
-    def _validate_checkpoint_components(  # noqa: PLR0912, PLR0915
+    def _validate_checkpoint_components(  # noqa: PLR0915
         self,
         payload: dict[str, Any],
-        schema_version: int,
     ) -> tuple[list[Callback], dict[str, Any] | None]:
         """Validate component identities and payload structure before mutation."""
-        data_pack_state = self._validate_checkpoint_data_pack(payload, schema_version)
+        data_pack_state = self._validate_checkpoint_data_pack(payload)
         saved_optimizer = payload["optimizer"]
         if saved_optimizer is not None and self._optimizer is None:
             logger.error("Checkpoint contains optimizer state but Battery does not.")
@@ -383,24 +444,7 @@ class CheckpointMixin(BatteryStateMixin):
         for callback, saved in zip(callbacks, saved_callbacks, strict=True):
             callback._validate_checkpoint_state(saved["state"])  # noqa: SLF001
 
-        metrics_state = payload["metrics"]
-        if not isinstance(metrics_state, dict):
-            logger.error("Checkpoint metric state is not a dictionary.")
-            msg = "Invalid metric state in training checkpoint."
-            raise TypeError(msg)
-        expected_metric_names = {
-            name
-            for name, metric in self._metrics.items()
-            if callable(getattr(metric, "load_state_dict", None))
-        }
-        if set(metrics_state) != expected_metric_names:
-            logger.error(
-                "Metric checkpoint state mismatch: expected=%s, actual=%s",
-                sorted(expected_metric_names),
-                sorted(metrics_state),
-            )
-            msg = "Configured metric states do not match checkpoint state."
-            raise ValueError(msg)
+        self._validate_metric_states(payload["metrics"])
 
         if not isinstance(payload["model"], dict):
             msg = "Invalid model state in training checkpoint."
@@ -414,11 +458,21 @@ class CheckpointMixin(BatteryStateMixin):
             logger.error("Checkpoint training results are not a dictionary.")
             msg = "Invalid training history in checkpoint."
             raise TypeError(msg)
+        self._validate_checkpoint_stop_state(payload)
 
-        if schema_version >= 3:
-            self._validate_global_rng_state(payload["rng_state"])
-            self._validate_loader_generator_states(payload["loader_generator_states"])
+        self._validate_global_rng_state(payload["rng_state"])
+        self._validate_loader_generator_states(payload["loader_generator_states"])
         return callbacks, data_pack_state
+
+    @staticmethod
+    def _validate_checkpoint_stop_state(payload: dict[str, Any]) -> None:
+        """Validate serialized stop metadata."""
+        if not isinstance(payload["stop_training"], bool) or (
+            payload["stop_reason"] is not None
+            and not isinstance(payload["stop_reason"], str)
+        ):
+            msg = "Invalid stop state in training checkpoint."
+            raise TypeError(msg)
 
     def _checkpoint_snapshot(self, callbacks: list[Callback]) -> dict[str, Any]:
         """Capture every mutable checkpoint participant before restoration."""
@@ -444,7 +498,7 @@ class CheckpointMixin(BatteryStateMixin):
                 else None
             ),
             "callbacks": callback_states,
-            "metrics": copy.deepcopy(self._metric_manager.state_dict()),
+            "metrics": copy.deepcopy(self._checkpoint_metric_states()),
             "data_pack": data_pack_state,
             "last_completed_epoch": self._last_completed_epoch,
             "optimizer_step_idx": self._optimizer_step_idx,
@@ -455,31 +509,25 @@ class CheckpointMixin(BatteryStateMixin):
             ),
             "resume_loaded": self._resume_loaded,
             "stop_training": self._stop_training,
+            "stop_reason": self._stop_reason,
             "rng_state": rng_state,
         }
 
     def _apply_checkpoint_internal_state(
         self,
         payload: dict[str, Any],
-        schema_version: int,
     ) -> None:
         """Apply Battery-owned counters, history, and deferred loader state."""
         self._last_completed_epoch = payload["epoch"]
         self._optimizer_step_idx = payload["optimizer_step_idx"]
-        self._train_results = cast("TrainResult", copy.deepcopy(payload["results"]))
-        if schema_version >= 3:
-            loader_states = self._validate_loader_generator_states(
-                payload["loader_generator_states"]
-            )
-            self._loader_generator_states = copy.deepcopy(loader_states)
-            self._pending_loader_generator_states = copy.deepcopy(loader_states)
-        else:
-            self._loader_generator_states = {}
-            self._pending_loader_generator_states = {}
-            logger.warning(
-                "Legacy checkpoint schema %d has no reproducible RNG state.",
-                schema_version,
-            )
+        self._train_results = cast("FitResult", copy.deepcopy(payload["results"]))
+        self._stop_training = payload["stop_training"]
+        self._stop_reason = payload["stop_reason"]
+        loader_states = self._validate_loader_generator_states(
+            payload["loader_generator_states"]
+        )
+        self._loader_generator_states = copy.deepcopy(loader_states)
+        self._pending_loader_generator_states = copy.deepcopy(loader_states)
         self._resume_loaded = True
 
     @staticmethod
@@ -522,7 +570,7 @@ class CheckpointMixin(BatteryStateMixin):
             )
         self._rollback_action(
             "metrics",
-            lambda: self._metric_manager.load_state_dict(snapshot["metrics"]),
+            lambda: self._restore_metric_states(snapshot["metrics"]),
         )
         data_pack = self._data_pack
         if data_pack is not None and snapshot["data_pack"] is not None:
@@ -543,6 +591,7 @@ class CheckpointMixin(BatteryStateMixin):
             )
             self._resume_loaded = snapshot["resume_loaded"]
             self._stop_training = snapshot["stop_training"]
+            self._stop_reason = snapshot["stop_reason"]
 
         self._rollback_action("Battery state", restore_internal_state)
         self._rollback_action(
@@ -585,10 +634,12 @@ class CheckpointMixin(BatteryStateMixin):
                 }
                 for callback in callbacks
             ],
-            "metrics": self._metric_manager.state_dict(),
+            "metrics": self._checkpoint_metric_states(),
             "epoch": self._last_completed_epoch,
             "optimizer_step_idx": self._optimizer_step_idx,
             "results": copy.deepcopy(self._train_results),
+            "stop_training": self._stop_training,
+            "stop_reason": self._stop_reason,
             "data_pack": self._checkpoint_data_pack(),
             "rng_state": self._capture_global_rng_state(),
             "loader_generator_states": copy.deepcopy(self._loader_generator_states),
@@ -716,7 +767,6 @@ class CheckpointMixin(BatteryStateMixin):
             return
 
         payload = self._validate_checkpoint_schema(payload, checkpoint_path)
-        schema_version = int(payload["__torch_batteries_checkpoint__"])
         required = {
             "model",
             "optimizer",
@@ -725,17 +775,18 @@ class CheckpointMixin(BatteryStateMixin):
             "epoch",
             "optimizer_step_idx",
             "results",
+            "stop_training",
+            "stop_reason",
+            "rng_state",
+            "loader_generator_states",
+            "data_pack",
         }
-        if schema_version >= 3:
-            required.update({"rng_state", "loader_generator_states"})
         if not required.issubset(payload):
             missing = sorted(required - set(payload))
             logger.error("Checkpoint is missing required fields: %s", missing)
             msg = f"Training checkpoint is missing fields: {missing}."
             raise ValueError(msg)
-        callbacks, data_pack_state = self._validate_checkpoint_components(
-            payload, schema_version
-        )
+        callbacks, data_pack_state = self._validate_checkpoint_components(payload)
         snapshot = self._checkpoint_snapshot(callbacks)
         try:
             self._model.load_state_dict(payload["model"], strict=True)
@@ -746,12 +797,11 @@ class CheckpointMixin(BatteryStateMixin):
                 )
             for callback, saved in zip(callbacks, payload["callbacks"], strict=True):
                 callback.load_state_dict(saved["state"])
-            self._metric_manager.load_state_dict(payload["metrics"])
+            self._restore_metric_states(payload["metrics"])
             if self._data_pack is not None and data_pack_state is not None:
                 self._data_pack.load_state_dict(data_pack_state)
-            self._apply_checkpoint_internal_state(payload, schema_version)
-            if schema_version >= 3:
-                self._restore_global_rng_state(payload["rng_state"])
+            self._apply_checkpoint_internal_state(payload)
+            self._restore_global_rng_state(payload["rng_state"])
         except BaseException:
             logger.exception(
                 "Checkpoint restoration failed at %s; rolling back.",

@@ -41,13 +41,18 @@ class Progress(ABC):
 
     @abstractmethod
     def update(
-        self, metrics: ProgressMetrics | None = None, batch_size: int | None = None
+        self,
+        metrics: ProgressMetrics | None = None,
+        batch_size: int | None = None,
+        *,
+        dataset_name: str | None = None,
     ) -> None:
         """Update progress after processing a batch.
 
         Args:
             metrics: Optional metrics dictionary containing 'loss' and other metrics.
             batch_size: Optional batch size for averaging metrics.
+            dataset_name: Name for dataset-specific display, when multiple run.
 
         Returns:
             None

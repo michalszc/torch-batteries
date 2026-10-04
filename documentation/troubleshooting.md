@@ -18,7 +18,7 @@ validation begins.
 Pass an explicit primary DataLoader, or attach `Battery(data_pack=...)` with a
 `SETUP_DATA` handler returning `DatasetBundle`. An implicit fit/train, test, or
 prediction workflow requires its corresponding dataset. Validation is optional for
-`fit()` and compatibility `train()`, but required for standalone `validate()`.
+`fit()`, but required for standalone `validate()`. `train()` runs without validation.
 
 Do not pass only `val_loader`: an explicit train loader selects direct-loader mode,
 and Battery never mixes it with implicit DataPack loaders.

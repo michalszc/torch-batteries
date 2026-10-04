@@ -9,6 +9,7 @@
 """
 
 from .base import ExperimentTracker
+from .local import LocalTracker
 from .types import (
     Run,
 )
@@ -16,6 +17,7 @@ from .wandb import WandbTracker
 
 __all__ = [
     "ExperimentTracker",
+    "LocalTracker",
     "Run",
     "WandbTracker",
 ]

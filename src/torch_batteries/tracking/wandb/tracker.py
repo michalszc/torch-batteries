@@ -26,6 +26,10 @@ class WandbTracker(ExperimentTracker):
     """
     Weights & Biases experiment tracker implementation.
 
+    Args:
+        project: W&B project name.
+        entity: Optional W&B username or team name.
+
     Example:
     ```python
     tracker = WandbTracker(project="your-wandb-project")

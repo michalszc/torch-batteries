@@ -21,15 +21,13 @@ SchedulerPhase = MonitorPhase
 class LearningRateScheduler(Callback):
     """Advance a PyTorch learning-rate scheduler during Battery training.
 
-    ``phase`` selects the monitored metrics for ``ReduceLROnPlateau``. The
-    deprecated ``stage`` keyword remains a compatibility alias.
+    ``phase`` selects the monitored metrics for ``ReduceLROnPlateau``.
 
     Args:
         scheduler: PyTorch scheduler to advance.
         interval: ``"step"`` after optimizer steps or ``"epoch"`` after epochs.
         phase: Metrics phase for ``ReduceLROnPlateau``.
         metric: Metric name for ``ReduceLROnPlateau``.
-        stage: Deprecated alias for ``phase``.
     """
 
     __slots__ = (
@@ -47,10 +45,8 @@ class LearningRateScheduler(Callback):
         interval: SchedulerInterval = "epoch",
         phase: SchedulerPhase | None = None,
         metric: str | None = None,
-        *,
-        stage: SchedulerPhase | None = None,
     ) -> None:
-        phase = resolve_monitor_phase(phase, stage=stage, required=False)
+        phase = resolve_monitor_phase(phase, required=False)
         is_plateau = isinstance(scheduler, ReduceLROnPlateau)
         self._validate_configuration(interval, phase, metric, is_plateau=is_plateau)
         self._is_plateau = is_plateau
@@ -234,8 +230,7 @@ class LearningRateScheduler(Callback):
         """Restore scheduler state after validating its configuration.
 
         Args:
-            state_dict: State returned by :meth:`state_dict`, including legacy
-                ``stage`` state.
+            state_dict: State returned by :meth:`state_dict`.
         """
         scheduler_state, stepped_epochs = self._validate_checkpoint_state(state_dict)
         self._scheduler.load_state_dict(scheduler_state)
@@ -249,30 +244,14 @@ class LearningRateScheduler(Callback):
         self, state_dict: dict[str, Any]
     ) -> tuple[dict[str, Any], list[int]]:
         """Validate all scheduler checkpoint state without mutation."""
-        has_phase = "phase" in state_dict
-        has_stage = "stage" in state_dict
-        if has_phase == has_stage:
-            logger.error(
-                "LearningRateScheduler checkpoint state must contain exactly one "
-                "of 'phase' or legacy 'stage'."
-            )
-            msg = (
-                "LearningRateScheduler checkpoint state must contain exactly one "
-                "of 'phase' or legacy 'stage'."
-            )
+        if "phase" not in state_dict:
+            logger.error("LearningRateScheduler checkpoint state requires 'phase'.")
+            msg = "LearningRateScheduler checkpoint state requires 'phase'."
             raise ValueError(msg)
-        if has_phase:
-            checkpoint_phase = resolve_monitor_phase(
-                cast("MonitorPhase | None", state_dict["phase"]),
-                stage=None,
-                required=False,
-            )
-        else:
-            checkpoint_phase = resolve_monitor_phase(
-                None,
-                stage=cast("MonitorPhase | None", state_dict["stage"]),
-                required=False,
-            )
+        checkpoint_phase = resolve_monitor_phase(
+            cast("MonitorPhase | None", state_dict["phase"]),
+            required=False,
+        )
         self._validate_configuration(
             state_dict.get("interval"),
             checkpoint_phase,

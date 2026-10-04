@@ -1,0 +1,32 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it using the metadata from this file."
+title: torch-batteries
+type: software
+authors:
+  - given-names: Michał
+    family-names: Szczygieł
+    orcid: https://orcid.org/0009-0006-9186-1595
+  - given-names: Arkadiusz
+    family-names: Paterak
+    orcid: https://orcid.org/0009-0002-1175-971X
+  - given-names: Antoni
+    family-names: Zięciak
+    orcid: https://orcid.org/0009-0005-8951-4431
+abstract: >-
+  A lightweight, event-driven training layer for PyTorch that provides
+  reusable utilities for training, evaluation, metrics, checkpointing,
+  and experiment management.
+license: Apache-2.0
+repository-code: https://github.com/michalszc/torch-batteries
+url: https://michalszc.github.io/torch-batteries/
+keywords:
+  - pytorch
+  - machine learning
+  - deep learning
+  - training
+  - evaluation
+  - datasets
+  - metrics
+  - callbacks
+  - checkpointing
+  - experiment tracking
