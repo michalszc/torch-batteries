@@ -26,6 +26,15 @@ Thank you for your interest in contributing to torch-batteries! This guide will 
    - Set up pre-commit hooks
 
 ### Development Workflow
+   **Alternative for [uv](https://docs.astral.sh/uv/) users**
+   ```bash
+   uv sync --all-extras
+   uv run pre-commit install
+   ```
+   This creates a `.venv` with the same dependencies. Prefix commands with
+   `uv run` (e.g. `uv run make test`), or activate the venv with
+   `source .venv/bin/activate`. `uv.lock` is local only and not committed.
+
 
 #### Available Make Commands
 ```bash
