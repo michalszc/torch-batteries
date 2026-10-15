@@ -7,6 +7,7 @@ Thank you for your interest in contributing to torch-batteries! This guide will 
 ### Prerequisites
 - Python 3.12+
 - Pip 25.1+
+- [jq](https://jqlang.org/) (only for `make notebooks-check`; e.g. `sudo apt install jq` or `brew install jq`)
 
 ### Setup Development Environment
 
@@ -25,7 +26,6 @@ Thank you for your interest in contributing to torch-batteries! This guide will 
    - Install all development dependencies (pytest, ruff, mypy, pre-commit)
    - Set up pre-commit hooks
 
-### Development Workflow
    **Alternative for [uv](https://docs.astral.sh/uv/) users**
    ```bash
    uv sync --all-extras
@@ -35,6 +35,7 @@ Thank you for your interest in contributing to torch-batteries! This guide will 
    `uv run` (e.g. `uv run make test`), or activate the venv with
    `source .venv/bin/activate`. `uv.lock` is local only and not committed.
 
+### Development Workflow
 
 #### Available Make Commands
 ```bash
@@ -54,6 +55,7 @@ make publish             # Publish to PyPI
 make check-build         # Check if build is ready for publishing
 make validate-version    # Check if versions in pyproject.toml and __init__.py match
 make release-metadata    # Record the current commit and version without publishing
+make notebooks-check     # Validate saved notebook outputs without executing them (requires jq)
 make clean               # Clean artifacts
 ```
 
