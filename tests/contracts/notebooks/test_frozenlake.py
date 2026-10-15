@@ -12,7 +12,9 @@ import torch
 from torch_batteries import Battery
 
 NOTEBOOK = (
-    Path(__file__).parents[3] / "notebooks" / "frozenlake_a2c_local_tracking.ipynb"
+    Path(__file__).parents[3]
+    / "notebooks"
+    / "frozenlake_reinforce_baseline_local_tracking.ipynb"
 )
 DEVICES = [
     "cpu",
@@ -37,9 +39,9 @@ def definitions() -> dict[str, Any]:
     pytest.importorskip("gymnasium")
     notebook = json.loads(NOTEBOOK.read_text(encoding="utf-8"))
     names = {
-        "FrozenLakeA2C",
+        "FrozenLakeReinforce",
         "OnPolicyRollout",
-        "GreedyEvaluation",
+        "PolicyEvaluation",
         "FrozenLakeDataPack",
     }
     nodes: list[ast.stmt] = []
@@ -74,7 +76,7 @@ def test_training_and_evaluation_use_selected_device(
 ) -> None:
     """Lazy inference and subsequent optimization share Battery's device."""
     torch.manual_seed(17)
-    model = definitions["FrozenLakeA2C"]()
+    model = definitions["FrozenLakeReinforce"]()
     data_pack = definitions["FrozenLakeDataPack"](model)
     data_pack.rollout.episodes = 2
     data_pack.evaluation.episodes = 2
@@ -120,7 +122,7 @@ def test_training_and_evaluation_use_selected_device(
     handle.remove()
 
 
-@pytest.mark.parametrize("dataset_name", ["OnPolicyRollout", "GreedyEvaluation"])
+@pytest.mark.parametrize("dataset_name", ["OnPolicyRollout", "PolicyEvaluation"])
 @pytest.mark.parametrize("training", [True, False])
 @pytest.mark.parametrize("failure", ["forward", "creation"])
 def test_inference_failure_restores_mode_and_closes_environment(
@@ -132,7 +134,7 @@ def test_inference_failure_restores_mode_and_closes_environment(
     failure: str,
 ) -> None:
     """Collection failures cannot leak an environment or alter model mode."""
-    model = definitions["FrozenLakeA2C"]()
+    model = definitions["FrozenLakeReinforce"]()
     model.train(training)
     environment = MagicMock()
     environment.reset.return_value = (0, {})
@@ -154,12 +156,12 @@ def test_inference_failure_restores_mode_and_closes_environment(
         environment.close.assert_not_called()
 
 
-@pytest.mark.parametrize("dataset_name", ["OnPolicyRollout", "GreedyEvaluation"])
+@pytest.mark.parametrize("dataset_name", ["OnPolicyRollout", "PolicyEvaluation"])
 def test_state_table_is_batched_and_refreshed_each_iteration(
     definitions: dict[str, Any], monkeypatch: pytest.MonkeyPatch, dataset_name: str
 ) -> None:
     """Every collection uses one fresh forward pass over all sixteen states."""
-    model = definitions["FrozenLakeA2C"]()
+    model = definitions["FrozenLakeReinforce"]()
     environment = MagicMock()
     environment.reset.return_value = (0, {})
     environment.step.return_value = (15, 1.0, True, False, {})
@@ -176,11 +178,11 @@ def test_state_table_is_batched_and_refreshed_each_iteration(
     assert torch.equal(inputs_seen[0], torch.eye(16))
     if dataset_name == "OnPolicyRollout":
         with torch.no_grad():
-            model.critic.bias.add_(7)
+            model.value.bias.add_(7)
     else:
         with torch.no_grad():
-            model.actor.weight.zero_()
-            model.actor.bias.copy_(torch.tensor([-100.0, -100.0, 100.0, -100.0]))
+            model.policy.weight.zero_()
+            model.policy.bias.copy_(torch.tensor([-100.0, -100.0, 100.0, -100.0]))
     second = next(iter(dataset))
     assert len(inputs_seen) == 2
     assert model.training
