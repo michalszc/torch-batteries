@@ -52,8 +52,10 @@ return StepOutput(
 ```
 
 Predictions and targets are required when `Battery(metrics=...)` is configured.
-Manual metric values must be numeric scalars and override automatic metrics with the
-same name.
+Manual metric values must be numeric scalars and override automatic metrics with the same name.
+Several outputs can be combined with `+`, which sums losses and merges
+keyed predictions, targets, and metrics; see
+[Metrics](metrics.md#select-structured-outputs).
 
 A step may also return either form below when automatic metrics are not configured:
 
@@ -65,8 +67,7 @@ return loss
 return loss, {"accuracy": accuracy}
 ```
 
-Invalid tuple shapes, non-dictionary metric payloads, non-scalar losses, and
-non-numeric metrics fail immediately.
+Invalid tuple shapes, non-dictionary metric payloads, non-scalar losses, and non-numeric metrics fail immediately.
 
 ## Fit with optional validation
 

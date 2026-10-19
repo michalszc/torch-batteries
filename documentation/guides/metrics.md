@@ -94,7 +94,8 @@ battery = Battery(model, optimizer=optimizer, metrics=metrics)
 ## Select structured outputs
 
 `StepOutput` can hold dictionaries of predictions and targets from several model
-heads. Bind each metric to its top-level keys with `MetricSpec`:
+heads.
+Bind each metric to its top-level keys with `MetricSpec`:
 
 ```python
 return StepOutput(
@@ -113,6 +114,27 @@ metrics = {
 
 Both selectors must be supplied together and must name keys present in the step
 output. Metric state is isolated between phases and named datasets.
+
+Multi-head steps can build one `StepOutput` per head and combine them with `+`.
+Losses are summed, and predictions, targets, and manual metrics are merged by key:
+
+```python
+classification = StepOutput(
+    loss=F.cross_entropy(logits, labels),
+    predictions={"classification": logits},
+    targets={"classification": labels},
+)
+regression = StepOutput(
+    loss=F.mse_loss(estimated_price, true_price),
+    predictions={"regression": estimated_price},
+    targets={"regression": true_price},
+)
+return classification + regression
+```
+
+Duplicate keys raise `ValueError`.
+Predictions or targets set on both sides must be dictionaries; two plain tensors raise `TypeError`.
+`sum(outputs)` also works.
 
 ## Manual step metrics
 
