@@ -29,6 +29,7 @@ class TestStepOutputAdd:
 
         combined = classification + regression
 
+        assert combined.loss is not None
         assert combined.loss.item() == pytest.approx(3.0)
         assert combined.predictions == {"classification": logits, "regression": price}
         assert combined.targets == {"classification": labels, "regression": true_price}
@@ -53,6 +54,7 @@ class TestStepOutputAdd:
         weight = torch.tensor(1.0, requires_grad=True)
         combined = StepOutput(loss=weight * 2) + StepOutput(loss=weight * 3)
 
+        assert combined.loss is not None
         combined.loss.backward()
 
         assert weight.grad is not None
@@ -68,8 +70,18 @@ class TestStepOutputAdd:
         combined = sum(outputs)
 
         assert isinstance(combined, StepOutput)
+        assert combined.loss is not None
         assert combined.loss.item() == pytest.approx(3.0)
         assert combined.metrics == {"m0": 0, "m1": 1, "m2": 2}
+
+    def test_add_skips_missing_losses(self) -> None:
+        """Test that a missing loss does not count as zero or erase the other."""
+        loss = torch.tensor(1.5)
+        with_loss = StepOutput(loss=loss)
+        without_loss = StepOutput(metrics={"success_rate": 0.5})
+
+        assert (with_loss + without_loss).loss is loss
+        assert (without_loss + StepOutput()).loss is None
 
     def test_add_does_not_mutate_operands(self) -> None:
         """Test that addition returns a new output."""

@@ -111,7 +111,7 @@ def test_training_and_evaluation_use_selected_device(
     result = battery.test(verbose=0)
     assert len(observed_devices) > rollout_calls
     assert data_pack.evaluation.device == battery.device
-    assert torch.isfinite(torch.tensor(result["test_loss"]))
+    assert "test_loss" not in result
     assert 0 <= result["test_metrics"]["success_rate"] <= 1
     assert data_pack.evaluation.frames
     assert next(iter(data_pack.evaluation)).device.type == "cpu"

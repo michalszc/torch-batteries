@@ -146,7 +146,7 @@ class EvaluationMixin(BatteryStateMixin):
             if dataset is not None:
                 msg = "dataset cannot be combined with an explicit test loader."
                 raise ValueError(msg)
-            return self._test_with_loader(test_loader, verbose)[0]
+            return self._test_result(self._test_with_loader(test_loader, verbose)[0])
         with self._data_workflow("test", dataset_name=dataset) as workflow:
             test_loaders = workflow.loaders.loaders_for_phase("test")
             shared_progress: Progress | None = None
@@ -158,7 +158,8 @@ class EvaluationMixin(BatteryStateMixin):
                 shared_progress.start_phase(
                     Phase.TEST, total_batches=sum(map(len, test_loaders.values()))
                 )
-            results: dict[str, tuple[TestResult, int]] = {}
+            results: dict[str, tuple[dict[str, float], int]] = {}
+            loss_presence: set[bool] = set()
             try:
                 for index, (name, loader) in enumerate(test_loaders.items()):
                     results[name] = self._test_with_loader(
@@ -168,6 +169,7 @@ class EvaluationMixin(BatteryStateMixin):
                         reset_metrics=index == 0,
                         named_metrics=len(test_loaders) > 1,
                         shared_progress=shared_progress,
+                        loss_presence=loss_presence,
                     )
             except BaseException:
                 if shared_progress is not None:
@@ -177,11 +179,10 @@ class EvaluationMixin(BatteryStateMixin):
                 shared_progress.end_phase()
                 shared_progress.end_epoch()
             if len(results) == 1:
-                return next(iter(results.values()))[0]
+                return self._test_result(next(iter(results.values()))[0])
             total_samples = sum(samples for _, samples in results.values())
             aggregate: dict[str, float] = {}
-            for name, (result, samples) in results.items():
-                values = {"loss": result["test_loss"], **result.get("test_metrics", {})}
+            for name, (values, samples) in results.items():
                 for metric, value in values.items():
                     aggregate[metric] = aggregate.get(metric, 0.0) + value * samples
                     aggregate[f"{name}:{metric}"] = value
@@ -194,21 +195,17 @@ class EvaluationMixin(BatteryStateMixin):
                 {name: value for name, value in aggregate.items() if ":" in name}
             )
             metrics.update(self._manager_for_phase("test").compute())
-            aggregate_result: TestResult = {
-                "test_loss": metrics.pop("loss"),
-                "test_metrics": metrics,
-            }
             aggregate_context: EventContext = {
                 "battery": as_battery(self),
                 "model": self._model,
                 "optimizer": self._optimizer,
                 "epoch": 1,
-                "test_loss": aggregate_result["test_loss"],
-                "test_metrics": {"loss": aggregate_result["test_loss"], **metrics},
+                **self._test_loss_context(metrics),
+                "test_metrics": metrics,
             }
             self._event_handler.call(Event.AFTER_TEST_EPOCH, aggregate_context)
             self._event_handler.call(Event.AFTER_TEST, aggregate_context)
-            return aggregate_result
+            return self._test_result(metrics)
 
     def _test_with_loader(  # noqa: PLR0913
         self,
@@ -219,7 +216,8 @@ class EvaluationMixin(BatteryStateMixin):
         reset_metrics: bool = True,
         named_metrics: bool = False,
         shared_progress: Progress | None = None,
-    ) -> tuple[TestResult, int]:
+        loss_presence: set[bool] | None = None,
+    ) -> tuple[dict[str, float], int]:
         """Evaluate the model once without gradient tracking.
 
         The model is placed in evaluation mode and ``Event.TEST_STEP`` runs for each
@@ -233,12 +231,16 @@ class EvaluationMixin(BatteryStateMixin):
             reset_metrics: Reset aggregate metric state before this loader.
             named_metrics: Maintain isolated metric state for this dataset.
             shared_progress: Optional progress tracker shared by named loaders.
+            loss_presence: Whether earlier batches returned a loss, shared across
+                named loaders so all of them agree.
 
         Returns:
-            Average test loss and, when present, named test metrics.
+            Phase metrics, including ``loss`` when steps return one, and the
+            number of evaluated samples.
 
         Raises:
-            ValueError: If the loader is empty or no test-step handler exists.
+            ValueError: If the loader is empty, no test-step handler exists, or
+                only some steps return a loss.
             TypeError: If a step returns an unsupported result structure.
         """
         if not self._event_handler.has_handler(Event.TEST_STEP):
@@ -293,6 +295,8 @@ class EvaluationMixin(BatteryStateMixin):
         if dataset_manager is not None:
             dataset_manager.reset()
         manual_metric_names: set[str] = set()
+        if loss_presence is None:
+            loss_presence = set()
         total_samples = 0
         logger.debug("Test phase started: epoch=1")
 
@@ -304,6 +308,7 @@ class EvaluationMixin(BatteryStateMixin):
                         batch_idx,
                         progress,
                         manual_metric_names,
+                        loss_presence,
                         dataset_name=dataset_name,
                         dataset_manager=dataset_manager,
                         named_metrics=named_metrics,
@@ -320,11 +325,6 @@ class EvaluationMixin(BatteryStateMixin):
         test_metrics = metric_progress.end_phase()
         if shared_progress is None:
             progress.end_epoch()
-        test_loss = (
-            test_metrics
-            if isinstance(test_metrics, float)
-            else test_metrics.get("loss", 0.0)
-        )
         test_metrics_context = (
             test_metrics if isinstance(test_metrics, dict) else {"loss": test_metrics}
         )
@@ -345,7 +345,7 @@ class EvaluationMixin(BatteryStateMixin):
             "model": self._model,
             "optimizer": self._optimizer,
             "epoch": 1,
-            "test_loss": test_loss,
+            **self._test_loss_context(test_metrics_context),
             "test_metrics": test_metrics_context,
             **dataset_identity_context(dataset_name),
         }
@@ -355,23 +355,15 @@ class EvaluationMixin(BatteryStateMixin):
             "battery": as_battery(self),
             "model": self._model,
             "optimizer": self._optimizer,
-            "test_loss": test_loss,
+            **self._test_loss_context(test_metrics_context),
             "test_metrics": test_metrics_context,
             **dataset_identity_context(dataset_name),
         }
         self._event_handler.call(Event.AFTER_TEST, after_test_context)
         logger.debug("Test phase completed: epoch=1, metrics=%s", test_metrics_context)
 
-        results: TestResult = {"test_loss": test_metrics_context["loss"]}
-        if len(test_metrics_context) > 1:
-            results["test_metrics"] = {
-                key: value
-                for key, value in test_metrics_context.items()
-                if key != "loss"
-            }
-
         logger.info("Testing completed")
-        return results, total_samples
+        return test_metrics_context, total_samples
 
     def _test_batch(  # noqa: PLR0913
         self,
@@ -379,6 +371,7 @@ class EvaluationMixin(BatteryStateMixin):
         batch_idx: int,
         progress: Progress,
         manual_metric_names: set[str],
+        loss_presence: set[bool],
         *,
         dataset_name: str | None = None,
         dataset_manager: PhaseMetricManager | None = None,
@@ -412,6 +405,10 @@ class EvaluationMixin(BatteryStateMixin):
         loss, step_metrics, predictions, targets = self._parse_step_result(
             result, "Test"
         )
+        loss_presence.add(loss is not None)
+        if len(loss_presence) > 1:
+            msg = "Test steps must either all return a loss or all omit it."
+            raise ValueError(msg)
         automatic_metrics = (
             self._manager_for_phase("test").update(predictions, targets)
             if predictions is not None and targets is not None
@@ -424,9 +421,8 @@ class EvaluationMixin(BatteryStateMixin):
         ):
             dataset_manager.update(predictions, targets)
         manual_metric_names.update(step_metrics)
-        loss_value = loss.item()
         batch_metrics = {
-            "loss": loss_value,
+            **({} if loss is None else {"loss": loss.item()}),
             **automatic_metrics,
             **step_metrics,
         }
@@ -443,7 +439,7 @@ class EvaluationMixin(BatteryStateMixin):
             "batch": batch,
             "batch_idx": batch_idx,
             "epoch": 1,
-            "test_loss": loss_value,
+            **self._test_loss_context(batch_metrics),
             "test_metrics": (
                 {
                     **batch_metrics,
@@ -468,6 +464,23 @@ class EvaluationMixin(BatteryStateMixin):
         if metric_progress is not None and metric_progress is not progress:
             metric_progress.update(cast("ProgressMetrics", batch_metrics), num_samples)
         return num_samples
+
+    @staticmethod
+    def _test_result(metrics: dict[str, float]) -> TestResult:
+        """Split phase metrics into an optional test loss and named metrics."""
+        result: TestResult = {}
+        if "loss" in metrics:
+            result["test_loss"] = metrics["loss"]
+        if metrics.keys() - {"loss"}:
+            result["test_metrics"] = {
+                key: value for key, value in metrics.items() if key != "loss"
+            }
+        return result
+
+    @staticmethod
+    def _test_loss_context(metrics: Mapping[str, float]) -> EventContext:
+        """Return the ``test_loss`` context entry when the metrics have a loss."""
+        return {"test_loss": metrics["loss"]} if "loss" in metrics else {}
 
     def _validate_epoch(
         self,
@@ -561,6 +574,7 @@ class EvaluationMixin(BatteryStateMixin):
                 loss, step_metrics, predictions, targets = self._parse_step_result(
                     result, "Validation"
                 )
+                loss = self._require_loss(loss, "Validation")
                 automatic_metrics = (
                     metric_manager.update(predictions, targets)
                     if predictions is not None and targets is not None

@@ -12,12 +12,18 @@ type StructuredTensors = torch.Tensor | dict[str, torch.Tensor]
 class StepOutput:
     """Explicit output from a training, validation, or test step.
 
+    Test steps may omit ``loss`` when no meaningful loss exists; the test result
+    then has no ``test_loss``. All test steps in a run must agree on whether they
+    return a loss. Training and validation steps always require it.
+
     Outputs can be combined with ``+``, for example to build a multi-head step
     from one output per head. Losses are summed, while predictions, targets, and
-    metrics are merged by key. ``sum(outputs)`` is supported as well.
+    metrics are merged by key. Missing losses are skipped, and ``sum(outputs)`` is
+    supported as well.
 
     Args:
         loss: Scalar tensor used for reporting and, during training, backward.
+            Optional for test steps only.
         predictions: Outputs produced by the same forward pass as ``loss``.
         targets: Ground-truth tensors corresponding to ``predictions``.
         metrics: Named scalar tensors or numeric values calculated by the step.
@@ -29,7 +35,7 @@ class StepOutput:
             are not both dictionaries.
     """
 
-    loss: torch.Tensor
+    loss: torch.Tensor | None = None
     predictions: StructuredTensors | None = None
     targets: StructuredTensors | None = None
     metrics: dict[str, float | torch.Tensor] = field(default_factory=dict)
@@ -38,7 +44,7 @@ class StepOutput:
         if not isinstance(other, StepOutput):
             return NotImplemented
         return type(self)(
-            loss=self.loss + other.loss,
+            loss=self._add_losses(self.loss, other.loss),
             predictions=self._merge_structured(
                 self.predictions, other.predictions, "predictions"
             ),
@@ -51,6 +57,17 @@ class StepOutput:
         if isinstance(other, int) and other == 0:
             return self
         return NotImplemented
+
+    @staticmethod
+    def _add_losses(
+        left: torch.Tensor | None, right: torch.Tensor | None
+    ) -> torch.Tensor | None:
+        """Sum losses, treating a missing loss as absent rather than zero."""
+        if left is None:
+            return right
+        if right is None:
+            return left
+        return left + right
 
     @staticmethod
     def _merge_keyed[T](

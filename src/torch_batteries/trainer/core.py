@@ -557,12 +557,23 @@ class Battery(CheckpointMixin, TrainingMixin, EvaluationMixin, PredictionMixin):
         return loss
 
     @staticmethod
+    def _require_loss(loss: torch.Tensor | None, phase: str) -> torch.Tensor:
+        """Return the step loss, rejecting steps that omitted it."""
+        if loss is None:
+            msg = f"{phase} step must return StepOutput with a loss."
+            raise ValueError(msg)
+        return loss
+
+    @staticmethod
     def _normalize_step_metrics(
         metrics: dict[str, float | torch.Tensor], phase: str
     ) -> dict[str, float]:
         """Convert supported scalar step metrics to Python floats."""
         normalized: dict[str, float] = {}
         for name, value in metrics.items():
+            if name == "loss":
+                msg = f"{phase} step must return its loss as StepOutput.loss."
+                raise ValueError(msg)
             if isinstance(value, torch.Tensor):
                 if value.ndim != 0:
                     msg = f"Metric '{name}' returned by {phase} step must be scalar."
@@ -579,7 +590,7 @@ class Battery(CheckpointMixin, TrainingMixin, EvaluationMixin, PredictionMixin):
     def _parse_step_result(
         self, result: Any, phase: str
     ) -> tuple[
-        torch.Tensor,
+        torch.Tensor | None,
         dict[str, float],
         torch.Tensor | dict[str, torch.Tensor] | None,
         torch.Tensor | dict[str, torch.Tensor] | None,
@@ -592,7 +603,9 @@ class Battery(CheckpointMixin, TrainingMixin, EvaluationMixin, PredictionMixin):
         }[phase.lower()]
         configured_metrics = self._phase_metrics[metric_phase]
         if isinstance(result, StepOutput):
-            loss = self._validate_loss(result.loss, phase)
+            loss = (
+                None if result.loss is None else self._validate_loss(result.loss, phase)
+            )
             if configured_metrics and (
                 result.predictions is None or result.targets is None
             ):
