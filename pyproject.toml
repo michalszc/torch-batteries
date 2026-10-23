@@ -77,6 +77,9 @@ docs = [
     "mkdocs>=1.6,<2",
     "mkdocs-material>=9.6,<10",
     "mkdocstrings[python]>=0.29,<1",
+    # pymdown-extensions 12.2 made Highlight require `md`, which mkdocstrings
+    # 0.x does not pass; mkdocstrings 1.0.8 handles it.
+    "pymdown-extensions>=10.2,<12.2",
     "nbformat>=5.10,<6",
 ]
 dev = [
