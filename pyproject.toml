@@ -76,7 +76,7 @@ docs = [
     # mkdocstrings; keep the documented toolchain on the supported 1.x line.
     "mkdocs>=1.6,<2",
     "mkdocs-material>=9.6,<10",
-    "mkdocstrings[python]>=0.29,<1",
+    "mkdocstrings[python]>=1.0.8,<2",
     "nbformat>=5.10,<6",
 ]
 dev = [
