@@ -2,8 +2,8 @@
 
 ## 1.1.0 — 2026-10-31
 
-- Added `StepOutput` addition, so step results built per objective can be combined with `+` (losses summed, predictions, targets, and metrics merged).
-- Allowed `@charge` to take several events, so one method can handle, for example, train, validation, and test steps without stacking decorators.
+- Added `StepOutput` addition, so step results built per objective can be combined with `+` (losses summed, predictions, targets, and metrics merged) in [PR #29](https://github.com/michalszc/torch-batteries/pull/29).
+- Allowed `@charge` to take several events, so one method can handle, for example, train, validation, and test steps without stacking decorators in [PR #29](https://github.com/michalszc/torch-batteries/pull/29).
 - Added a notebook benchmarking overhead against vanilla PyTorch and other training libraries.
 
 ## 1.0.0 — 2026-09-20
