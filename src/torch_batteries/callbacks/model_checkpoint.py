@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal
-
-import torch
-from torch import nn
+from typing import TYPE_CHECKING, Any, Literal, cast
+from uuid import UUID, uuid4
 
 from torch_batteries.callbacks._monitor import (
     MonitorPhase,
@@ -18,14 +17,17 @@ from torch_batteries.callbacks.base import Callback
 from torch_batteries.events import Event, EventContext, charge
 from torch_batteries.utils.logging import get_logger
 
+from ._checkpoint_files import _checkpoint_file_transaction, _save_weights, _write_json
 from ._model_checkpoint_functions import (
-    _optional_existing_path,
+    _optional_path,
     _serialized_float,
     _string_float_dict,
     _validate_save_weights_only,
 )
 
 if TYPE_CHECKING:
+    from torch import nn
+
     from torch_batteries.trainer import Battery
 
 logger = get_logger("callbacks.model_checkpoint")
@@ -90,6 +92,7 @@ class ModelCheckpoint(Callback):
         self._save_top_k = save_top_k
         self._save_weights_only = save_weights_only
         self._best_k_models: dict[str, float] = {}
+        self._ranking_id: str | None = uuid4().hex
 
         self._best_model_path: str | None = None
         self._kth_best_model_path: str | None = None
@@ -134,6 +137,8 @@ class ModelCheckpoint(Callback):
             "best_score": self._best_score,
             "kth_best_score": self._kth_best_score,
             "save_weights_only": self._save_weights_only,
+            "ranking_id": self._ranking_id,
+            "ranking_config": self._ranking_config(),
         }
         logger.debug(
             "Serialized model checkpoint state with %d retained models.",
@@ -159,7 +164,7 @@ class ModelCheckpoint(Callback):
         self._kth_best_model_path = kth_best_model_path
         self._best_score = best_score
         self._kth_best_score = kth_best_score
-        self._refresh_kth_best()
+        self._ranking_id = cast("str | None", state_dict.get("ranking_id"))
         logger.info(
             "Restored model checkpoint state with %d retained models.",
             len(self._best_k_models),
@@ -171,16 +176,15 @@ class ModelCheckpoint(Callback):
         """Validate and normalize all checkpoint ranking state without mutation."""
         try:
             best_k_models = _string_float_dict(state_dict["best_k_models"])
-            best_model_path = _optional_existing_path(state_dict["best_model_path"])
-            kth_best_model_path = _optional_existing_path(
-                state_dict["kth_best_model_path"]
-            )
+            best_model_path = _optional_path(state_dict["best_model_path"])
+            kth_best_model_path = _optional_path(state_dict["kth_best_model_path"])
             best_score = _serialized_float(state_dict["best_score"])
             kth_best_score = _serialized_float(state_dict["kth_best_score"])
             _validate_save_weights_only(
                 state_dict["save_weights_only"],
                 expected=self._save_weights_only,
             )
+            self._validate_ranking_metadata(state_dict)
         except (KeyError, TypeError, ValueError) as error:
             logger.exception("Invalid model checkpoint state.")
             msg = "Invalid ModelCheckpoint checkpoint state."
@@ -226,6 +230,90 @@ class ModelCheckpoint(Callback):
             best_score,
             kth_best_score,
         )
+
+    def _ranking_config(self) -> dict[str, object]:
+        """Identify the monitor and retention policy owning one manifest."""
+        return {
+            "phase": self._phase,
+            "metric": self._metric,
+            "mode": self._mode,
+            "save_path": self._save_path,
+            "save_top_k": self._save_top_k,
+            "save_weights_only": self._save_weights_only,
+        }
+
+    def _validate_ranking_metadata(self, state: dict[str, object]) -> None:
+        """Accept legacy metadata or validate a run identity and fixed policy."""
+        ranking_id = state.get("ranking_id")
+        if ranking_id is not None and (
+            not isinstance(ranking_id, str) or UUID(ranking_id).hex != ranking_id
+        ):
+            msg = "Invalid checkpoint ranking identity."
+            raise ValueError(msg)
+        if (
+            "ranking_config" in state
+            and state["ranking_config"] != self._ranking_config()
+        ):
+            msg = "Checkpoint ranking configuration does not match."
+            raise ValueError(msg)
+
+    def _manifest_path(self) -> Path:
+        """Locate this run's private ranking metadata in the configured directory."""
+        return Path(self._save_dir) / f".torch-batteries-top-k-{self._ranking_id}.json"
+
+    def _write_manifest(self) -> None:
+        """Commit the current ranking after its checkpoint is safely written."""
+        _write_json(
+            {"schema_version": 1, "state": self.state_dict()}, self._manifest_path()
+        )
+
+    def _read_manifest(self) -> dict[str, float]:
+        """Read and validate a manifest belonging to this callback's run."""
+        if self._ranking_id is None:
+            msg = "Legacy checkpoint has no ranking identity."
+            raise ValueError(msg)
+        payload = json.loads(self._manifest_path().read_text(encoding="utf-8"))
+        if not isinstance(payload, dict) or payload.get("schema_version") != 1:
+            msg = "Unsupported checkpoint ranking manifest."
+            raise ValueError(msg)
+        state = payload["state"]
+        if not isinstance(state, dict) or state.get("ranking_id") != self._ranking_id:
+            msg = "Checkpoint ranking manifest identity does not match."
+            raise ValueError(msg)
+        ranking = self._validate_checkpoint_state(state)[0]
+        if len(ranking) > self._save_top_k:
+            msg = "Checkpoint manifest exceeds the configured retention limit."
+            raise ValueError(msg)
+        return ranking
+
+    def _reconcile_checkpoint_state(self) -> None:
+        """Read current ranking metadata while keeping restoration free of writes."""
+        try:
+            ranking = self._read_manifest()
+        except (OSError, ValueError, TypeError, KeyError) as error:
+            ranking = self._best_k_models
+            logger.warning(
+                "Using surviving checkpoint snapshot entries; newer ranking entries "
+                "cannot be recovered from the manifest: %s",
+                error,
+            )
+        self._best_k_models = {
+            path: score for path, score in ranking.items() if Path(path).is_file()
+        }
+        self._refresh_ranking()
+
+    def _refresh_ranking(self) -> None:
+        """Recompute both cached extrema after filesystem reconciliation."""
+        if self._best_k_models:
+            select = min if self._mode == "min" else max
+            self._best_model_path = select(
+                self._best_k_models, key=self._best_k_models.__getitem__
+            )
+            self._best_score = self._best_k_models[self._best_model_path]
+        else:
+            self._best_model_path = None
+            self._best_score = float("inf") if self._mode == "min" else float("-inf")
+        self._refresh_kth_best()
 
     @charge(Event.AFTER_TRAIN_EPOCH)
     def run_on_train_epoch_end(self, context: EventContext) -> None:
@@ -338,37 +426,37 @@ class ModelCheckpoint(Callback):
             filename = f"{filename}.pth"
         path = Path(self._save_dir) / filename
         path.parent.mkdir(parents=True, exist_ok=True)
+        if self._save_top_k > 1 or str(path) not in self._best_k_models:
+            original = path
+            version = 1
+            while path.exists():
+                path = original.with_name(
+                    f"{original.stem}-v{version}{original.suffix}"
+                )
+                version += 1
         filepath = str(path)
 
-        previous_state = (
-            dict(self._best_k_models),
-            self._best_model_path,
-            self._kth_best_model_path,
-            self._best_score,
-            self._kth_best_score,
-        )
+        previous_state = self.state_dict()
+        if self._ranking_id is None:
+            self._ranking_id = uuid4().hex
         if is_best:
             self._best_score = current_score
             self._best_model_path = filepath
         displaced_path = self._update_top_k_models(filepath, current_score)
         try:
-            if self._save_weights_only or battery is None:
-                if battery is None and not self._save_weights_only:
-                    logger.warning(
-                        "ModelCheckpoint context has no Battery; "
-                        "falling back to raw weights."
-                    )
-                torch.save(model.state_dict(), filepath)
-            else:
-                battery.save_checkpoint(filepath)
-        except Exception:
-            (
-                self._best_k_models,
-                self._best_model_path,
-                self._kth_best_model_path,
-                self._best_score,
-                self._kth_best_score,
-            ) = previous_state
+            with _checkpoint_file_transaction(path):
+                if self._save_weights_only or battery is None:
+                    if battery is None and not self._save_weights_only:
+                        logger.warning(
+                            "ModelCheckpoint context has no Battery; "
+                            "falling back to raw weights."
+                        )
+                    _save_weights(model.state_dict(), path)
+                else:
+                    battery.save_checkpoint(filepath)
+                self._write_manifest()
+        except BaseException:
+            self.load_state_dict(previous_state)
             logger.exception("Failed to save model checkpoint at: %s", filepath)
             raise
 
