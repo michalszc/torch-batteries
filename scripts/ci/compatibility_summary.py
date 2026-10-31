@@ -123,11 +123,15 @@ def render_summary(
     lines.extend(["", *_test_summary(directory / "runtime.xml")])
     lines.extend(
         [
-            "CPU compatibility covers the tested dependency versions. "
-            "CUDA, MPS, and native Inductor compilation are outside this matrix.",
+            (
+                "CPU compatibility covers the tested dependency versions. "
+                "CUDA, MPS, and native Inductor compilation are outside this matrix."
+            ),
             "",
-            "Environment details, JUnit results, and this summary are saved "
-            "in the compatibility artifact.",
+            (
+                "Environment details, JUnit results, and this summary are saved "
+                "in the compatibility artifact."
+            ),
             "",
         ]
     )
