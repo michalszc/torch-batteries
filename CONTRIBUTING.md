@@ -75,6 +75,11 @@ with checkpoint resume and a spawned DataLoader worker. Portable setup and repor
 helpers live in `scripts/ci/`; every matrix cell publishes a Markdown job summary,
 JUnit results, and dependency versions, including when a stage fails.
 
+The CPU PyTorch wheel is selected from its official index and installed with its
+dependencies resolved from PyPI. The library wheel is also installed with dependency
+resolution enabled. `pip check` then verifies required packages and compatible
+versions before any runtime tests run.
+
 The `inductor` pytest marker identifies the test requiring the default native compiler
 backend. Compatibility jobs select `-m "not inductor"`; eager compiler-wrapper tests
 still run. The full Ubuntu quality suite runs the Inductor test and enforces coverage.

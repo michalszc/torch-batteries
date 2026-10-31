@@ -46,8 +46,10 @@ def test_required_native_matrix_runs_after_quality_checks() -> None:
 def test_matrix_checks_installed_wheel_and_runtime_workflows() -> None:
     steps = workflow("ci")["jobs"]["compatibility-tests"]["steps"]
     commands = {step.get("name"): step.get("run", "") for step in steps}
-    assert "https://download.pytorch.org/whl/cpu" in commands["Install CPU PyTorch"]
-    assert "--only-binary=:all:" in commands["Install CPU PyTorch"]
+    assert (
+        "scripts/ci/compatibility.py install-cpu-torch"
+        in commands["Install CPU PyTorch"]
+    )
     assert "--wheel" in commands["Build wheel"]
     assert "scripts/ci/compatibility.py install-wheel" in commands["Install wheel"]
     assert "pip check" in commands["Check installed dependencies"]

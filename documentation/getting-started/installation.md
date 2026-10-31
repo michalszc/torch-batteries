@@ -34,12 +34,15 @@ below this package's PyTorch minimum. See the
 [upstream announcement](https://dev-discuss.pytorch.org/t/pytorch-macos-x86-builds-deprecation-starting-january-2024/1690).
 Windows ARM/Python 3.14 is excluded while a matching CPU wheel is unavailable in the
 [official PyTorch CPU index](https://download.pytorch.org/whl/cpu/torch/).
-For Windows ARM, install the native CPU build first:
+For Windows ARM, download a native CPU wheel first:
 
 ```bash
-python -m pip install "torch>=2.9.0" --index-url https://download.pytorch.org/whl/cpu
-python -m pip install torch-batteries
+python -m pip download --no-deps --only-binary=:all: "torch>=2.9.0" --index-url https://download.pytorch.org/whl/cpu --dest torch-cpu
 ```
+
+Install that downloaded `.whl` by filename with `python -m pip install`, then install
+`torch-batteries` normally. This selects the CPU build while allowing dependencies
+such as MarkupSafe to resolve from PyPI instead of restricting them to the CPU index.
 
 ## Optional dependencies
 

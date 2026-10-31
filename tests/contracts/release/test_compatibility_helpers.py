@@ -2,9 +2,11 @@
 
 import importlib
 import json
+import subprocess
 import sys
 from pathlib import Path
 from unittest.mock import patch
+from zipfile import ZipFile
 
 import pytest
 
@@ -34,7 +36,7 @@ def test_dependency_install_reads_project_requirements_without_upgrading_pip(
     assert "pip" not in command[4:]
 
 
-def test_wheel_install_uses_the_selected_interpreter_and_preserves_dependencies(
+def test_wheel_install_resolves_dependencies_and_preserves_installed_cpu_torch(
     tmp_path: Path,
 ) -> None:
     helper = importlib.import_module("scripts.ci.compatibility")
@@ -44,9 +46,88 @@ def test_wheel_install_uses_the_selected_interpreter_and_preserves_dependencies(
         helper.install_wheel(tmp_path)
     command = run.call_args.args[0]
     assert command[:4] == [sys.executable, "-m", "pip", "install"]
-    assert "--no-deps" in command
+    assert "--no-deps" not in command
+    assert "--force-reinstall" not in command
     assert str(wheel) in command
     assert "-e" not in command
+
+
+def test_wheel_install_does_not_silently_ignore_a_missing_dependency(
+    tmp_path: Path,
+) -> None:
+    """Exercise pip's resolver offline in dry-run mode without installing anything."""
+    helper = importlib.import_module("scripts.ci.compatibility")
+    wheel = tmp_path / "ci_dependency_fixture-1.0.0-py3-none-any.whl"
+    metadata = "ci_dependency_fixture-1.0.0.dist-info"
+    with ZipFile(wheel, "w") as archive:
+        archive.writestr(
+            f"{metadata}/METADATA",
+            "Metadata-Version: 2.1\nName: ci-dependency-fixture\nVersion: 1.0.0\n"
+            "Requires-Dist: torch-batteries-ci-missing-dependency==1.0.0\n",
+        )
+        archive.writestr(f"{metadata}/WHEEL", "Wheel-Version: 1.0\nTag: py3-none-any\n")
+        archive.writestr(f"{metadata}/RECORD", "")
+    run = subprocess.run
+
+    def dry_run(command: list[str], *, check: bool) -> subprocess.CompletedProcess[str]:
+        return run(
+            [
+                *command[:4],
+                "--dry-run",
+                "--no-index",
+                "--ignore-installed",
+                *command[4:],
+            ],
+            check=check,
+            capture_output=True,
+            text=True,
+        )
+
+    with (
+        patch.object(helper.subprocess, "run", side_effect=dry_run),
+        pytest.raises(subprocess.CalledProcessError) as error,
+    ):
+        helper.install_wheel(tmp_path)
+    assert "torch-batteries-ci-missing-dependency" in error.value.stderr
+
+
+def test_cpu_wheel_download_and_dependency_install_use_separate_indexes() -> None:
+    helper = importlib.import_module("scripts.ci.compatibility")
+    commands: list[list[str]] = []
+
+    def run(command: list[str], *, check: bool) -> None:
+        commands.append(command)
+        if "download" in command:
+            destination = Path(command[command.index("--dest") + 1])
+            (destination / "torch-2.15.0+cpu-cp313-cp313-win_arm64.whl").touch()
+
+    with patch.object(helper.subprocess, "run", side_effect=run):
+        helper.install_cpu_torch()
+    download, install = commands
+    assert download[:4] == [sys.executable, "-m", "pip", "download"]
+    assert "--no-deps" in download
+    assert "--only-binary=:all:" in download
+    assert "https://download.pytorch.org/whl/cpu" in download
+    assert install[:4] == [sys.executable, "-m", "pip", "install"]
+    assert "win_arm64.whl" in install[-1]
+    assert "--index-url" not in install
+    assert "--only-binary=:all:" not in install
+    assert "--no-deps" not in install
+    assert not Path(install[-1]).parent.exists()
+
+
+def test_failed_cpu_download_does_not_attempt_installation() -> None:
+    helper = importlib.import_module("scripts.ci.compatibility")
+    with (
+        patch.object(
+            helper.subprocess,
+            "run",
+            side_effect=subprocess.CalledProcessError(1, ["pip"]),
+        ) as run,
+        pytest.raises(subprocess.CalledProcessError),
+    ):
+        helper.install_cpu_torch()
+    assert run.call_count == 1
 
 
 @pytest.mark.parametrize("count", [0, 2])

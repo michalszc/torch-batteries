@@ -8,6 +8,7 @@ import sys
 import tomllib
 from importlib.metadata import distributions
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
 
 def install_test_dependencies(project_root: Path) -> None:
@@ -25,7 +26,7 @@ def install_test_dependencies(project_root: Path) -> None:
 
 
 def install_wheel(directory: Path) -> None:
-    """Install exactly one built wheel while retaining the selected CPU PyTorch."""
+    """Install one wheel with dependencies, retaining already satisfied packages."""
     wheels = list(directory.glob("*.whl"))
     if len(wheels) != 1:
         message = f"Expected exactly one wheel in {directory}; found {len(wheels)}"
@@ -36,12 +37,32 @@ def install_wheel(directory: Path) -> None:
             "-m",
             "pip",
             "install",
-            "--force-reinstall",
-            "--no-deps",
             str(wheels[0]),
         ],
         check=True,
     )
+
+
+def install_cpu_torch() -> None:
+    """Select a native CPU wheel, then resolve its dependencies through PyPI."""
+    with TemporaryDirectory(prefix="torch-batteries-cpu-") as directory:
+        subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "pip",
+                "download",
+                "--no-deps",
+                "--only-binary=:all:",
+                "--index-url",
+                "https://download.pytorch.org/whl/cpu",
+                "--dest",
+                directory,
+                "torch>=2.9.0",
+            ],
+            check=True,
+        )
+        install_wheel(Path(directory))
 
 
 def record_environment(destination: Path) -> None:
@@ -63,11 +84,18 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "action",
-        choices=["install-test-dependencies", "install-wheel", "record-environment"],
+        choices=[
+            "install-test-dependencies",
+            "install-cpu-torch",
+            "install-wheel",
+            "record-environment",
+        ],
     )
     action = parser.parse_args().action
     if action == "install-test-dependencies":
         install_test_dependencies(Path.cwd())
+    elif action == "install-cpu-torch":
+        install_cpu_torch()
     elif action == "install-wheel":
         install_wheel(Path("dist/compatibility"))
     else:
