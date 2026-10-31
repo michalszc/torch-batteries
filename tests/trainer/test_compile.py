@@ -136,6 +136,7 @@ def test_eager_backend_checkpoint_round_trip(tmp_path: Path) -> None:
     assert restored.optimizer.state_dict() == source.optimizer.state_dict()  # type: ignore[union-attr]
 
 
+@pytest.mark.inductor
 def test_default_backend_compiles_during_cpu_training() -> None:
     """The installed default backend executes an actual compiled training step."""
     battery = _compiled_battery(backend=None)

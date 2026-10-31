@@ -53,7 +53,7 @@ make build               # Build package for distribution
 make publish-test        # Publish to TestPyPI
 make publish             # Publish to PyPI
 make check-build         # Check if build is ready for publishing
-make validate-version    # Check if versions in pyproject.toml and __init__.py match
+make validate-version    # Check matching versions, release notes, and a newer version than PyPI
 make release-metadata    # Record the current commit and version without publishing
 make notebooks-check     # Validate saved notebook outputs without executing them (requires jq)
 make clean               # Clean artifacts
@@ -65,6 +65,24 @@ make clean               # Clean artifacts
 - **Type Checking:** [MyPy](https://github.com/python/mypy) - Static type checker
 - **Testing:** [pytest](https://pytest.org/) with coverage reporting
 - **Pre-commit:** Automatic code quality checks before commits
+
+#### Native compatibility CI
+
+After `quality-checks` passes, `compatibility-tests` runs the supported native
+Python 3.12–3.14 and platform combinations documented in the installation guide.
+It installs the built wheel and exercises the runtime suite plus a synthetic workflow
+with checkpoint resume and a spawned DataLoader worker. Portable setup and reporting
+helpers live in `scripts/ci/`; every matrix cell publishes a Markdown job summary,
+JUnit results, and dependency versions, including when a stage fails.
+
+The CPU PyTorch wheel is selected from its official index and installed with its
+dependencies resolved from PyPI. The library wheel is also installed with dependency
+resolution enabled. `pip check` then verifies required packages and compatible
+versions before any runtime tests run.
+
+The `inductor` pytest marker identifies the test requiring the default native compiler
+backend. Compatibility jobs select `-m "not inductor"`; eager compiler-wrapper tests
+still run. The full Ubuntu quality suite runs the Inductor test and enforces coverage.
 
 #### CPU workflow timing checks
 

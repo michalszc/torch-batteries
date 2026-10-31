@@ -9,7 +9,7 @@ on:
       - "tests/**"
       - "pyproject.toml"
       - "Makefile"
-      - "scripts/ci/run_check.sh"
+      - "scripts/ci/**"
       - ".github/workflows/ci.yml"
       - ".github/workflows/cd.yml"
       - ".github/workflows/release.yml"
@@ -23,7 +23,7 @@ on:
       - "tests/**"
       - "pyproject.toml"
       - "Makefile"
-      - "scripts/ci/run_check.sh"
+      - "scripts/ci/**"
       - ".github/workflows/ci.yml"
       - ".github/workflows/cd.yml"
       - ".github/workflows/release.yml"
@@ -67,3 +67,91 @@ jobs:
             exit 1
             ;;
         esac
+
+  compatibility-tests:
+    name: Native ${{ matrix.platform.os }} / ${{ matrix.platform.architecture }} / Python ${{ matrix.python-version }}
+    needs: quality-checks
+    runs-on: ${{ matrix.platform.os }}
+    timeout-minutes: 30
+    env:
+      PYTHONUTF8: '1'
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.12', '3.13', '3.14']
+        platform:
+          - {os: ubuntu-latest, architecture: x64}
+          - {os: macos-latest, architecture: arm64}
+          - {os: windows-latest, architecture: x64}
+          - {os: windows-11-arm, architecture: arm64}
+        # Intel macOS has no official torch>=2.9 wheels. Native Windows ARM
+        # currently has CPU wheels for Python 3.12/3.13, but not Python 3.14.
+        exclude:
+          - python-version: '3.14'
+            platform: {os: windows-11-arm, architecture: arm64}
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up native Python
+        id: python
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+          architecture: ${{ matrix.platform.architecture }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install test and build dependencies
+        id: dependencies
+        run: python scripts/ci/compatibility.py install-test-dependencies
+
+      - name: Install CPU PyTorch
+        id: pytorch
+        run: python scripts/ci/compatibility.py install-cpu-torch
+
+      - name: Build wheel
+        id: build
+        run: python -m build --wheel --outdir dist/compatibility
+
+      - name: Install wheel
+        id: install
+        run: python scripts/ci/compatibility.py install-wheel
+
+      - name: Check installed dependencies
+        id: pip_check
+        run: python -m pip check
+
+      - name: Run runtime tests
+        id: runtime
+        run: >-
+          python -m pytest -m "not inductor"
+          tests/callbacks tests/data tests/events tests/tracking tests/trainer tests/utils tests/performance
+          tests/contracts/package/test_import_compatibility.py
+          --junitxml=compatibility-results/runtime.xml
+
+      - name: Smoke test installed wheel
+        id: smoke
+        run: python -I scripts/ci/smoke_installed_package.py
+
+      - name: Record environment
+        id: environment
+        if: always()
+        run: python scripts/ci/compatibility.py record-environment
+
+      - name: Write compatibility summary
+        if: always()
+        env:
+          CI_RUNNER: ${{ matrix.platform.os }}
+          CI_ARCHITECTURE: ${{ matrix.platform.architecture }}
+          CI_PYTHON: ${{ matrix.python-version }}
+          CI_STEP_RESULTS: ${{ toJSON(steps) }}
+        run: python scripts/ci/compatibility_summary.py
+
+      - name: Upload compatibility results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: compatibility-${{ matrix.platform.os }}-${{ matrix.platform.architecture }}-py${{ matrix.python-version }}
+          path: compatibility-results/
+          if-no-files-found: warn

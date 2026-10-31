@@ -2,19 +2,14 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 
-
-def _optional_existing_path(value: object) -> str | None:
-    """Validate an optional serialized checkpoint file path."""
+def _optional_path(value: object) -> str | None:
+    """Validate a serialized path independently of its current availability."""
     if value is None:
         return None
     if not isinstance(value, str):
         msg = "checkpoint path must be a string or None"
         raise TypeError(msg)
-    if not Path(value).is_file():
-        msg = f"checkpoint path does not exist: {value}"
-        raise ValueError(msg)
     return value
 
 
@@ -24,14 +19,13 @@ def _string_float_dict(value: object) -> dict[str, float]:
         msg = "best_k_models must be a dictionary"
         raise TypeError(msg)
     return {
-        _required_existing_path(path): _serialized_float(score)
-        for path, score in value.items()
+        _required_path(path): _serialized_float(score) for path, score in value.items()
     }
 
 
-def _required_existing_path(value: object) -> str:
-    """Validate one serialized checkpoint file path."""
-    path = _optional_existing_path(value)
+def _required_path(value: object) -> str:
+    """Validate one non-null serialized checkpoint path."""
+    path = _optional_path(value)
     if path is None:
         msg = "checkpoint path must not be None"
         raise TypeError(msg)

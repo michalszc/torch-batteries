@@ -12,6 +12,38 @@ python -m pip install torch-batteries
 The core installation includes PyTorch and `tqdm`. It does not install notebook,
 plotting, vision, reinforcement-learning, diffusion, or tracking packages.
 
+## Compatibility checks
+
+The native CPU compatibility CI targets these combinations:
+
+| Platform | Architecture | Python versions |
+| --- | --- | --- |
+| Ubuntu | x64 | 3.12, 3.13, 3.14 |
+| macOS | Apple Silicon / ARM64 | 3.12, 3.13, 3.14 |
+| Windows | x64 | 3.12, 3.13, 3.14 |
+| Windows 11 | ARM64 | 3.12, 3.13 |
+
+Each job builds and installs a wheel, checks dependencies, runs the runtime suite,
+and exercises synthetic training, evaluation, prediction, checkpoint resume, and a
+spawned DataLoader worker. This tests the selected CPU dependency versions; CUDA,
+MPS, optional integrations, and every permitted dependency version require additional
+validation. Native Inductor compilation is checked separately in Ubuntu quality CI.
+
+Intel macOS is excluded because official PyTorch x64 binaries stopped after 2.2,
+below this package's PyTorch minimum. See the
+[upstream announcement](https://dev-discuss.pytorch.org/t/pytorch-macos-x86-builds-deprecation-starting-january-2024/1690).
+Windows ARM/Python 3.14 is excluded while a matching CPU wheel is unavailable in the
+[official PyTorch CPU index](https://download.pytorch.org/whl/cpu/torch/).
+For Windows ARM, download a native CPU wheel first:
+
+```bash
+python -m pip download --no-deps --only-binary=:all: "torch>=2.9.0" --index-url https://download.pytorch.org/whl/cpu --dest torch-cpu
+```
+
+Install that downloaded `.whl` by filename with `python -m pip install`, then install
+`torch-batteries` normally. This selects the CPU build while allowing dependencies
+such as MarkupSafe to resolve from PyPI instead of restricting them to the CPU index.
+
 ## Optional dependencies
 
 Install W&B only when experiment tracking is needed:
