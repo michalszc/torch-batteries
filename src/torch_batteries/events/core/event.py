@@ -235,7 +235,8 @@ class Event(Enum):
         - **Context**: `optimizer`, `batch`, `batch_idx`, `epoch`
 
     - `TEST_STEP`: Called for each test batch. Returns `StepOutput`, or a scalar
-      loss when automatic Battery metrics are not configured.
+      loss when automatic Battery metrics are not configured. The `StepOutput`
+      loss may be omitted, in which case test contexts have no `test_loss`.
         - **Context**: `optimizer`, `batch`, `batch_idx`, `epoch`
 
     - `AFTER_TEST_STEP`: Called after each test batch.
