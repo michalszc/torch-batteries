@@ -1,4 +1,4 @@
-.PHONY: help install install-dev test lint lint-fix format format-check type-check build clean validate-version docs docs-serve notebooks-check release-metadata release-select-commit release
+.PHONY: help install install-dev test lint lint-fix format format-check type-check build clean validate-version validate-version-unpublished docs docs-serve notebooks-check release-metadata release-resolve-commit release-find-build release-verify-build release
 .DEFAULT_GOAL := help
 
 help: ## Show this help message
@@ -48,14 +48,23 @@ check-build: ## Check if build is ready for publishing
 release-metadata: ## Record the current commit and package version without publishing
 	python scripts/release.py metadata --output "$(or $(RELEASE_METADATA),release-metadata.json)"
 
-release-select-commit: ## Select the deployed commit from validated CD metadata
-	python scripts/release.py select-commit --metadata "$(or $(RELEASE_METADATA),release-metadata.json)"
+release-resolve-commit: ## Select RELEASE_COMMIT (default HEAD) after checking it is on the current branch
+	python scripts/release.py resolve-commit --commit "$(RELEASE_COMMIT)"
+
+release-find-build: ## Select the CD run that built RELEASE_SHA for the Release workflow
+	python scripts/release.py find-build --sha "$(RELEASE_SHA)" --repository "$(or $(RELEASE_REPOSITORY),$(GITHUB_REPOSITORY))"
+
+release-verify-build: ## Check that CD deployment metadata matches the current checkout
+	python scripts/release.py verify-build --metadata "$(or $(RELEASE_METADATA),release-metadata.json)" --project "$(or $(RELEASE_PROJECT),.)"
 
 release: ## Publish a GitHub release for the checkout recorded in deployment metadata
 	python scripts/release.py publish --metadata "$(or $(RELEASE_METADATA),release-metadata.json)" --project "$(or $(RELEASE_PROJECT),.)" --repository "$(or $(RELEASE_REPOSITORY),$(GITHUB_REPOSITORY))"
 
-validate-version: ## Check project versions, release notes, and PyPI
+validate-version: ## Check project versions and release notes
 	@bash scripts/validate_version.sh
+
+validate-version-unpublished: ## Also check that the version is newer than the latest on PyPI
+	@bash scripts/validate_version.sh --unpublished
 
 docs: ## Validate and generate documentation using strict MkDocs checks
 	NO_MKDOCS_2_WARNING=1 mkdocs build --strict

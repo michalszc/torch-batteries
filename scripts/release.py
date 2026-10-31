@@ -1,4 +1,4 @@
-"""Prepare deployment metadata and GitHub releases without package dependencies."""
+"""Prepare CD builds for release and publish GitHub releases without dependencies."""
 
 # ruff: noqa: INP001
 from __future__ import annotations
@@ -54,14 +54,6 @@ def read_metadata(path: Path) -> dict[str, str]:
     return {key: data[key] for key in patterns}
 
 
-def select_deployed_commit(metadata: Path) -> None:
-    """Expose only a validated full commit SHA to the workflow checkout step."""
-    sha = read_metadata(metadata)["sha"]
-    with Path(os.environ["GITHUB_OUTPUT"]).open("a", encoding="utf-8") as stream:
-        stream.write(f"sha={sha}\n")
-    logger.info("Selected deployed commit %s", sha)
-
-
 def release_notes(project: Path, version: str) -> str:
     """Extract exactly one nonempty curated section for the deployed version."""
     lines = (
@@ -93,6 +85,19 @@ def release_notes(project: Path, version: str) -> str:
         message = f"Empty release-notes section for {version}"
         raise ValueError(message)
     return notes
+
+
+def validate_repository(repository: str) -> None:
+    """Reject repository names that could alter GitHub API endpoints."""
+    if not re.fullmatch(r"[\w.-]+/[\w.-]+", repository):
+        message = "A valid owner/repository is required"
+        raise ValueError(message)
+
+
+def write_output(key: str, value: object) -> None:
+    """Expose a step output to later workflow steps."""
+    with Path(os.environ["GITHUB_OUTPUT"]).open("a", encoding="utf-8") as stream:
+        stream.write(f"{key}={value}\n")
 
 
 def api(endpoint: str) -> dict[str, Any] | None:
@@ -143,11 +148,87 @@ def tag_commit(repository: str, tag: str) -> str | None:
     return str(target["sha"])
 
 
-def publish_release(metadata: Path, project: Path, repository: str) -> None:
-    """Publish a release for the deployed checkout, preserving existing releases."""
-    if not re.fullmatch(r"[\w.-]+/[\w.-]+", repository):
-        message = "A valid owner/repository is required"
+def resolve_commit(commit: str, project: Path) -> None:
+    """Expose the full SHA of a commit on the checked-out branch, defaulting to HEAD."""
+    revision = commit.strip() or "HEAD"
+    if revision != "HEAD":
+        # Git accepts either case, and pasted SHAs are sometimes uppercase.
+        revision = revision.lower()
+    if revision != "HEAD" and not re.fullmatch(r"[0-9a-f]{7,40}", revision):
+        message = "The release commit must be a hexadecimal commit SHA"
         raise ValueError(message)
+    sha = subprocess.check_output(
+        ["git", "-C", str(project), "rev-parse", "--verify", f"{revision}^{{commit}}"],
+        text=True,
+    ).strip()
+    result = subprocess.run(
+        ["git", "-C", str(project), "merge-base", "--is-ancestor", sha, "HEAD"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode == 1:
+        message = f"Release commit {sha} is not on the checked-out branch"
+        raise ValueError(message)
+    if result.returncode:
+        raise subprocess.CalledProcessError(
+            result.returncode,
+            result.args,
+            result.stdout,
+            result.stderr,
+        )
+    write_output("sha", sha)
+    logger.info("Selected release commit %s", sha)
+
+
+def is_cd_run(repository: str, run_id: int) -> bool:
+    """Accept only master CD runs of this repository, not other uploaders."""
+    run = api(f"repos/{repository}/actions/runs/{run_id}")
+    return (
+        run is not None
+        and run.get("path") == ".github/workflows/cd.yml"
+        and run.get("event") == "workflow_run"
+        and run.get("head_branch") == "master"
+        and run.get("repository", {}).get("full_name") == repository
+    )
+
+
+def find_build(repository: str, sha: str) -> None:
+    """Expose the newest CD run that recorded a build for the commit."""
+    validate_repository(repository)
+    if not re.fullmatch(r"[0-9a-f]{40}", sha):
+        message = "A full commit SHA is required"
+        raise ValueError(message)
+    listing = api(
+        f"repos/{repository}/actions/artifacts?name=release-metadata-{sha}&per_page=100"
+    )
+    artifacts = [
+        artifact
+        for artifact in (listing or {}).get("artifacts", [])
+        if not artifact["expired"] and artifact["workflow_run"]["head_sha"] == sha
+    ]
+    artifacts.sort(key=lambda artifact: artifact["created_at"], reverse=True)
+    run_id = next(
+        (
+            int(artifact["workflow_run"]["id"])
+            for artifact in artifacts
+            if is_cd_run(repository, int(artifact["workflow_run"]["id"]))
+        ),
+        None,
+    )
+    if run_id is None:
+        message = (
+            f"No unexpired CD build for {sha}; wait for CD on master to succeed, "
+            "rerun it if it failed, or release a newer master commit if its "
+            "artifacts expired"
+        )
+        raise ValueError(message)
+    write_output("run-id", run_id)
+    logger.info("Selected CD run %s for %s", run_id, sha)
+
+
+def verify_checkout(metadata: Path, project: Path) -> dict[str, str]:
+    """Require the CD build identity to match the checkout being released."""
     identity = read_metadata(metadata)
     sha = subprocess.check_output(
         ["git", "-C", str(project), "rev-parse", "HEAD"],
@@ -160,6 +241,20 @@ def publish_release(metadata: Path, project: Path, repository: str) -> None:
     ):
         message = "Deployment metadata does not match the release checkout"
         raise ValueError(message)
+    logger.info(
+        "CD build of %s %s matches checkout %s",
+        identity["name"],
+        identity["version"],
+        sha,
+    )
+    return identity
+
+
+def publish_release(metadata: Path, project: Path, repository: str) -> None:
+    """Publish a release for the deployed checkout, preserving existing releases."""
+    validate_repository(repository)
+    identity = verify_checkout(metadata, project)
+    sha = identity["sha"]
     tag = f"v{identity['version']}"
     notes = "## What's Changed\n\n" + release_notes(project, identity["version"])
     notes += (
@@ -215,22 +310,33 @@ def main() -> int:
     commands = parser.add_subparsers(dest="command", required=True)
     metadata = commands.add_parser("metadata", help="Record deployment identity")
     metadata.add_argument("--output", type=Path, default=Path("release-metadata.json"))
-    for name in ("select-commit", "publish"):
+    repository = os.environ.get("GITHUB_REPOSITORY", "")
+    resolve = commands.add_parser(
+        "resolve-commit", help="Select a commit on the checked-out branch"
+    )
+    resolve.add_argument("--commit", default="")
+    resolve.add_argument("--project", type=Path, default=Path())
+    find = commands.add_parser("find-build", help="Select the CD run for a commit")
+    find.add_argument("--sha", required=True)
+    find.add_argument("--repository", default=repository)
+    for name in ("verify-build", "publish"):
         command = commands.add_parser(name)
         command.add_argument(
             "--metadata", type=Path, default=Path("release-metadata.json")
         )
+        command.add_argument("--project", type=Path, default=Path())
         if name == "publish":
-            command.add_argument("--project", type=Path, default=Path())
-            command.add_argument(
-                "--repository", default=os.environ.get("GITHUB_REPOSITORY", "")
-            )
+            command.add_argument("--repository", default=repository)
     args = parser.parse_args()
     try:
         if args.command == "metadata":
             record_metadata(args.output)
-        elif args.command == "select-commit":
-            select_deployed_commit(args.metadata)
+        elif args.command == "resolve-commit":
+            resolve_commit(args.commit, args.project)
+        elif args.command == "find-build":
+            find_build(args.repository, args.sha)
+        elif args.command == "verify-build":
+            verify_checkout(args.metadata, args.project)
         else:
             publish_release(args.metadata, args.project, args.repository)
     except (OSError, ValueError, KeyError, TypeError, subprocess.CalledProcessError):

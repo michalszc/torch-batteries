@@ -1,7 +1,16 @@
 #!/usr/bin/env bash
-# Validate version consistency across project files, release notes, and PyPI
+# Validate version consistency across project files and release notes.
+# With --unpublished, also require that the version is newer than the latest on PyPI.
 
 set -e
+
+# RELEASE_PROJECT lets master's tooling validate a separately checked-out release commit.
+cd "${RELEASE_PROJECT:-.}"
+
+CHECK_PYPI=false
+if [ "${1:-}" = "--unpublished" ]; then
+    CHECK_PYPI=true
+fi
 
 echo "🔍 Validating version consistency..."
 echo ""
@@ -49,24 +58,47 @@ fi
 echo "📋 Release notes:   $PYPROJECT_VERSION"
 echo "✅ Current version is included exactly once in release notes"
 
-# Check PyPI version
-PACKAGE_NAME="torch-batteries"
-PYPI_VERSION=$(curl -s "https://pypi.org/pypi/${PACKAGE_NAME}/json" | python -c "import sys, json; data = json.load(sys.stdin); print(data['info']['version'])" 2>/dev/null || echo "")
-
-if [ -z "$PYPI_VERSION" ]; then
-    echo "ℹ️  Package '${PACKAGE_NAME}' not found on PyPI (first release?)"
-else
-    echo "📦 PyPI:           $PYPI_VERSION"
-
-    if [ "$PYPROJECT_VERSION" = "$PYPI_VERSION" ]; then
+if [ "$CHECK_PYPI" = true ]; then
+    # Check PyPI version
+    PACKAGE_NAME="torch-batteries"
+    PYPI_JSON=$(mktemp)
+    trap 'rm -f "$PYPI_JSON"' EXIT
+    # Only a 404 means "never published"; any other failure must stop the release.
+    if ! PYPI_STATUS=$(curl -sS --retry 3 -o "$PYPI_JSON" -w '%{http_code}' "https://pypi.org/pypi/${PACKAGE_NAME}/json"); then
         echo ""
-        echo "❌ Version matches PyPI! Please bump the version before publishing."
+        echo "❌ Could not reach PyPI to check the latest version"
         exit 1
+    fi
+
+    PYPI_VERSION=""
+    if [ "$PYPI_STATUS" != "404" ]; then
+        if [ "$PYPI_STATUS" != "200" ]; then
+            echo ""
+            echo "❌ PyPI returned HTTP $PYPI_STATUS while checking the latest version"
+            exit 1
+        fi
+        if ! PYPI_VERSION=$(python -c "import sys, json; print(json.load(open(sys.argv[1]))['info']['version'])" "$PYPI_JSON"); then
+            echo ""
+            echo "❌ Could not read the latest version from the PyPI response"
+            exit 1
+        fi
+    fi
+
+    if [ -z "$PYPI_VERSION" ]; then
+        echo "ℹ️  Package '${PACKAGE_NAME}' not found on PyPI (first release?)"
     else
-        echo ""
-        echo "✅ Version $PYPROJECT_VERSION is different from PyPI ($PYPI_VERSION)"
+        echo "📦 PyPI:           $PYPI_VERSION"
+
+        if ! python -c 'import sys; from packaging.version import Version; sys.exit(Version(sys.argv[1]) <= Version(sys.argv[2]))' "$PYPROJECT_VERSION" "$PYPI_VERSION"; then
+            echo ""
+            echo "❌ Version $PYPROJECT_VERSION is not newer than PyPI ($PYPI_VERSION)! Please bump the version before publishing."
+            exit 1
+        else
+            echo ""
+            echo "✅ Version $PYPROJECT_VERSION is newer than PyPI ($PYPI_VERSION)"
+        fi
     fi
 fi
 
 echo ""
-echo "✨ All checks passed! Ready to publish version $PYPROJECT_VERSION"
+echo "✨ All checks passed for version $PYPROJECT_VERSION"

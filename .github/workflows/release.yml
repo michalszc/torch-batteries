@@ -1,32 +1,157 @@
 name: Release
 
 on:
-  workflow_run:
-    workflows: ["CD"]
-    branches:
-      - master
-    types:
-      - completed
+  workflow_dispatch:
+    inputs:
+      commit:
+        description: "Master commit to release (SHA); default: master HEAD"
+        required: false
+        default: ""
+        type: string
 
 concurrency:
   group: release-${{ github.repository }}
   cancel-in-progress: false
 
 jobs:
-  release:
+  publish:
+    runs-on: ubuntu-latest
+    if: ${{ github.ref == 'refs/heads/master' }}
+    environment:
+      name: pypi
+      url: https://pypi.org/project/torch-batteries/
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      run-id: ${{ steps.build.outputs.run-id }}
+      sha: ${{ steps.commit.outputs.sha }}
+    env:
+      # Master's tooling runs from the root and reads the release commit from here.
+      RELEASE_PROJECT: release-src
+    steps:
+    - name: Check out master
+      uses: actions/checkout@v7
+      with:
+        ref: ${{ github.sha }}
+        fetch-depth: 0
+        persist-credentials: false
+
+    - name: Set up Python 3.12
+      uses: actions/setup-python@v6
+      with:
+        python-version: '3.12'
+        cache: 'pip'
+        cache-dependency-path: 'pyproject.toml'
+
+    - name: Resolve release commit
+      id: commit
+      run: make release-resolve-commit
+      env:
+        RELEASE_COMMIT: ${{ inputs.commit }}
+
+    - name: Check out release commit
+      uses: actions/checkout@v7
+      with:
+        ref: ${{ steps.commit.outputs.sha }}
+        path: release-src
+        persist-credentials: false
+
+    - name: Find CD build
+      id: build
+      run: make release-find-build
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        RELEASE_SHA: ${{ steps.commit.outputs.sha }}
+
+    - name: Download package build
+      uses: actions/download-artifact@v8
+      with:
+        name: dist-${{ steps.commit.outputs.sha }}
+        path: dist
+        run-id: ${{ steps.build.outputs.run-id }}
+        repository: ${{ github.repository }}
+        github-token: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Download deployment identity
+      uses: actions/download-artifact@v8
+      with:
+        name: release-metadata-${{ steps.commit.outputs.sha }}
+        path: ${{ runner.temp }}/release-metadata
+        run-id: ${{ steps.build.outputs.run-id }}
+        repository: ${{ github.repository }}
+        github-token: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Install dependencies
+      run: pip install -e ./release-src --group build
+
+    - name: Verify CD build
+      run: make release-verify-build
+      env:
+        RELEASE_METADATA: ${{ runner.temp }}/release-metadata/release-metadata.json
+
+    - name: Validate unpublished version
+      run: make validate-version-unpublished
+
+    - name: Check build
+      run: make check-build
+
+    - name: Publish to PyPI
+      run: |
+        echo "## 📦 Publishing to PyPI" >> $GITHUB_STEP_SUMMARY
+        if make publish > publish_output.txt 2>&1; then
+          # Extract package name and version
+          PACKAGE_NAME=$(python -c "import tomllib; print(tomllib.load(open('$RELEASE_PROJECT/pyproject.toml', 'rb'))['project']['name'])")
+          PACKAGE_VERSION=$(python -c "import tomllib; print(tomllib.load(open('$RELEASE_PROJECT/pyproject.toml', 'rb'))['project']['version'])")
+
+          echo "✅ **Package published successfully!**" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📋 Package Details:" >> $GITHUB_STEP_SUMMARY
+          echo "- **Package:** \`$PACKAGE_NAME\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Version:** \`$PACKAGE_VERSION\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Repository:** PyPI" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🔗 Links:" >> $GITHUB_STEP_SUMMARY
+          echo "- [View on PyPI](https://pypi.org/project/$PACKAGE_NAME/$PACKAGE_VERSION/)" >> $GITHUB_STEP_SUMMARY
+          echo "- [Install command](https://pypi.org/project/$PACKAGE_NAME/#description): \`pip install $PACKAGE_NAME==$PACKAGE_VERSION\`" >> $GITHUB_STEP_SUMMARY
+        else
+          echo "❌ **Publishing failed!**" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Error details:" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          cat publish_output.txt >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "💡 **Common fixes:**" >> $GITHUB_STEP_SUMMARY
+          echo "- Check if version already exists on PyPI" >> $GITHUB_STEP_SUMMARY
+          echo "- Verify \`PYPI_API_TOKEN\` secret is set correctly" >> $GITHUB_STEP_SUMMARY
+          echo "- Ensure package name is available" >> $GITHUB_STEP_SUMMARY
+          exit 1
+        fi
+      env:
+        TWINE_USERNAME: __token__
+        TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
+
+  github-release:
+    needs: publish
     runs-on: ubuntu-latest
     permissions:
       actions: read
       contents: write
-    if: >-
-      ${{ github.event.workflow_run.conclusion == 'success' &&
-          github.event.workflow_run.head_branch == 'master' &&
-          github.event.workflow_run.head_repository.full_name == github.repository }}
+    env:
+      RELEASE_PROJECT: release-src
     steps:
-    - name: Check out repository
+    - name: Check out master
       uses: actions/checkout@v7
       with:
         ref: ${{ github.sha }}
+        persist-credentials: false
+
+    - name: Check out release commit
+      uses: actions/checkout@v7
+      with:
+        ref: ${{ needs.publish.outputs.sha }}
+        path: release-src
         persist-credentials: false
 
     - name: Set up Python 3.12
@@ -37,28 +162,14 @@ jobs:
     - name: Download deployment identity
       uses: actions/download-artifact@v8
       with:
-        name: release-metadata
+        name: release-metadata-${{ needs.publish.outputs.sha }}
         path: ${{ runner.temp }}/release-metadata
-        run-id: ${{ github.event.workflow_run.id }}
+        run-id: ${{ needs.publish.outputs.run-id }}
         repository: ${{ github.repository }}
         github-token: ${{ secrets.GITHUB_TOKEN }}
-
-    - name: Select deployed commit
-      id: deployment
-      run: make release-select-commit
-      env:
-        RELEASE_METADATA: ${{ runner.temp }}/release-metadata/release-metadata.json
-
-    - name: Check out deployed commit
-      uses: actions/checkout@v7
-      with:
-        ref: ${{ steps.deployment.outputs.sha }}
-        path: deployed
-        persist-credentials: false
 
     - name: Publish GitHub release
       run: make release
       env:
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         RELEASE_METADATA: ${{ runner.temp }}/release-metadata/release-metadata.json
-        RELEASE_PROJECT: deployed

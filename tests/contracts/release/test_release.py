@@ -1,4 +1,4 @@
-"""Offline tests of release publication, identity validation, and retry safety."""
+"""Offline tests of CD build selection, release publication, and retry safety."""
 
 from __future__ import annotations
 
@@ -47,6 +47,8 @@ def github(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> dict[str, Any]:
     """Replace every GitHub and git invocation; never access network or publish."""
     state: dict[str, Any] = {
         "release": None,
+        "artifacts": None,
+        "runs": {},
         "ref": None,
         "annotated": None,
         "api_error": None,
@@ -62,6 +64,10 @@ def github(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> dict[str, Any]:
         endpoint = command[2]
         if "/releases/tags/" in endpoint:
             value = state["release"]
+        elif "/actions/artifacts" in endpoint:
+            value = state["artifacts"]
+        elif "/actions/runs/" in endpoint:
+            value = state["runs"].get(int(endpoint.rsplit("/", 1)[1]))
         elif "/git/ref/" in endpoint:
             value = state["ref"]
         else:
@@ -232,27 +238,226 @@ def test_invalid_notes_fail_before_api(
         {"sha": SHA, "name": "pkg", "version": "1.0\nsha=master"},
     ],
 )
-def test_invalid_metadata_cannot_select_checkout(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
+def test_invalid_metadata_fails_verification(
+    project: Path,
+    github: dict[str, Any],
     identity: Any,
 ) -> None:
-    metadata = tmp_path / "metadata.json"
-    metadata.write_text(json.dumps(identity))
+    (project / "metadata.json").write_text(json.dumps(identity))
+    with pytest.raises(ValueError, match="Invalid deployment metadata"):
+        TOOL.verify_checkout(project / "metadata.json", project)
+
+
+def test_verify_checkout_accepts_matching_build(
+    project: Path, github: dict[str, Any]
+) -> None:
+    identity = TOOL.verify_checkout(project / "metadata.json", project)
+    assert identity == {"sha": SHA, "name": "torch-batteries", "version": "1.0.0"}
+    assert not github["commands"]
+
+
+def artifact(run_id: int, created_at: str, *, expired: bool = False) -> dict[str, Any]:
+    return {
+        "expired": expired,
+        "created_at": created_at,
+        "workflow_run": {"id": run_id, "head_sha": SHA},
+    }
+
+
+def cd_run(**overrides: Any) -> dict[str, Any]:
+    return {
+        "path": ".github/workflows/cd.yml",
+        "event": "workflow_run",
+        "head_branch": "master",
+        "repository": {"full_name": "owner/repo"},
+        **overrides,
+    }
+
+
+def test_find_build_selects_newest_unexpired_cd_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, github: dict[str, Any]
+) -> None:
+    github["runs"] = {1: cd_run(), 2: cd_run(), 3: cd_run()}
+    github["artifacts"] = {
+        "artifacts": [
+            artifact(1, "2026-01-01T00:00:00Z"),
+            artifact(3, "2026-01-03T00:00:00Z", expired=True),
+            artifact(2, "2026-01-02T00:00:00Z"),
+        ]
+    }
     output = tmp_path / "output"
     monkeypatch.setenv("GITHUB_OUTPUT", str(output))
-    with pytest.raises(ValueError, match="Invalid deployment metadata"):
-        TOOL.select_deployed_commit(metadata)
+    TOOL.find_build("owner/repo", SHA)
+    assert output.read_text() == "run-id=2\n"
+    endpoint = github["commands"][0][2]
+    assert endpoint.startswith("repos/owner/repo/actions/artifacts?")
+    assert f"name=release-metadata-{SHA}" in endpoint
+
+
+@pytest.mark.parametrize(
+    "run",
+    [
+        cd_run(path=".github/workflows/ci.yml"),
+        cd_run(event="workflow_dispatch"),
+        cd_run(head_branch="feature"),
+        cd_run(repository={"full_name": "fork/repo"}),
+    ],
+)
+def test_find_build_skips_runs_outside_master_cd(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    github: dict[str, Any],
+    run: dict[str, Any],
+) -> None:
+    github["runs"] = {1: cd_run(), 2: run}
+    github["artifacts"] = {
+        "artifacts": [
+            artifact(1, "2026-01-01T00:00:00Z"),
+            artifact(2, "2026-01-02T00:00:00Z"),
+        ]
+    }
+    output = tmp_path / "output"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+    TOOL.find_build("owner/repo", SHA)
+    assert output.read_text() == "run-id=1\n"
+
+
+def test_find_build_requires_cd_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, github: dict[str, Any]
+) -> None:
+    github["runs"] = {1: cd_run(path=".github/workflows/ci.yml")}
+    github["artifacts"] = {"artifacts": [artifact(1, "2026-01-01T00:00:00Z")]}
+    output = tmp_path / "output"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+    with pytest.raises(ValueError, match="No unexpired CD build"):
+        TOOL.find_build("owner/repo", SHA)
     assert not output.exists()
 
 
-def test_select_deployed_commit_uses_metadata_sha(
-    project: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize(
+    "artifacts",
+    [
+        {"artifacts": []},
+        {"artifacts": [artifact(1, "2026-01-01T00:00:00Z", expired=True)]},
+    ],
+)
+def test_find_build_requires_unexpired_cd_run(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    github: dict[str, Any],
+    artifacts: dict[str, Any],
 ) -> None:
-    output = project / "output"
+    github["artifacts"] = artifacts
+    output = tmp_path / "output"
     monkeypatch.setenv("GITHUB_OUTPUT", str(output))
-    TOOL.select_deployed_commit(project / "metadata.json")
-    assert output.read_text() == f"sha={SHA}\n"
+    with pytest.raises(ValueError, match="No unexpired CD build"):
+        TOOL.find_build("owner/repo", SHA)
+    assert not output.exists()
+
+
+@pytest.mark.parametrize(
+    ("repository", "sha", "error"),
+    [
+        ("owner", SHA, "owner/repository"),
+        ("owner/repo", "master", "full commit SHA"),
+        ("owner/repo", SHA[:7], "full commit SHA"),
+    ],
+)
+def test_find_build_validates_inputs_before_api(
+    github: dict[str, Any], repository: str, sha: str, error: str
+) -> None:
+    with pytest.raises(ValueError, match=error):
+        TOOL.find_build(repository, sha)
+    assert not github["commands"]
+
+
+@pytest.fixture
+def history(tmp_path: Path) -> dict[str, Any]:
+    """Create a real repository with master history and an unmerged side commit."""
+    repository = tmp_path / "history"
+    repository.mkdir()
+
+    def git(*arguments: str) -> str:
+        return subprocess.check_output(
+            ["git", "-C", str(repository), *arguments], text=True
+        ).strip()
+
+    git("init", "--quiet")
+    git("symbolic-ref", "HEAD", "refs/heads/master")
+    git("config", "user.email", "test@example.com")
+    git("config", "user.name", "Test")
+    git("commit", "--quiet", "--allow-empty", "-m", "bump")
+    bump = git("rev-parse", "HEAD")
+    git("commit", "--quiet", "--allow-empty", "-m", "docs")
+    head = git("rev-parse", "HEAD")
+    git("checkout", "--quiet", "-b", "side", bump)
+    git("commit", "--quiet", "--allow-empty", "-m", "side")
+    side = git("rev-parse", "HEAD")
+    git("checkout", "--quiet", "master")
+    return {"path": repository, "bump": bump, "head": head, "side": side}
+
+
+@pytest.mark.parametrize(("commit", "expected"), [("", "head"), ("  ", "head")])
+def test_resolve_commit_defaults_to_head(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    history: dict[str, Any],
+    commit: str,
+    expected: str,
+) -> None:
+    output = tmp_path / "output"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+    TOOL.resolve_commit(commit, history["path"])
+    assert output.read_text() == f"sha={history[expected]}\n"
+
+
+@pytest.mark.parametrize("length", [7, 40])
+@pytest.mark.parametrize("upper", [False, True])
+def test_resolve_commit_accepts_earlier_branch_commit(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    history: dict[str, Any],
+    length: int,
+    *,
+    upper: bool,
+) -> None:
+    output = tmp_path / "output"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+    commit = history["bump"][:length]
+    TOOL.resolve_commit(commit.upper() if upper else commit, history["path"])
+    assert output.read_text() == f"sha={history['bump']}\n"
+
+
+def test_resolve_commit_rejects_commit_outside_branch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, history: dict[str, Any]
+) -> None:
+    output = tmp_path / "output"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+    with pytest.raises(ValueError, match="not on the checked-out branch"):
+        TOOL.resolve_commit(history["side"], history["path"])
+    assert not output.exists()
+
+
+@pytest.mark.parametrize("commit", ["master", "HEAD~1", "abc", "a" * 41, "$(id)"])
+def test_resolve_commit_rejects_non_sha_input(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    history: dict[str, Any],
+    commit: str,
+) -> None:
+    output = tmp_path / "output"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+    with pytest.raises(ValueError, match="hexadecimal commit SHA"):
+        TOOL.resolve_commit(commit, history["path"])
+    assert not output.exists()
+
+
+def test_resolve_commit_rejects_unknown_sha(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, history: dict[str, Any]
+) -> None:
+    monkeypatch.setenv("GITHUB_OUTPUT", str(tmp_path / "output"))
+    with pytest.raises(subprocess.CalledProcessError):
+        TOOL.resolve_commit("f" * 40, history["path"])
 
 
 def test_cli_logs_failure(
@@ -260,7 +465,7 @@ def test_cli_logs_failure(
 ) -> None:
     monkeypatch.setattr(
         "sys.argv",
-        ["release.py", "select-commit", "--metadata", str(project / "missing.json")],
+        ["release.py", "verify-build", "--metadata", str(project / "missing.json")],
     )
     assert TOOL.main() == 1
     assert "Release tooling failed" in caplog.text
