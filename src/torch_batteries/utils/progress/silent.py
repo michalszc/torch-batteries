@@ -76,14 +76,23 @@ class SilentProgress(Progress):
                 self._total_metrics[key] += cast("float", value) * batch_size
             self._total_samples += batch_size
 
-    def end_phase(self) -> dict[str, float]:
-        """End the current phase and return average metrics."""
-        if self._total_samples > 0:
-            return {
+    def end_phase(
+        self, *, final_metrics: dict[str, float] | None = None
+    ) -> dict[str, float]:
+        """Return batch averages merged with computed phase metrics.
+
+        Args:
+            final_metrics: Authoritative phase values overriding batch averages.
+        """
+        averages = (
+            {
                 key: total / self._total_samples
                 for key, total in self._total_metrics.items()
             }
-        return {}
+            if self._total_samples > 0
+            else {}
+        )
+        return {**averages, **(final_metrics or {})}
 
     def end_epoch(self) -> None:
         """End the current epoch (silent)."""

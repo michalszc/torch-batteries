@@ -59,8 +59,13 @@ class Progress(ABC):
         """
 
     @abstractmethod
-    def end_phase(self) -> float | dict[str, float]:
-        """End the current phase and return average metrics.
+    def end_phase(
+        self, *, final_metrics: dict[str, float] | None = None
+    ) -> float | dict[str, float]:
+        """End the current phase and return completed metrics.
+
+        Args:
+            final_metrics: Authoritative phase values overriding batch averages.
 
         Returns:
             Either a single float (average loss) or a dictionary containing
