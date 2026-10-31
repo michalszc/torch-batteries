@@ -14,14 +14,17 @@ R = TypeVar("R")
 logger = get_logger("events.core")
 
 
-def charge(event: Event) -> Callable[[Callable[P, R]], Callable[P, R]]:
+def charge(event: Event, *events: Event) -> Callable[[Callable[P, R]], Callable[P, R]]:
     """Decorator to mark methods for specific training events.
 
     Handlers accept the context associated with the selected event. Model and callback
-    events receive `EventContext`; DataPack events receive `DataContext`.
+    events receive `EventContext`; DataPack events receive `DataContext`. Passing
+    several events charges one method for each of them, equivalent to stacking
+    decorators.
 
     Args:
         event: The event type from the Event enum
+        *events: Additional events handled by the same method
 
     Returns:
         Decorated function with event metadata
@@ -35,6 +38,11 @@ def charge(event: Event) -> Callable[[Callable[P, R]], Callable[P, R]]:
             pred = self(x)
             loss = F.mse_loss(pred, y)
             return StepOutput(loss=loss)
+
+        @charge(Event.TRAIN_STEP, Event.VALIDATION_STEP, Event.TEST_STEP)
+        def step(self, context: EventContext):
+            x, y = context["batch"]
+            return StepOutput(loss=F.mse_loss(self(x), y))
 
         @charge(Event.BEFORE_TRAIN_EPOCH)
         def on_epoch_start(self, context: EventContext):
@@ -50,8 +58,11 @@ def charge(event: Event) -> Callable[[Callable[P, R]], Callable[P, R]]:
 
     def decorator(fn: Callable[P, R]) -> Callable[P, R]:
         charged_events = getattr(fn, "_torch_batteries_events", ())
-        fn._torch_batteries_events = (*charged_events, event)  # type: ignore[attr-defined] # noqa: SLF001
-        logger.debug("Method '%s' charged with event '%s'", fn.__name__, event.value)
+        fn._torch_batteries_events = (*charged_events, event, *events)  # type: ignore[attr-defined] # noqa: SLF001
+        for charged_event in (event, *events):
+            logger.debug(
+                "Method '%s' charged with event '%s'", fn.__name__, charged_event.value
+            )
         return fn
 
     return decorator

@@ -8,8 +8,16 @@ Data lifecycle events are owned only by a `DataPack`; placing them on a model or
 callback fails during discovery. They may run through an attached `Battery` or a
 standalone `DataPack.resolve()` call.
 
-Distinct events may share one implementation by stacking decorators. This is useful
-when train, validation, and test steps have the same behavior:
+Distinct events may share one implementation by passing several events to one decorator. This is useful when train, validation, and test steps have the same behavior:
+
+```python
+@charge(Event.TRAIN_STEP, Event.VALIDATION_STEP, Event.TEST_STEP)
+def step(self, context: EventContext):
+    batch = context["batch"]
+    return self.shared_step(batch)
+```
+
+Stacking decorators is equivalent, and both forms may be combined:
 
 ```python
 @charge(Event.TRAIN_STEP)
