@@ -49,7 +49,7 @@ release-metadata: ## Record the current commit and package version without publi
 	python scripts/release.py metadata --output "$(or $(RELEASE_METADATA),release-metadata.json)"
 
 release-resolve-commit: ## Select RELEASE_COMMIT (default HEAD) after checking it is on the current branch
-	python scripts/release.py resolve-commit --commit "$(RELEASE_COMMIT)"
+	python scripts/release.py resolve-commit --commit "$$RELEASE_COMMIT"
 
 release-find-build: ## Select the CD run that built RELEASE_SHA for the Release workflow
 	python scripts/release.py find-build --sha "$(RELEASE_SHA)" --repository "$(or $(RELEASE_REPOSITORY),$(GITHUB_REPOSITORY))"

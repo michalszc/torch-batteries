@@ -221,6 +221,22 @@ def test_release_resolves_commit_on_master_first() -> None:
         assert not any("inputs." in step.get("run", "") for step in job["steps"])
 
 
+@pytest.mark.parametrize(
+    "commit", ['x"; echo injected; echo "', "$(shell echo injected)"]
+)
+def test_release_commit_input_is_not_expanded_by_make(commit: str) -> None:
+    result = subprocess.run(
+        ["make", "-n", "release-resolve-commit"],
+        cwd=ROOT,
+        env={**os.environ, "RELEASE_COMMIT": commit},
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert "injected" not in result.stdout + result.stderr
+    assert '--commit "$RELEASE_COMMIT"' in result.stdout
+
+
 def test_release_publishes_cd_build_before_tagging() -> None:
     jobs = workflow("release")["jobs"]
     steps = jobs["publish"]["steps"]
