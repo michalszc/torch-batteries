@@ -144,6 +144,18 @@ def test_unpublished_validation_rejects_version_not_newer_than_pypi(
     assert f"not newer than PyPI ({pypi_version})" in result.stdout
 
 
+def test_unpublished_validation_rejects_invalid_pypi_version(
+    version_project: Path,
+) -> None:
+    fake_pypi(version_project, '{"info":{"version":"not-a-version"}}')
+
+    result = validate(version_project, "--unpublished")
+
+    assert result.returncode != 0
+    assert "not a valid version" in result.stdout
+    assert "not newer" not in result.stdout
+
+
 def test_unpublished_validation_accepts_first_release(version_project: Path) -> None:
     fake_pypi(version_project, '{"message":"Not Found"}', status=404)
 

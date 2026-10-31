@@ -89,7 +89,14 @@ if [ "$CHECK_PYPI" = true ]; then
     else
         echo "📦 PyPI:           $PYPI_VERSION"
 
-        if ! python -c 'import sys; from packaging.version import Version; sys.exit(Version(sys.argv[1]) <= Version(sys.argv[2]))' "$PYPROJECT_VERSION" "$PYPI_VERSION"; then
+        # An unparsable version must not be reported as an ordering problem.
+        if ! IS_NEWER=$(python -c 'import sys; from packaging.version import Version; print(Version(sys.argv[1]) > Version(sys.argv[2]))' "$PYPROJECT_VERSION" "$PYPI_VERSION"); then
+            echo ""
+            echo "❌ Could not compare version $PYPROJECT_VERSION with PyPI ($PYPI_VERSION): not a valid version"
+            exit 1
+        fi
+
+        if [ "$IS_NEWER" != "True" ]; then
             echo ""
             echo "❌ Version $PYPROJECT_VERSION is not newer than PyPI ($PYPI_VERSION)! Please bump the version before publishing."
             exit 1
