@@ -103,6 +103,31 @@ Missing directories are created. A `.pth` suffix is added only when the template
 no suffix. Static Top-K templates gain an epoch field so retained files do not
 overwrite each other. Deleted rankings remove their files.
 
+Each callback run also maintains a private
+`.torch-batteries-top-k-<run-id>.json` ranking manifest in `save_dir`. Keep it with
+the checkpoint files when continuing the same run. Its identity and monitor
+configuration isolate the ranking from other callbacks and fresh runs in that
+directory. Replayed epoch filenames gain a `-v1`, `-v2`, ... suffix when needed to
+preserve an existing retained checkpoint.
+
+Restoring an older checkpoint loads its model, optimizer, epoch, and history state,
+then reconciles checkpoint management with the current manifest. For example, scores
+`0.80, 0.79, 0.90, 0.85` with `mode="max"` and `save_top_k=2` retain epochs 3 and 4.
+Loading epoch 3 still tracks both files, even though its historical callback snapshot
+referenced the now-deleted epoch 1. Loading does not modify checkpoint files or the
+manifest.
+
+Missing sibling files no longer invalidate an otherwise valid checkpoint. If the
+manifest is missing, invalid, or absent from a legacy callback snapshot, restoration
+warns and retains only existing files from that snapshot. Newer directory entries
+cannot be recovered automatically in this fallback. Structurally corrupt callback
+state and incompatible monitor configurations are still rejected.
+
+Checkpoint and manifest writes complete before displaced files are removed. A failed
+write restores the previous ranking and checkpoint contents. One writer must own a
+ranking; concurrent writers and atomic recovery across multiple files after a process
+crash are not supported.
+
 With `save_weights_only=False` (the default), each retained file is a full Battery
 checkpoint. With `True`, it contains only `model.state_dict()` and can initialize a
 model but cannot resume optimizer, callback, metric, epoch, or history state.
@@ -124,4 +149,5 @@ Restoration fails rather than silently changing an experiment when:
 - Stateful metric names differ.
 - The saved and configured DataPack types differ, or a required DataPack is missing.
 - A callback's fixed configuration differs, such as accumulation steps or precision.
+- A checkpoint callback's saved monitor, filename template, or retention policy differs.
 - The requested total resume target contains no new epoch.

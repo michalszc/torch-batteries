@@ -54,6 +54,11 @@ class ModelCheckpoint(Callback):
     The `{epoch}` filename field uses the one-based epoch number from the event
     context, matching progress output.
 
+    Full-state restoration uses this run's ranking manifest in ``save_dir`` to
+    retain the current best files while restoring historical training state.
+    Missing or invalid manifests fall back to surviving snapshot entries with a
+    warning. Saving a replacement is transactional; each ranking needs one writer.
+
     Examples:
         ```python
         checkpoint = ModelCheckpoint(
