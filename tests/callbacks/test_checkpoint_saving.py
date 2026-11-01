@@ -40,7 +40,7 @@ class EpochScoreModel(torch.nn.Module):
 
 
 def make_training_battery(
-    directory: Path, **options: Any
+    directory: Path, *, extra_callbacks: list[object] | None = None, **options: Any
 ) -> tuple[Battery, ModelCheckpoint]:
     """Construct a reproducible CPU workflow with configurable saving policies."""
     configuration = {"phase": "validation", "metric": "score", **options}
@@ -50,7 +50,7 @@ def make_training_battery(
         model,
         device="cpu",
         optimizer=torch.optim.SGD(model.parameters(), lr=0.01),
-        callbacks=[callback],
+        callbacks=[callback, *(extra_callbacks or [])],
     )
     return battery, callback
 
@@ -161,7 +161,7 @@ def test_invalid_checkpoint_retention(tmp_path: Path, top_k: object) -> None:
 def test_unlimited_resume_preserves_absolute_cadence_and_retained_files(
     tmp_path: Path,
 ) -> None:
-    options = {"save_top_k": -1, "save_every_n_epochs": 2}
+    options: dict[str, Any] = {"save_top_k": -1, "save_every_n_epochs": 2}
     battery, callback = make_training_battery(tmp_path, **options)
     battery.fit(loader(), loader(), epochs=4, verbose=0)
     original = {path: Path(path).read_bytes() for path in callback.best_k_models}

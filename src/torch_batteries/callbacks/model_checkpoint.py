@@ -22,6 +22,7 @@ from ._model_checkpoint_functions import (
     _optional_path,
     _serialized_float,
     _string_float_dict,
+    _validate_bool,
     _validate_save_weights_only,
 )
 
@@ -82,6 +83,8 @@ class ModelCheckpoint(Callback):
         save_top_k: int = 1,
         save_weights_only: bool = False,
         save_every_n_epochs: int = 1,
+        save_final: bool = False,
+        final_save_path: str | None = None,
     ) -> None:
         phase = resolve_monitor_phase(phase, required=True)
         assert phase is not None
@@ -93,6 +96,8 @@ class ModelCheckpoint(Callback):
             msg = "save_every_n_epochs must be a positive integer"
             raise ValueError(msg)
         save_weights_only = _validate_save_weights_only(save_weights_only)
+        save_final = _validate_bool(save_final, name="save_final")
+        final_save_path = _optional_path(final_save_path)
 
         self._phase = phase
         self._metric = metric
@@ -100,6 +105,9 @@ class ModelCheckpoint(Callback):
         self._save_path = save_path
         self._save_top_k = save_top_k
         self._save_every_n_epochs = save_every_n_epochs
+        self._save_final = save_final
+        self._final_save_path = final_save_path
+        self._final_model_path: str | None = None
         self._save_weights_only = save_weights_only
         self._best_k_models: dict[str, float] = {}
         self._ranking_id: str | None = uuid4().hex
@@ -129,6 +137,11 @@ class ModelCheckpoint(Callback):
         return self._best_model_path
 
     @property
+    def final_model_path(self) -> str | None:
+        """Return the latest additional final checkpoint path, if saved."""
+        return self._final_model_path
+
+    @property
     def best_score(self) -> float | None:
         """Returns the best score achieved by the monitored metric."""
         return self._best_score
@@ -144,8 +157,9 @@ class ModelCheckpoint(Callback):
             "best_k_models": dict(self._best_k_models),
             "best_model_path": self._best_model_path,
             "kth_best_model_path": self._kth_best_model_path,
-            "best_score": self._best_score,
-            "kth_best_score": self._kth_best_score,
+            "best_score": self._best_score if self._best_k_models else None,
+            "kth_best_score": self._kth_best_score if self._best_k_models else None,
+            "final_model_path": self._final_model_path,
             "save_weights_only": self._save_weights_only,
             "ranking_id": self._ranking_id,
             "ranking_config": self._ranking_config(),
@@ -175,6 +189,7 @@ class ModelCheckpoint(Callback):
         self._best_score = best_score
         self._kth_best_score = kth_best_score
         self._ranking_id = cast("str | None", state_dict.get("ranking_id"))
+        self._final_model_path = cast("str | None", state_dict.get("final_model_path"))
         logger.info(
             "Restored model checkpoint state with %d retained models.",
             len(self._best_k_models),
@@ -188,8 +203,18 @@ class ModelCheckpoint(Callback):
             best_k_models = _string_float_dict(state_dict["best_k_models"])
             best_model_path = _optional_path(state_dict["best_model_path"])
             kth_best_model_path = _optional_path(state_dict["kth_best_model_path"])
-            best_score = _serialized_float(state_dict["best_score"])
-            kth_best_score = _serialized_float(state_dict["kth_best_score"])
+            empty_score = (
+                (float("inf") if self._mode == "min" else float("-inf"))
+                if not best_k_models
+                else None
+            )
+            best_score = _serialized_float(
+                state_dict["best_score"], empty_score=empty_score
+            )
+            kth_best_score = _serialized_float(
+                state_dict["kth_best_score"], empty_score=empty_score
+            )
+            _optional_path(state_dict.get("final_model_path"))
             _validate_save_weights_only(
                 state_dict["save_weights_only"],
                 expected=self._save_weights_only,
@@ -250,6 +275,8 @@ class ModelCheckpoint(Callback):
             "save_path": self._save_path,
             "save_top_k": self._save_top_k,
             "save_every_n_epochs": self._save_every_n_epochs,
+            "save_final": self._save_final,
+            "final_save_path": self._final_save_path,
             "save_weights_only": self._save_weights_only,
         }
 
@@ -263,7 +290,12 @@ class ModelCheckpoint(Callback):
             raise ValueError(msg)
         config = state.get("ranking_config")
         if isinstance(config, dict):
-            config = {"save_every_n_epochs": 1, **config}
+            config = {
+                "save_every_n_epochs": 1,
+                "save_final": False,
+                "final_save_path": None,
+                **config,
+            }
         if "ranking_config" in state and config != self._ranking_config():
             msg = "Checkpoint ranking configuration does not match."
             raise ValueError(msg)
@@ -278,7 +310,7 @@ class ModelCheckpoint(Callback):
             {"schema_version": 1, "state": self.state_dict()}, self._manifest_path()
         )
 
-    def _read_manifest(self) -> dict[str, float]:
+    def _read_manifest(self) -> dict[str, Any]:
         """Read and validate a manifest belonging to this callback's run."""
         if self._ranking_id is None:
             msg = "Legacy checkpoint has no ranking identity."
@@ -295,22 +327,30 @@ class ModelCheckpoint(Callback):
         if self._save_top_k != -1 and len(ranking) > self._save_top_k:
             msg = "Checkpoint manifest exceeds the configured retention limit."
             raise ValueError(msg)
-        return ranking
+        return state
 
     def _reconcile_checkpoint_state(self) -> None:
         """Read current ranking metadata while keeping restoration free of writes."""
         try:
-            ranking = self._read_manifest()
+            state = self._read_manifest()
         except (OSError, ValueError, TypeError, KeyError) as error:
-            ranking = self._best_k_models
+            state = self.state_dict()
             logger.warning(
                 "Using surviving checkpoint snapshot entries; newer ranking entries "
                 "cannot be recovered from the manifest: %s",
                 error,
             )
         self._best_k_models = {
-            path: score for path, score in ranking.items() if Path(path).is_file()
+            path: score
+            for path, score in state["best_k_models"].items()
+            if Path(path).is_file()
         }
+        final_path = state.get("final_model_path")
+        self._final_model_path = (
+            final_path
+            if final_path is not None and Path(final_path).is_file()
+            else None
+        )
         self._refresh_ranking()
 
     def _refresh_ranking(self) -> None:
@@ -341,7 +381,7 @@ class ModelCheckpoint(Callback):
         battery = context.get("battery")
         self._save_top_k_model(battery, context["model"], metrics)
 
-    @charge(Event.AFTER_VALIDATION)
+    @charge(Event.AFTER_VALIDATION_EPOCH)
     def run_on_validation_end(self, context: EventContext) -> None:
         """Save model checkpoint after validation if metric improved.
 
@@ -355,6 +395,40 @@ class ModelCheckpoint(Callback):
 
         battery = context.get("battery")
         self._save_top_k_model(battery, context["model"], metrics)
+
+    @charge(Event.AFTER_TRAIN)
+    def run_on_train_end(self, context: EventContext) -> None:
+        """Save the latest final model independently of periodic retention.
+
+        Args:
+            context: Completed training context, including optional validation metrics.
+        """
+        if not self._save_final:
+            return
+        template = self._final_save_path
+        if template is None:
+            original = Path(self._save_path or "{epoch}")
+            template = str(original.with_name(f"final-{original.name}"))
+        phase_metrics = (
+            context.get("train_metrics", {})
+            if self._phase == "train"
+            else context.get("val_metrics", {})
+        )
+        metrics = {**phase_metrics, "epoch": context["epoch"]}
+        path = self._checkpoint_path(
+            template, metrics, replace_path=self._final_model_path
+        )
+        previous_state = self.state_dict()
+        previous_final = self._final_model_path
+        if self._ranking_id is None:
+            self._ranking_id = uuid4().hex
+        self._final_model_path = str(path)
+        self._commit_checkpoint(
+            context.get("battery"), context["model"], path, previous_state
+        )
+        if previous_final is not None and previous_final != str(path):
+            self._delete_checkpoint_file(previous_final)
+        logger.info("Saved final model checkpoint at: %s", path)
 
     def _save_top_k_model(
         self,
@@ -430,23 +504,11 @@ class ModelCheckpoint(Callback):
             Path to the saved model file.
         """
         filename_template = self._ensure_unique_template(self._save_path)
-        filename = self._format_checkpoint_name(
+        path = self._checkpoint_path(
             filename_template,
             metrics,
-            auto_insert_metric_name=True,
+            replace_path=self._best_model_path if self._save_top_k == 1 else None,
         )
-        if not self._has_explicit_suffix(filename_template):
-            filename = f"{filename}.pth"
-        path = Path(self._save_dir) / filename
-        path.parent.mkdir(parents=True, exist_ok=True)
-        if self._save_top_k != 1 or str(path) not in self._best_k_models:
-            original = path
-            version = 1
-            while path.exists():
-                path = original.with_name(
-                    f"{original.stem}-v{version}{original.suffix}"
-                )
-                version += 1
         filepath = str(path)
 
         previous_state = self.state_dict()
@@ -456,22 +518,7 @@ class ModelCheckpoint(Callback):
             self._best_score = current_score
             self._best_model_path = filepath
         displaced_path = self._update_top_k_models(filepath, current_score)
-        try:
-            with _checkpoint_file_transaction(path):
-                if self._save_weights_only or battery is None:
-                    if battery is None and not self._save_weights_only:
-                        logger.warning(
-                            "ModelCheckpoint context has no Battery; "
-                            "falling back to raw weights."
-                        )
-                    _save_weights(model.state_dict(), path)
-                else:
-                    battery.save_checkpoint(filepath)
-                self._write_manifest()
-        except BaseException:
-            self.load_state_dict(previous_state)
-            logger.exception("Failed to save model checkpoint at: %s", filepath)
-            raise
+        self._commit_checkpoint(battery, model, path, previous_state)
 
         if displaced_path is not None:
             self._delete_checkpoint_file(displaced_path)
@@ -483,6 +530,51 @@ class ModelCheckpoint(Callback):
         )
 
         return filepath
+
+    def _checkpoint_path(
+        self,
+        template: str | None,
+        metrics: dict[str, float],
+        *,
+        replace_path: str | None,
+    ) -> Path:
+        """Format a destination while preserving files not owned by this save."""
+        filename = self._format_checkpoint_name(template, metrics)
+        if not self._has_explicit_suffix(template):
+            filename = f"{filename}.pth"
+        path = Path(self._save_dir) / filename
+        path.parent.mkdir(parents=True, exist_ok=True)
+        original = path
+        version = 1
+        while path.exists() and str(path) != replace_path:
+            path = original.with_name(f"{original.stem}-v{version}{original.suffix}")
+            version += 1
+        return path
+
+    def _commit_checkpoint(
+        self,
+        battery: Battery | None,
+        model: nn.Module,
+        path: Path,
+        previous_state: dict[str, object],
+    ) -> None:
+        """Commit checkpoint and manifest together, rolling back failed writes."""
+        try:
+            with _checkpoint_file_transaction(path):
+                if self._save_weights_only or battery is None:
+                    if battery is None and not self._save_weights_only:
+                        logger.warning(
+                            "ModelCheckpoint context has no Battery; "
+                            "falling back to raw weights."
+                        )
+                    _save_weights(model.state_dict(), path)
+                else:
+                    battery.save_checkpoint(str(path))
+                self._write_manifest()
+        except BaseException:
+            self.load_state_dict(previous_state)
+            logger.exception("Failed to save model checkpoint at: %s", path)
+            raise
 
     def _ensure_unique_template(self, filename: str | None) -> str | None:
         """Add an epoch field when top-k checkpoints would share one filename."""

@@ -32,8 +32,10 @@ def _required_path(value: object) -> str:
     return path
 
 
-def _serialized_float(value: object) -> float:
+def _serialized_float(value: object, *, empty_score: float | None = None) -> float:
     """Validate a serialized numeric value."""
+    if value is None and empty_score is not None:
+        return empty_score
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         msg = "checkpoint score must be numeric"
         raise TypeError(msg)
@@ -42,10 +44,16 @@ def _serialized_float(value: object) -> float:
 
 def _validate_save_weights_only(value: object, *, expected: bool | None = None) -> bool:
     """Validate checkpoint output mode from any configuration source."""
-    if not isinstance(value, bool):
-        msg = "save_weights_only must be a boolean"
-        raise TypeError(msg)
+    value = _validate_bool(value, name="save_weights_only")
     if expected is not None and value != expected:
         msg = "save_weights_only configuration does not match"
         raise ValueError(msg)
+    return value
+
+
+def _validate_bool(value: object, *, name: str) -> bool:
+    """Require an explicit boolean checkpoint option."""
+    if not isinstance(value, bool):
+        msg = f"{name} must be a boolean"
+        raise TypeError(msg)
     return value
