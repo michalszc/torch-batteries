@@ -35,7 +35,7 @@ logger = get_logger("callbacks.model_checkpoint")
 
 
 class ModelCheckpoint(Callback):
-    """Saves the model when a monitored metric improves.
+    """Save ranked or unlimited epoch checkpoints and an optional final checkpoint.
 
     Args:
         phase: ``"train"`` or ``"validation"``.
@@ -44,16 +44,29 @@ class ModelCheckpoint(Callback):
               monitored metric decreases. In 'max' mode, it is saved when the
               metric increases
         save_dir: Directory to save the model checkpoints (defaults to current directory)
-        save_path: Filename for the saved model. If None, defaults to
-                   'epochs-metric=value.pth'
-        save_top_k: Saves specified number of best models (defaults to 1)
-        save_weights_only: Save only model weights instead of full Battery state.
+        save_path: Periodic filename template. If None, defaults to '{epoch}.pth'.
+        save_top_k: Number of best periodic checkpoints to retain (defaults to 1).
+            Set to -1 to retain every eligible epoch, including worse scores and ties.
+        save_weights_only: Save only model weights instead of full Battery state,
+            for both periodic and final files.
+        save_every_n_epochs: Positive interval for periodic saving (defaults to 1).
+            Uses absolute one-based epochs, including after checkpoint resume.
+        save_final: Additionally save at AFTER_TRAIN for either monitoring phase
+            (defaults to False). Standalone validation does not trigger a final save.
+        final_save_path: Final filename template. If None, prefix the basename of
+            save_path with 'final-'; with no save_path, use 'final-{epoch}.pth'.
 
     Missing directories are created automatically. A `.pth` suffix is added only
     when `save_path` has no explicit suffix. Static templates gain an epoch field
-    when `save_top_k` is greater than one to avoid overwriting retained weights.
+    when `save_top_k` is greater than one or -1 to avoid overwriting retained weights.
     The `{epoch}` filename field uses the one-based epoch number from the event
     context, matching progress output.
+
+    Periodic saves run at AFTER_TRAIN_EPOCH or AFTER_VALIDATION_EPOCH. Validation
+    saving requires both an actual validation pass and a matching save interval.
+    Final saving ignores the interval and top-k qualification, respects
+    save_weights_only, and keeps only the latest owned final file outside the ranking.
+    The read-only final_model_path property exposes its actual collision-safe path.
 
     Full-state restoration uses this run's ranking manifest in ``save_dir`` to
     retain the current best files while restoring historical training state.
