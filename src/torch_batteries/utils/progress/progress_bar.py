@@ -101,35 +101,48 @@ class BarProgress(Progress):
 
         if self._pbar:
             if self._total_samples > 0:
-                # Display all metrics in progress bar
-                postfix_parts = []
-                for key, total_value in self._total_metrics.items():
-                    avg_value = total_value / self._total_samples
-                    metric_name = key.capitalize()
-                    postfix_parts.append(f"{metric_name}={avg_value:.4f}")
-                postfix_parts.extend(
-                    f"{name}={value:.4f}"
-                    for name, value in self._dataset_totals.compute().items()
-                )
-                self._pbar.set_postfix_str(", ".join(postfix_parts))
+                self._display_metrics(self._averages())
             self._pbar.update(1)
 
-    def end_phase(self) -> dict[str, float]:
-        """End the current phase, close progress bar, and return average metrics.
+    def end_phase(
+        self, *, final_metrics: dict[str, float] | None = None
+    ) -> dict[str, float]:
+        """Display completed metrics, close the bar, and return phase values.
+
+        Args:
+            final_metrics: Authoritative phase values overriding batch averages.
 
         Returns:
-            Dictionary of average metrics calculated across all batches in the phase.
+            Batch averages merged with exact computed phase metrics.
         """
+        values = {**self._averages(), **(final_metrics or {})}
         if self._pbar:
+            self._display_metrics(values)
             self._pbar.close()
             self._pbar = None
+        return values
 
-        if self._total_samples > 0:
-            return {
+    def _averages(self) -> dict[str, float]:
+        """Return weighted batch and dataset values without changing accumulation."""
+        values = (
+            {
                 key: total / self._total_samples
                 for key, total in self._total_metrics.items()
             }
-        return {}
+            if self._total_samples > 0
+            else {}
+        )
+        values.update(self._dataset_totals.compute())
+        return values
+
+    def _display_metrics(self, values: dict[str, float]) -> None:
+        """Render scalar values without adding a batch to the progress bar."""
+        parts = [
+            f"{name if ':' in name else name.capitalize()}={value:.4f}"
+            for name, value in values.items()
+        ]
+        if self._pbar is not None:
+            self._pbar.set_postfix_str(", ".join(parts))
 
     def end_epoch(self) -> None:
         """End the current epoch (no output for verbose=1)."""

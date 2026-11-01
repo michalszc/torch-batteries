@@ -328,7 +328,7 @@ class TestModelCheckpoint:
 
         with (
             patch(
-                "torch_batteries.callbacks.model_checkpoint.torch.save",
+                "torch_batteries.callbacks._checkpoint_files.torch.save",
                 side_effect=OSError("disk unavailable"),
             ),
             pytest.raises(OSError, match="disk unavailable"),

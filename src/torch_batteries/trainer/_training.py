@@ -643,11 +643,8 @@ class TrainingMixin(BatteryStateMixin):
             )
             dataset_totals.update(dataset_name, batch_metrics, num_samples)
 
-        avg_metrics = progress.end_phase()
-        train_metrics = (
-            avg_metrics if isinstance(avg_metrics, dict) else {"loss": avg_metrics}
-        )
-        train_metrics.update(
+        final_metrics: dict[str, float] = {}
+        final_metrics.update(
             {
                 name: value
                 for name, value in metric_manager.compute().items()
@@ -655,15 +652,19 @@ class TrainingMixin(BatteryStateMixin):
             }
         )
         if len(loaders) > 1:
-            train_metrics.update(dataset_totals.compute())
+            final_metrics.update(dataset_totals.compute())
             for dataset_name, manager in dataset_managers.items():
-                train_metrics.update(
+                final_metrics.update(
                     {
                         f"{dataset_name}:{name}": value
                         for name, value in manager.compute().items()
                         if name not in manual_metric_names
                     }
                 )
+        avg_metrics = progress.end_phase(final_metrics=final_metrics)
+        train_metrics = (
+            avg_metrics if isinstance(avg_metrics, dict) else {"loss": avg_metrics}
+        )
         logger.debug(
             "Training phase completed: epoch=%d, metrics=%s",
             epoch,

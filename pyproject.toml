@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "torch-batteries"
-version = "1.0.0"
+version = "1.0.1"
 description = "A lightweight, event-driven training layer for PyTorch that provides reusable utilities for training, evaluation, metrics, checkpointing, and experiment management."
 readme = "README.md"
 requires-python = ">=3.12"
@@ -22,6 +22,8 @@ classifiers = [
     "Intended Audience :: Science/Research",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
@@ -163,6 +165,9 @@ testpaths = ["tests"]
 python_files = ["test_*.py", "*_test.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
+markers = [
+    "inductor: requires the native compiler toolchain used by torch.compile's default backend",
+]
 
 [tool.coverage.run]
 source = ["src/torch_batteries"]

@@ -213,6 +213,7 @@ docs
 notebooks/data/
 notebooks/**/*.pt
 notebooks/**/*.pth
+notebooks/**/.torch-batteries-top-k-*.json
 
 # Weights & Biases
 wandb/
