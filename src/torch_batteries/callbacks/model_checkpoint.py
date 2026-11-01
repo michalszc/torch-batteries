@@ -81,12 +81,16 @@ class ModelCheckpoint(Callback):
         *,
         save_top_k: int = 1,
         save_weights_only: bool = False,
+        save_every_n_epochs: int = 1,
     ) -> None:
         phase = resolve_monitor_phase(phase, required=True)
         assert phase is not None
         metric = require_metric(metric)
-        if save_top_k < 1:
-            msg = "save_top_k must be greater than or equal to one"
+        if type(save_top_k) is not int or (save_top_k != -1 and save_top_k < 1):
+            msg = "save_top_k must be -1 or a positive integer"
+            raise ValueError(msg)
+        if type(save_every_n_epochs) is not int or save_every_n_epochs < 1:
+            msg = "save_every_n_epochs must be a positive integer"
             raise ValueError(msg)
         save_weights_only = _validate_save_weights_only(save_weights_only)
 
@@ -95,6 +99,7 @@ class ModelCheckpoint(Callback):
         self._save_dir = save_dir
         self._save_path = save_path
         self._save_top_k = save_top_k
+        self._save_every_n_epochs = save_every_n_epochs
         self._save_weights_only = save_weights_only
         self._best_k_models: dict[str, float] = {}
         self._ranking_id: str | None = uuid4().hex
@@ -244,6 +249,7 @@ class ModelCheckpoint(Callback):
             "mode": self._mode,
             "save_path": self._save_path,
             "save_top_k": self._save_top_k,
+            "save_every_n_epochs": self._save_every_n_epochs,
             "save_weights_only": self._save_weights_only,
         }
 
@@ -255,10 +261,10 @@ class ModelCheckpoint(Callback):
         ):
             msg = "Invalid checkpoint ranking identity."
             raise ValueError(msg)
-        if (
-            "ranking_config" in state
-            and state["ranking_config"] != self._ranking_config()
-        ):
+        config = state.get("ranking_config")
+        if isinstance(config, dict):
+            config = {"save_every_n_epochs": 1, **config}
+        if "ranking_config" in state and config != self._ranking_config():
             msg = "Checkpoint ranking configuration does not match."
             raise ValueError(msg)
 
@@ -286,7 +292,7 @@ class ModelCheckpoint(Callback):
             msg = "Checkpoint ranking manifest identity does not match."
             raise ValueError(msg)
         ranking = self._validate_checkpoint_state(state)[0]
-        if len(ranking) > self._save_top_k:
+        if self._save_top_k != -1 and len(ranking) > self._save_top_k:
             msg = "Checkpoint manifest exceeds the configured retention limit."
             raise ValueError(msg)
         return ranking
@@ -327,7 +333,7 @@ class ModelCheckpoint(Callback):
         Args:
             context: Event context containing training metrics and model.
         """
-        if self._phase != "train":
+        if self._phase != "train" or context["epoch"] % self._save_every_n_epochs:
             return
 
         metrics = {**context["train_metrics"], "epoch": context["epoch"]}
@@ -342,7 +348,7 @@ class ModelCheckpoint(Callback):
         Args:
             context: Event context containing validation metrics and model.
         """
-        if self._phase != "validation":
+        if self._phase != "validation" or context["epoch"] % self._save_every_n_epochs:
             return
 
         metrics = {**context["val_metrics"], "epoch": context["epoch"]}
@@ -376,8 +382,10 @@ class ModelCheckpoint(Callback):
             raise ValueError(msg)
 
         is_best = self._monitor_op(current_score, self._best_score)
-        qualifies = len(self._best_k_models) < self._save_top_k or self._monitor_op(
-            current_score, self._kth_best_score
+        qualifies = (
+            self._save_top_k == -1
+            or len(self._best_k_models) < self._save_top_k
+            or self._monitor_op(current_score, self._kth_best_score)
         )
         logger.debug(
             "Checkpoint candidate: metric=%s, score=%s, best=%s, kth=%s, qualifies=%s",
@@ -431,7 +439,7 @@ class ModelCheckpoint(Callback):
             filename = f"{filename}.pth"
         path = Path(self._save_dir) / filename
         path.parent.mkdir(parents=True, exist_ok=True)
-        if self._save_top_k > 1 or str(path) not in self._best_k_models:
+        if self._save_top_k != 1 or str(path) not in self._best_k_models:
             original = path
             version = 1
             while path.exists():
@@ -503,7 +511,7 @@ class ModelCheckpoint(Callback):
         """
         self._best_k_models[filepath] = current_score
         displaced_path: str | None = None
-        if len(self._best_k_models) > self._save_top_k:
+        if self._save_top_k != -1 and len(self._best_k_models) > self._save_top_k:
             if self._mode == "min":
                 displaced_path = max(
                     self._best_k_models,
