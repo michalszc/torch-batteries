@@ -31,10 +31,13 @@ def test_final_save_is_additional_and_ignores_cadence(
         save_final=True,
         save_weights_only=weights_only,
     )
-    assert callback.final_model_path is None
+    initial_final = callback.final_model_path
+    assert initial_final is None
     result = battery.fit(loader(), loader(), epochs=3, verbose=0)
     assert {Path(path).name for path in callback.best_k_models} == {"epoch=2.pth"}
-    final = Path(callback.final_model_path)  # type: ignore[arg-type]
+    final_path = callback.final_model_path
+    assert final_path is not None
+    final = Path(final_path)
     assert final.name == "final-epoch=3.pth"
     assert str(final) not in callback.best_k_models
     payload = torch.load(final, weights_only=True)
@@ -134,9 +137,12 @@ def test_default_does_not_create_final_files(tmp_path: Path, workflow: str) -> N
 def test_standalone_validation_does_not_create_or_replace_final(tmp_path: Path) -> None:
     battery, callback = make_training_battery(tmp_path, save_final=True)
     battery.validate(loader(), verbose=0)
-    assert callback.final_model_path is None
+    initial_final = callback.final_model_path
+    assert initial_final is None
     battery.fit(loader(), loader(), epochs=2, verbose=0)
-    final = Path(callback.final_model_path)  # type: ignore[arg-type]
+    final_path = callback.final_model_path
+    assert final_path is not None
+    final = Path(final_path)
     before = final.read_bytes()
     battery.validate(loader(), verbose=0)
     assert final.read_bytes() == before
