@@ -107,7 +107,6 @@ class TerminateOnNonFinite(Callback):
             context: Completed train, validation, or test phase context.
         """
         phase, loss, metrics = self._phase_values(context)
-        loss = metrics.get("loss", loss)
         if self._check_loss and loss is not None:
             self._check_value("loss", loss, phase, context)
         self._check_metric_values(metrics, phase, context)
