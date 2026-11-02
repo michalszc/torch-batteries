@@ -1,11 +1,33 @@
 # Release Notes
 
-## 1.1.0 — 2026-10-31
+## 1.1.0 — 2026-11-03
 
 - Added `StepOutput` addition, so step results built per objective can be combined with `+` (losses summed, predictions, targets, and metrics merged) in [PR #29](https://github.com/michalszc/torch-batteries/pull/29).
 - Allowed `@charge` to take several events, so one method can handle, for example, train, validation, and test steps without stacking decorators in [PR #29](https://github.com/michalszc/torch-batteries/pull/29).
 - Made the `StepOutput` loss optional for test steps, so evaluation without a meaningful loss reports only metrics and the test result omits `test_loss` in [PR #29](https://github.com/michalszc/torch-batteries/pull/29).
 - Added a notebook benchmarking overhead against vanilla PyTorch and other training libraries.
+
+## 1.0.1 — 2026-11-01
+
+- Fixed loading retained top-k checkpoints after sibling files have been deleted.
+  Per-run ranking manifests preserve the current directory's best checkpoints when
+  restoring historical training state, with transactional save/load behavior and
+  collision-safe filenames for replayed epochs.
+- Added unlimited periodic checkpoint retention with `save_top_k=-1`, absolute
+  epoch cadence with `save_every_n_epochs`, and optional final training checkpoints
+  with `save_final`, configurable `final_save_path`, and a read-only
+  `final_model_path`. Final files respect `save_weights_only` and remain separate
+  from ranked retention. Validation checkpoints now subscribe to the existing
+  `AFTER_VALIDATION_EPOCH` event without changing event dispatch or contexts.
+- Added stateful and collected metrics to completed training, validation, and test
+  progress bars, including aggregate and per-dataset results.
+- Required release versions to be strictly newer than the published PyPI version,
+  using PEP 440 ordering to reject downgrades and equivalent version spellings.
+- Added native CPU compatibility CI for Python 3.12–3.14 across Linux, Apple Silicon
+  macOS, Windows x64, and Windows ARM64 where official PyTorch wheels are available.
+  Jobs build and install the wheel, exercise checkpoint resume and spawned data
+  loading, and publish test/environment summaries. Added Python 3.13/3.14 classifiers
+  in [PR #31](https://github.com/michalszc/torch-batteries/pull/31).
 
 ## 1.0.0 — 2026-09-20
 

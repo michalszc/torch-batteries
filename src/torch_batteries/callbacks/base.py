@@ -27,6 +27,9 @@ class Callback:
         """Accept checkpoint state when no fixed configuration is declared."""
         return state_dict
 
+    def _reconcile_checkpoint_state(self) -> None:
+        """Reconcile external metadata after restoring all checkpoint participants."""
+
     def load_state_dict(self, state_dict: dict[str, Any]) -> None:
         """Restore state from a full training checkpoint.
 

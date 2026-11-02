@@ -175,9 +175,6 @@ class EvaluationMixin(BatteryStateMixin):
                 if shared_progress is not None:
                     shared_progress.abort()
                 raise
-            if shared_progress is not None:
-                shared_progress.end_phase()
-                shared_progress.end_epoch()
             if len(results) == 1:
                 return self._test_result(next(iter(results.values()))[0])
             total_samples = sum(samples for _, samples in results.values())
@@ -194,7 +191,15 @@ class EvaluationMixin(BatteryStateMixin):
             metrics.update(
                 {name: value for name, value in aggregate.items() if ":" in name}
             )
-            metrics.update(self._manager_for_phase("test").compute())
+            try:
+                metrics.update(self._manager_for_phase("test").compute())
+                if shared_progress is not None:
+                    shared_progress.end_phase(final_metrics=metrics)
+                    shared_progress.end_epoch()
+            except BaseException:
+                if shared_progress is not None:
+                    shared_progress.abort()
+                raise
             aggregate_context: EventContext = {
                 "battery": as_battery(self),
                 "model": self._model,
@@ -314,22 +319,10 @@ class EvaluationMixin(BatteryStateMixin):
                         named_metrics=named_metrics,
                         metric_progress=metric_progress,
                     )
-        except BaseException:
-            progress.abort()
-            raise
-
-        self._capture_loader_generator_state(
-            "test", test_loader, dataset_name=dataset_name
-        )
-
-        test_metrics = metric_progress.end_phase()
-        if shared_progress is None:
-            progress.end_epoch()
-        test_metrics_context = (
-            test_metrics if isinstance(test_metrics, dict) else {"loss": test_metrics}
-        )
-        test_metrics_context.update(
-            {
+            self._capture_loader_generator_state(
+                "test", test_loader, dataset_name=dataset_name
+            )
+            final_metrics = {
                 name: value
                 for name, value in (
                     dataset_manager.compute()
@@ -338,6 +331,14 @@ class EvaluationMixin(BatteryStateMixin):
                 ).items()
                 if name not in manual_metric_names
             }
+            test_metrics = metric_progress.end_phase(final_metrics=final_metrics)
+        except BaseException:
+            progress.abort()
+            raise
+        if shared_progress is None:
+            progress.end_epoch()
+        test_metrics_context = (
+            test_metrics if isinstance(test_metrics, dict) else {"loss": test_metrics}
         )
 
         after_test_epoch_context: EventContext = {
@@ -630,11 +631,8 @@ class EvaluationMixin(BatteryStateMixin):
                 )
                 dataset_totals.update(dataset_name, batch_metrics, num_samples)
 
-        avg_metrics = progress.end_phase()
-        val_metrics = (
-            avg_metrics if isinstance(avg_metrics, dict) else {"loss": avg_metrics}
-        )
-        val_metrics.update(
+        final_metrics: dict[str, float] = {}
+        final_metrics.update(
             {
                 name: value
                 for name, value in metric_manager.compute().items()
@@ -642,9 +640,9 @@ class EvaluationMixin(BatteryStateMixin):
             }
         )
         if len(loaders) > 1:
-            val_metrics.update(dataset_totals.compute())
+            final_metrics.update(dataset_totals.compute())
             for dataset_name, manager in dataset_managers.items():
-                val_metrics.update(
+                final_metrics.update(
                     {
                         f"{dataset_name}:{name}": value
                         for name, value in manager.compute().items()
@@ -652,6 +650,10 @@ class EvaluationMixin(BatteryStateMixin):
                     }
                 )
 
+        avg_metrics = progress.end_phase(final_metrics=final_metrics)
+        val_metrics = (
+            avg_metrics if isinstance(avg_metrics, dict) else {"loss": avg_metrics}
+        )
         # Trigger AFTER_VALIDATION_EPOCH event
         after_val_epoch_context: EventContext = {
             "battery": as_battery(self),

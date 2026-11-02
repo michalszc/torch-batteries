@@ -801,6 +801,8 @@ class CheckpointMixin(BatteryStateMixin):
             if self._data_pack is not None and data_pack_state is not None:
                 self._data_pack.load_state_dict(data_pack_state)
             self._apply_checkpoint_internal_state(payload)
+            for callback in callbacks:
+                callback._reconcile_checkpoint_state()  # noqa: SLF001
             self._restore_global_rng_state(payload["rng_state"])
         except BaseException:
             logger.exception(

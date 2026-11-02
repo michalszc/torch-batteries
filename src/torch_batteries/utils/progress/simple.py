@@ -98,8 +98,13 @@ class SimpleProgress(Progress):
                     dataset_name, cast("dict[str, float]", metrics), batch_size
                 )
 
-    def end_phase(self) -> dict[str, float]:
-        """End the current phase and return average metrics.
+    def end_phase(
+        self, *, final_metrics: dict[str, float] | None = None
+    ) -> dict[str, float]:
+        """End the current phase and return completed metrics.
+
+        Args:
+            final_metrics: Authoritative phase values overriding batch averages.
 
         Returns:
             Dictionary of average metrics calculated across all batches in the phase.
@@ -112,6 +117,7 @@ class SimpleProgress(Progress):
         else:
             avg_metrics = {}
         avg_metrics.update(self._dataset_totals.compute())
+        avg_metrics.update(final_metrics or {})
 
         if self._current_phase:
             self._phase_metrics[self._current_phase] = avg_metrics

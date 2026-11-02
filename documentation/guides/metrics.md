@@ -74,6 +74,19 @@ It retains detached CPU tensors and concatenates them at phase end. Memory use g
 with the dataset, so prefer an incremental stateful implementation for large outputs.
 Multiple collected metrics share one retained prediction/target collection.
 
+## Progress output
+
+With `verbose=1`, active progress bars show loss and weighted batch-callable metrics.
+Stateful and collected metrics are computed once when the phase completes, then added
+to the final bar before it closes. Their exact phase values are displayed directly,
+without being averaged again or adding a progress step.
+
+For the CIFAR-10 example, the completed bar includes `batch_accuracy`,
+`running_accuracy`, and `macro_f1`. Named datasets include both aggregate and
+`dataset:metric` values. `verbose=2` summaries use the same final values;
+`verbose=0` remains silent. Manual metrics retain precedence over automatic metrics
+with the same name.
+
 ## Configure phases separately
 
 A flat `metrics={"accuracy": accuracy}` mapping applies to training, validation,

@@ -43,6 +43,21 @@ When it stops training, `EarlyStopping` reports a descriptive reason in the fit
 result's `stop_reason` field. A custom callback can call
 `battery.request_stop("reason")` for the same orderly stop behavior.
 
+## Model checkpoints
+
+`ModelCheckpoint` saves at `AFTER_TRAIN_EPOCH` or `AFTER_VALIDATION_EPOCH`, according
+to its required `phase`. Use `save_top_k=-1` for unlimited periodic retention and
+`save_every_n_epochs` to select eligible absolute epoch numbers.
+
+Set `save_final=True` to save an additional checkpoint at `AFTER_TRAIN`, separately
+from periodic retention. Its name defaults to `save_path` with a `final-` filename
+prefix; override it with `final_save_path`. Both saving modes respect
+`save_weights_only`. The read-only `final_model_path` identifies the latest final
+file. Standalone validation does not trigger an additional final save.
+
+See [Checkpoints and Resume](checkpoints.md) for examples, filename rules, validation
+cadence, and restoration behavior.
+
 ## Gradient accumulation
 
 ```python

@@ -58,13 +58,13 @@ if [ -z "$PYPI_VERSION" ]; then
 else
     echo "📦 PyPI:           $PYPI_VERSION"
 
-    if [ "$PYPROJECT_VERSION" = "$PYPI_VERSION" ]; then
+    if ! python -c 'import sys; from packaging.version import Version; sys.exit(0 if Version(sys.argv[1]) > Version(sys.argv[2]) else 1)' "$PYPROJECT_VERSION" "$PYPI_VERSION"; then
         echo ""
-        echo "❌ Version matches PyPI! Please bump the version before publishing."
+        echo "❌ Version $PYPROJECT_VERSION must be greater than PyPI ($PYPI_VERSION). Please bump the version before publishing."
         exit 1
     else
         echo ""
-        echo "✅ Version $PYPROJECT_VERSION is different from PyPI ($PYPI_VERSION)"
+        echo "✅ Version $PYPROJECT_VERSION is newer than PyPI ($PYPI_VERSION)"
     fi
 fi
 

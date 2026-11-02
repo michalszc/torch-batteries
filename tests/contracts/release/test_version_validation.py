@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 import os
+import shlex
 import subprocess
 from pathlib import Path
 
@@ -92,3 +94,44 @@ def test_rejects_duplicate_release_version(version_project: Path) -> None:
 
     assert result.returncode != 0
     assert f"Version {VERSION} appears multiple times" in result.stdout
+
+
+@pytest.mark.parametrize(
+    ("candidate", "published", "accepted"),
+    [
+        ("0.25.0", "1.0.0", False),
+        ("1.0.0", "1.0.0", False),
+        ("1.0", "1.0.0", False),
+        ("1.0.1", "1.0.0", True),
+        ("1.0.10", "1.0.9", True),
+        ("0.10.0", "0.9.0", True),
+        ("1.0.0rc1", "1.0.0", False),
+        ("1.0.1rc1", "1.0.0", True),
+    ],
+)
+def test_version_must_be_strictly_newer_than_pypi(
+    version_project: Path, candidate: str, published: str, *, accepted: bool
+) -> None:
+    """Prevent downgrades and compare numeric and prerelease components correctly."""
+    (version_project / "pyproject.toml").write_text(
+        f'[project]\nname = "torch-batteries"\nversion = "{candidate}"\n',
+        encoding="utf-8",
+    )
+    (version_project / "src" / "torch_batteries" / "__init__.py").write_text(
+        f'__version__ = "{candidate}"\n', encoding="utf-8"
+    )
+    (version_project / "documentation" / "release-notes.md").write_text(
+        f"# Release Notes\n\n## {candidate} — Current\n", encoding="utf-8"
+    )
+    payload = shlex.quote(json.dumps({"info": {"version": published}}))
+    (version_project / "bin" / "curl").write_text(
+        f"#!/usr/bin/env bash\nprintf '%s\\n' {payload}\n", encoding="utf-8"
+    )
+
+    result = validate(version_project)
+
+    assert (result.returncode == 0) is accepted
+    if accepted:
+        assert f"Version {candidate} is newer than PyPI ({published})" in result.stdout
+    else:
+        assert "must be greater than PyPI" in result.stdout

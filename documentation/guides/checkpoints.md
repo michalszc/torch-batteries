@@ -99,9 +99,56 @@ checkpoint = ModelCheckpoint(
 )
 ```
 
-Missing directories are created. A `.pth` suffix is added only when the template has
-no suffix. Static Top-K templates gain an epoch field so retained files do not
-overwrite each other. Deleted rankings remove their files.
+Both `phase` and `metric` are required. Missing directories are created. A `.pth`
+suffix is added only when the template has no suffix. Static templates gain an epoch
+field when retaining multiple checkpoints or using unlimited retention, so retained
+files do not overwrite each other. Evicted periodic checkpoints are deleted.
+
+### Retention and saving intervals
+
+`save_top_k` defaults to `1`. Set it to a positive integer for ranked retention, or
+`-1` to retain every eligible periodic checkpoint, including worse scores and ties.
+Zero and values below `-1` are invalid. `best_model_path` and `best_score` still identify
+the best retained checkpoint in unlimited mode.
+
+`save_every_n_epochs` defaults to `1` and must be a positive integer. It uses absolute,
+one-based epoch numbers: a value of `3` allows saves at epochs 3, 6, 9, and so on,
+including after resume. Ineligible epochs are skipped before monitored metrics are
+accessed.
+
+For `phase="validation"`, validation must actually run on the eligible epoch. For
+example, `validate_every_n_epochs=2` together with `save_every_n_epochs=3` allows
+validation checkpoints at epochs 6, 12, and so on. Saving never runs extra validation.
+
+Periodic checkpoints use `AFTER_TRAIN_EPOCH` or `AFTER_VALIDATION_EPOCH`. The latter
+already has the computed validation metrics; the enclosing workflow appends that
+validation history and captures validation DataLoader generator state afterward.
+Use a final checkpoint when you need the state after the complete training workflow.
+
+Each callback run also maintains a private
+`.torch-batteries-top-k-<run-id>.json` ranking manifest in `save_dir`. Keep it with
+the checkpoint files when continuing the same run. Its identity and monitor
+configuration isolate the ranking from other callbacks and fresh runs in that
+directory. Replayed epoch filenames gain a `-v1`, `-v2`, ... suffix when needed to
+preserve an existing retained checkpoint.
+
+Restoring an older checkpoint loads its model, optimizer, epoch, and history state,
+then reconciles checkpoint management with the current manifest. For example, scores
+`0.80, 0.79, 0.90, 0.85` with `mode="max"` and `save_top_k=2` retain epochs 3 and 4.
+Loading epoch 3 still tracks both files, even though its historical callback snapshot
+referenced the now-deleted epoch 1. Loading does not modify checkpoint files or the
+manifest.
+
+Missing sibling files no longer invalidate an otherwise valid checkpoint. If the
+manifest is missing, invalid, or absent from a legacy callback snapshot, restoration
+warns and retains only existing files from that snapshot. Newer directory entries
+cannot be recovered automatically in this fallback. Structurally corrupt callback
+state and incompatible monitor configurations are still rejected.
+
+Checkpoint and manifest writes complete before displaced files are removed. A failed
+write restores the previous ranking and checkpoint contents. One writer must own a
+ranking; concurrent writers and atomic recovery across multiple files after a process
+crash are not supported.
 
 With `save_weights_only=False` (the default), each retained file is a full Battery
 checkpoint. With `True`, it contains only `model.state_dict()` and can initialize a
@@ -114,6 +161,69 @@ inference_battery.load_checkpoint(checkpoint.best_model_path)
 Raw weights are detected automatically. Loading them deliberately leaves resume state
 disabled.
 
+## Save the final training state
+
+Keep every second epoch and an additional final checkpoint:
+
+```python
+checkpoint = ModelCheckpoint(
+    phase="validation",
+    metric="accuracy",
+    save_dir="checkpoints",
+    save_path="models/{epoch}.pt",
+    save_top_k=-1,
+    save_every_n_epochs=2,
+    save_final=True,
+)
+battery = Battery(model, optimizer=optimizer, callbacks=[checkpoint])
+battery.fit(train_loader, val_loader, epochs=5)
+
+assert checkpoint.final_model_path is not None
+battery.load_checkpoint(checkpoint.final_model_path)
+```
+
+`save_final` defaults to `False`. When enabled, it saves the current model at
+`AFTER_TRAIN` after `train()` or `fit()`, for either monitoring phase, including
+normal early stopping. It ignores the periodic save interval and top-k qualification.
+It does not run extra validation or create an additional final file after standalone
+`validate()`. A failure during training or validation does not reach the final-save
+event.
+
+The final file respects `save_weights_only`: the default saves complete Battery
+state; `True` saves raw model weights. Full final checkpoints contain completed epoch,
+history, optimizer, and stopping state. Handlers run in callback order, so place a
+callback that restores model weights before `ModelCheckpoint` if those restored
+weights should be included in the final file.
+
+`final_save_path` optionally overrides the final filename template. By default, the
+filename portion of `save_path` gains a `final-` prefix, preserving its parent
+directory:
+
+| `save_path` | Default final filename |
+| --- | --- |
+| Omitted | `final-epoch=5.pth` at epoch 5 |
+| `best.pt` | `final-best.pt` |
+| `models/{epoch}.pt` | `models/final-epoch=5.pt` at epoch 5 |
+
+For example, `final_save_path="exports/last.pt"` writes the final file there within
+`save_dir`. The same template fields, metric-name insertion, and suffix rules apply
+to periodic and final files. Final template metrics come from the selected phase's
+metrics available at `AFTER_TRAIN`; validation metrics may be from an earlier epoch
+when the last epoch skips validation. Missing template fields raise a formatting
+error. A filename using only `{epoch}` needs no monitored metric at completion.
+
+The read-only `final_model_path` is `None` until a successful final save, then reports
+the actual path, including any collision suffix. Each callback/run identity retains
+only its latest final checkpoint. This file is tracked in the manifest separately
+from `best_k_models` and never changes best/kth scores. Its replacement is committed
+before the previous owned final file is removed; periodic files and unrelated files
+are protected by collision suffixes. Full restoration reconciles both the periodic
+ranking and the latest final path with the manifest.
+
+Older callback metadata without the new options defaults to
+`save_every_n_epochs=1`, `save_final=False`, and `final_save_path=None`, with no final
+path recorded. Recreate matching saving options when resuming a configured run.
+
 ## Strict restoration failures
 
 Restoration fails rather than silently changing an experiment when:
@@ -124,4 +234,5 @@ Restoration fails rather than silently changing an experiment when:
 - Stateful metric names differ.
 - The saved and configured DataPack types differ, or a required DataPack is missing.
 - A callback's fixed configuration differs, such as accumulation steps or precision.
+- A checkpoint callback's saved monitor, filename template, or retention policy differs.
 - The requested total resume target contains no new epoch.
