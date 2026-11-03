@@ -48,6 +48,33 @@ class TestChargeDecorator:
             Event.TRAIN_STEP,
         )
 
+    def test_charge_decorator_accepts_multiple_events(self) -> None:
+        """One decorator retains every passed event in argument order."""
+
+        @charge(Event.TRAIN_STEP, Event.VALIDATION_STEP, Event.TEST_STEP)
+        def shared_step(_: EventContext) -> torch.Tensor:
+            return torch.tensor(1.0)
+
+        assert shared_step._torch_batteries_events == (  # type: ignore[attr-defined] # noqa: SLF001
+            Event.TRAIN_STEP,
+            Event.VALIDATION_STEP,
+            Event.TEST_STEP,
+        )
+
+    def test_multi_event_charge_combines_with_stacking(self) -> None:
+        """Multi-event and stacked decorators accumulate together."""
+
+        @charge(Event.TEST_STEP)
+        @charge(Event.TRAIN_STEP, Event.VALIDATION_STEP)
+        def shared_step(_: EventContext) -> torch.Tensor:
+            return torch.tensor(1.0)
+
+        assert shared_step._torch_batteries_events == (  # type: ignore[attr-defined] # noqa: SLF001
+            Event.TRAIN_STEP,
+            Event.VALIDATION_STEP,
+            Event.TEST_STEP,
+        )
+
     def test_charge_decorator_with_different_events(self) -> None:
         """Test charge decorator works with different events."""
 
@@ -243,6 +270,33 @@ class TestEventHandler:
             handler.call(Event.VALIDATION_STEP, {"phase": "validation"}) == "validation"
         )
         assert handler.call(Event.TEST_STEP, {"phase": "test"}) == "test"
+
+    def test_multi_event_model_step_handles_each_event(self) -> None:
+        """One multi-event decorator dispatches every listed step event."""
+
+        class SharedStepModel(nn.Module):
+            @charge(Event.TRAIN_STEP, Event.VALIDATION_STEP, Event.TEST_STEP)
+            def step(self, context: EventContext) -> str:
+                return context["phase"]
+
+        handler = EventHandler(SharedStepModel())
+
+        assert handler.call(Event.TRAIN_STEP, {"phase": "train"}) == "train"
+        assert (
+            handler.call(Event.VALIDATION_STEP, {"phase": "validation"}) == "validation"
+        )
+        assert handler.call(Event.TEST_STEP, {"phase": "test"}) == "test"
+
+    def test_duplicate_event_in_one_charge_is_rejected(self) -> None:
+        """Repeating an event within one decorator fails during discovery."""
+
+        class DuplicateModel(nn.Module):
+            @charge(Event.TRAIN_STEP, Event.TRAIN_STEP)
+            def step(self, _: EventContext) -> torch.Tensor:
+                return torch.tensor(0.0)
+
+        with pytest.raises(ValueError, match="charged repeatedly"):
+            EventHandler(DuplicateModel())
 
     def test_duplicate_stacked_event_is_rejected(self) -> None:
         """Repeating the same charge is a deterministic configuration error."""

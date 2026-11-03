@@ -584,6 +584,7 @@ class TrainingMixin(BatteryStateMixin):
             loss, step_metrics, predictions, targets = self._parse_step_result(
                 result, "Training"
             )
+            loss = self._require_loss(loss, "Training")
             automatic_metrics = (
                 metric_manager.update(predictions, targets)
                 if predictions is not None and targets is not None

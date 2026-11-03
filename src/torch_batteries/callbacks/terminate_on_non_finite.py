@@ -79,9 +79,11 @@ class TerminateOnNonFinite(Callback):
         if self._check_loss:
             self._check_value("loss", context["loss_tensor"], "train", context)
 
-    @charge(Event.AFTER_TRAIN_STEP)
-    @charge(Event.AFTER_VALIDATION_STEP)
-    @charge(Event.AFTER_TEST_STEP)
+    @charge(
+        Event.AFTER_TRAIN_STEP,
+        Event.AFTER_VALIDATION_STEP,
+        Event.AFTER_TEST_STEP,
+    )
     def on_step_end(self, context: EventContext) -> None:
         """Check evaluation loss and named metrics after a phase step.
 
@@ -89,13 +91,15 @@ class TerminateOnNonFinite(Callback):
             context: Completed train, validation, or test step context.
         """
         phase, loss, metrics = self._phase_values(context)
-        if self._check_loss and phase != "train":
+        if self._check_loss and phase != "train" and loss is not None:
             self._check_value("loss", loss, phase, context)
         self._check_metric_values(metrics, phase, context)
 
-    @charge(Event.AFTER_TRAIN_EPOCH)
-    @charge(Event.AFTER_VALIDATION_EPOCH)
-    @charge(Event.AFTER_TEST_EPOCH)
+    @charge(
+        Event.AFTER_TRAIN_EPOCH,
+        Event.AFTER_VALIDATION_EPOCH,
+        Event.AFTER_TEST_EPOCH,
+    )
     def on_phase_end(self, context: EventContext) -> None:
         """Check final aggregated loss and stateful or collected metrics.
 
@@ -103,13 +107,8 @@ class TerminateOnNonFinite(Callback):
             context: Completed train, validation, or test phase context.
         """
         phase, loss, metrics = self._phase_values(context)
-        if self._check_loss:
-            self._check_value(
-                "loss",
-                metrics.get("loss", loss),
-                phase,
-                context,
-            )
+        if self._check_loss and loss is not None:
+            self._check_value("loss", loss, phase, context)
         self._check_metric_values(metrics, phase, context)
 
     def _check_metric_values(

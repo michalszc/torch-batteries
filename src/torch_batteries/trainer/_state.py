@@ -60,11 +60,14 @@ if TYPE_CHECKING:
         def _parse_step_result(
             self, result: Any, phase: str
         ) -> tuple[
-            torch.Tensor,
+            torch.Tensor | None,
             dict[str, float],
             torch.Tensor | dict[str, torch.Tensor] | None,
             torch.Tensor | dict[str, torch.Tensor] | None,
         ]: ...
+
+        @staticmethod
+        def _require_loss(loss: torch.Tensor | None, phase: str) -> torch.Tensor: ...
 
         def _manager_for_phase(self, phase: str) -> PhaseMetricManager: ...
 
